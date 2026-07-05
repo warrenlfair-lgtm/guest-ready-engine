@@ -11,8 +11,8 @@
 <div class="container">
   <div class="header">
     <div>
-      <h1>🏊 Guest Ready Engine</h1>
-      <p>Vacation Rental Pool Scheduler</p>
+      <h1 id="companyHeaderName">Guest Ready Pool Pros</h1>
+      <p id="companyHeaderTagline">Vacation Rental Pool Service Specialists</p>
     </div>
 
     <button id="addPropertyBtn">+ Add Property</button>
@@ -45,6 +45,8 @@
     <button type="button" class="view-btn" data-view="week">Week View</button>
     <button type="button" class="view-btn" data-view="properties">Properties</button>
     <button type="button" class="view-btn" data-view="billing">Billing Report</button>
+    <button type="button" class="view-btn" data-view="messages">Messages</button>
+    <button type="button" class="view-btn" data-view="settings">Settings</button>
   </div>
 
   <section id="todayView" class="view-panel active">
@@ -134,6 +136,65 @@
 
     <div id="billingReportContainer" class="billing-report-paper"></div>
   </section>
+
+  <section id="messagesView" class="view-panel">
+    <div class="view-header">
+      <h2>Messages</h2>
+      <p>Generate a weekly message for your assigned tech.</p>
+    </div>
+
+    <div class="messages-card">
+      <div class="messages-controls">
+        <div class="filter-group">
+          <label for="messageWeekDate">Week Date:</label>
+          <input id="messageWeekDate" type="date">
+        </div>
+        <div class="filter-group">
+          <label for="messageUnassignedName">Unassigned Name (Optional):</label>
+          <input id="messageUnassignedName" type="text" placeholder="Optional label for unassigned tasks">
+        </div>
+      </div>
+
+      <div id="messagesByTech"></div>
+    </div>
+  </section>
+
+  <section id="settingsView" class="view-panel">
+    <div class="view-header">
+      <h2>Company Profile</h2>
+      <p>Manage company branding details used across the app and reports.</p>
+    </div>
+
+    <div class="settings-card">
+      <label for="companyNameInput">Company Name</label>
+      <input id="companyNameInput" type="text" placeholder="Guest Ready Pool Pros">
+
+      <label for="companyTaglineInput">Tagline</label>
+      <input id="companyTaglineInput" type="text" placeholder="Vacation Rental Pool Service Specialists">
+
+      <label for="companyPhoneInput">Phone Number</label>
+      <input id="companyPhoneInput" type="text" placeholder="(555) 555-5555">
+
+      <label for="companyEmailInput">Email</label>
+      <input id="companyEmailInput" type="email" placeholder="service@example.com">
+
+      <label for="companyLogoUrlInput">Logo URL</label>
+      <input id="companyLogoUrlInput" type="url" placeholder="https://example.com/logo.png">
+
+      <h3>Security Settings</h3>
+
+      <label for="adminPinInput">Admin PIN</label>
+      <input id="adminPinInput" type="password" inputmode="numeric" autocomplete="new-password" placeholder="Enter new admin PIN">
+
+      <label for="confirmAdminPinInput">Confirm Admin PIN</label>
+      <input id="confirmAdminPinInput" type="password" inputmode="numeric" autocomplete="new-password" placeholder="Confirm admin PIN">
+
+      <div class="settings-actions">
+        <button type="button" id="saveCompanyProfileBtn">Save Company Profile</button>
+        <span id="settingsStatus" class="settings-status"></span>
+      </div>
+    </div>
+  </section>
 </div>
 
 <div id="propertyModal" class="modal hidden">
@@ -160,10 +221,16 @@
       <option>Sunday</option>
     </select>
 
-    <label>Coverage Days</label>
-    <input id="coverageDays" type="number" value="2">
+      <label>Guest Ready Coverage Rule</label>
+      <select id="coverageRule">
+        <option value="none">none = No Flex / service day only</option>
+        <option value="before">before = Service day -1 day only</option>
+        <option value="after">after = Service day +1 day only</option>
+        <option value="both" selected>both = Service day +/- 1 day</option>
+      </select>
+      <input id="coverageDays" type="hidden" value="2">
 
-    <label>Default Off-Cycle Charge</label>
+    <label>Billable Guest Ready Charge</label>
     <input id="offCycleCharge" type="number" value="65">
 
     <div class="modal-actions">
@@ -247,6 +314,19 @@
     <div id="alertDetailBody"></div>
     <div class="modal-actions">
       <button id="closeAlertDetailBtn">Close</button>
+    </div>
+  </div>
+</div>
+
+<div id="pinModal" class="modal hidden">
+  <div class="modal-card pin-modal-card">
+    <h2>Enter PIN to continue</h2>
+    <label for="pinInput">PIN</label>
+    <input id="pinInput" type="password" inputmode="numeric" autocomplete="off" maxlength="12" placeholder="Enter PIN">
+    <div id="pinError" class="pin-error hidden">Incorrect PIN. Please try again.</div>
+    <div class="modal-actions">
+      <button id="pinCancelBtn" type="button">Cancel</button>
+      <button id="pinUnlockBtn" type="button">Unlock</button>
     </div>
   </div>
 </div>

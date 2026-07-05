@@ -552,6 +552,17 @@ button:hover {
     padding:25px;
 }
 
+.pin-modal-card {
+    width: 360px;
+}
+
+.pin-error {
+    margin-top: 10px;
+    color: #dc2626;
+    font-size: 13px;
+    font-weight: 600;
+}
+
 label{
     display:block;
     margin-top:14px;
@@ -1328,6 +1339,19 @@ textarea{
     padding: 26px;
 }
 
+.billing-report-header-block {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.billing-report-logo {
+    width: 56px;
+    height: 56px;
+    object-fit: contain;
+    border-radius: 8px;
+}
+
 .billing-report-brand {
     font-size: 24px;
     font-weight: 700;
@@ -1398,6 +1422,94 @@ textarea{
     color: #0f172a;
 }
 
+.billing-report-footer {
+    margin-top: 20px;
+    padding-top: 10px;
+    border-top: 1px solid #e2e8f0;
+    font-size: 12px;
+    color: #64748b;
+}
+
+.settings-card {
+    background: white;
+    border-radius: 12px;
+    padding: 20px;
+    box-shadow: 0 3px 10px rgba(0,0,0,.08);
+    max-width: 680px;
+}
+
+.settings-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 16px;
+}
+
+.settings-status {
+    color: #059669;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.messages-card {
+    background: white;
+    border-radius: 12px;
+    padding: 20px;
+    box-shadow: 0 3px 10px rgba(0,0,0,.08);
+}
+
+.messages-controls {
+    display: flex;
+    gap: 14px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+}
+
+.messages-controls .filter-group {
+    align-items: center;
+}
+
+#messagePreview {
+    font-family: Consolas, "Courier New", monospace;
+    line-height: 1.45;
+    min-height: 280px;
+}
+
+.messages-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 12px;
+}
+
+.messages-tech-card {
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    padding: 14px;
+    background: #f8fafc;
+    margin-top: 14px;
+}
+
+.messages-tech-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+.messages-tech-header h3 {
+    margin: 0;
+    font-size: 18px;
+}
+
+.messages-tech-card textarea {
+    width: 100%;
+    box-sizing: border-box;
+    font-family: Consolas, "Courier New", monospace;
+    line-height: 1.45;
+}
+
 @media print {
     body {
         background: white;
@@ -1410,6 +1522,8 @@ textarea{
     #todayView,
     #weekView,
     #propertiesView,
+    #messagesView,
+    #settingsView,
     #propertyModal,
     #cleaningModal,
     #reminderModal,

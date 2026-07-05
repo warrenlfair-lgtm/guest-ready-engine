@@ -121,15 +121,24 @@ function getServiceDateForWeek(checkInDateString: string, standardDay: string) {
   return formatDate(serviceDate);
 }
 
-function isCheckInCoveredByStandardDay(checkInDate: string, standardDay: string) {
-  const checkInDayNumber = getDayNumber(getDayName(checkInDate));
-  const standardDayNumber = getDayNumber(standardDay);
-  if (standardDayNumber === undefined || checkInDayNumber === undefined) {
-    return false;
+function normalizeCoverageRule(coverageRule: string | null | undefined, coverageDays: number | null | undefined) {
+  const normalizedRule = String(coverageRule || "").toLowerCase();
+  if (["none", "before", "after", "both"].includes(normalizedRule)) {
+    return normalizedRule;
   }
 
-  const nextDayNumber = (standardDayNumber + 1) % 7;
-  return checkInDayNumber === standardDayNumber || checkInDayNumber === nextDayNumber;
+  const numeric = Number(coverageDays);
+  if (numeric === 0) return "none";
+  if (numeric === 1) return "both";
+  if (numeric > 1) return "both";
+  return "both";
+}
+
+function getCoverageOffsetsForRule(coverageRule: string) {
+  if (coverageRule === "none") return [0];
+  if (coverageRule === "before") return [-1, 0];
+  if (coverageRule === "after") return [0, 1];
+  return [-1, 0, 1];
 }
 
 function getGuestReadyServiceDate(reservation: { check_in: string; check_out: string | null }, activeReservations: Array<{ check_in: string; check_out: string | null }>) {
@@ -140,21 +149,24 @@ function getGuestReadyServiceDate(reservation: { check_in: string; check_out: st
   return hasSameDayTurnover ? reservation.check_in : addDays(reservation.check_in, -1);
 }
 
-function isGuestReadyIncludedDay(serviceDate: string, standardDay: string) {
-  const serviceDayNumber = parseDateString(serviceDate).getUTCDay();
-  const standardDayNumber = getDayNumber(standardDay);
-  if (standardDayNumber === undefined) {
+function isDateWithinCoverageRule(serviceDate: string, candidateDate: string, coverageRule: string) {
+  const service = parseDateString(serviceDate);
+  const candidate = parseDateString(candidateDate);
+  const dayDiff = Math.round((candidate.getTime() - service.getTime()) / (1000 * 60 * 60 * 24));
+  return getCoverageOffsetsForRule(coverageRule).includes(dayDiff);
+}
+
+function isGuestReadyIncludedDay(serviceDate: string, standardDay: string, coverageRule: string) {
+  const weeklyServiceDate = getServiceDateForWeek(serviceDate, standardDay);
+  if (!weeklyServiceDate) {
     return false;
   }
 
-  const previousDayNumber = (standardDayNumber + 6) % 7;
-  const nextDayNumber = (standardDayNumber + 1) % 7;
-
-  return serviceDayNumber === previousDayNumber || serviceDayNumber === standardDayNumber || serviceDayNumber === nextDayNumber;
+  return isDateWithinCoverageRule(weeklyServiceDate, serviceDate, coverageRule);
 }
 
-function getGuestReadyCharge(serviceDate: string, standardDay: string, defaultOffCycleCharge: number | null) {
-  if (isGuestReadyIncludedDay(serviceDate, standardDay)) {
+function getGuestReadyCharge(serviceDate: string, standardDay: string, coverageRule: string, defaultOffCycleCharge: number | null) {
+  if (isGuestReadyIncludedDay(serviceDate, standardDay, coverageRule)) {
     return 0;
   }
   return Number(defaultOffCycleCharge ?? 65);
@@ -208,7 +220,7 @@ Deno.serve(async (req) => {
       return createSuccessResponse(reservationsCreated, tasksCreated);
     }
 
-    const property = properties as { id: string; ical_url: string | null; default_off_cycle_charge: number | null; standard_service_day: string | null };
+    const property = properties as { id: string; ical_url: string | null; default_off_cycle_charge: number | null; standard_service_day: string | null; coverage_days: number | null; coverage_rule: string | null };
     console.log("STEP 1 property loaded");
     if (!property.ical_url) {
       return createSuccessResponse(reservationsCreated, tasksCreated);
@@ -310,6 +322,10 @@ Deno.serve(async (req) => {
     }
 
     const standardDay = property.standard_service_day || "Wednesday";
+    const coverageRule = normalizeCoverageRule(property.coverage_rule, property.coverage_days);
+    const coverageOffsets = getCoverageOffsetsForRule(coverageRule);
+    const minOffset = Math.min(...coverageOffsets);
+    const maxOffset = Math.max(...coverageOffsets);
 
     // Build source_key -> service_date mapping for all weekly tasks this sync run needs.
     // source_key is a stable identity for "the weekly task for property X in the week containing check-in Y".
@@ -324,6 +340,26 @@ Deno.serve(async (req) => {
 
     const weeklyServiceDates = Array.from(new Set(weeklySourceKeyToDate.values()));
     const weeklySourceKeys = Array.from(weeklySourceKeyToDate.keys());
+
+    const earliestWeeklyDate = weeklyServiceDates.length
+      ? weeklyServiceDates.slice().sort()[0]
+      : null;
+    const latestWeeklyDate = weeklyServiceDates.length
+      ? weeklyServiceDates.slice().sort().at(-1) || null
+      : null;
+
+    const windowQueryStart = earliestWeeklyDate ? addDays(earliestWeeklyDate, minOffset) : null;
+    const windowQueryEnd = latestWeeklyDate ? addDays(latestWeeklyDate, maxOffset) : null;
+
+    const { data: existingGuestReadyWindowTasks } = windowQueryStart && windowQueryEnd
+      ? await supabase
+          .from("cleaning_tasks")
+          .select("id, service_date, status, check_in_date, service_type")
+          .eq("property_id", propertyId)
+          .eq("service_type", "Guest Ready")
+          .gte("service_date", windowQueryStart)
+          .lte("service_date", windowQueryEnd)
+      : { data: [] };
 
     // Lookup 1: by original service_date — catches tasks that predate the source_key column
     const { data: existingByDate } = weeklyServiceDates.length
@@ -380,6 +416,19 @@ Deno.serve(async (req) => {
     const suppressedWeeklySourceKeys = new Set<string>();
     const guestReadyTasksToCreate: Array<Record<string, any>> = [];
 
+    for (const weeklyServiceDate of weeklyServiceDates) {
+      const hasGuestReadyInsideWindow = (existingGuestReadyWindowTasks || []).some((task: { service_date: string; status: string | null }) => {
+        const status = String(task.status || "").toLowerCase();
+        if (status === "cancelled") return false;
+        if (!task.service_date) return false;
+        return isDateWithinCoverageRule(weeklyServiceDate, task.service_date, coverageRule);
+      });
+
+      if (hasGuestReadyInsideWindow) {
+        suppressedWeeklySourceKeys.add(`wk:${propertyId}:${weeklyServiceDate}`);
+      }
+    }
+
     console.log("[SYNC] Starting task creation logic");
     console.log("[SYNC] existingWeeklyTaskMap size:", existingWeeklyTaskMap.size);
     console.log("[SYNC] existingGuestReadyMap size:", existingGuestReadyMap.size);
@@ -389,7 +438,7 @@ Deno.serve(async (req) => {
 
       const service_date = getServiceDateForWeek(reservation.check_in, standardDay);
       const guestReadyServiceDate = getGuestReadyServiceDate(reservation, activeReservations);
-      const guestReadyWithinWindow = isGuestReadyIncludedDay(guestReadyServiceDate, standardDay);
+      const guestReadyWithinWindow = isDateWithinCoverageRule(service_date, guestReadyServiceDate, coverageRule);
       const isSameDayAsStandard = reservation.check_in === service_date;
       const source_key = `wk:${propertyId}:${service_date}`;
       const weeklyTask = existingWeeklyTaskMap.get(source_key);
@@ -440,7 +489,7 @@ Deno.serve(async (req) => {
         }
       }
 
-      const guestReadyCharge = getGuestReadyCharge(guestReadyServiceDate, standardDay, property.default_off_cycle_charge);
+      const guestReadyCharge = getGuestReadyCharge(guestReadyServiceDate, standardDay, coverageRule, property.default_off_cycle_charge);
       const guestReadySourceKey = `gr:${propertyId}:${reservation.check_in}`;
       const existingGuestReady = existingGuestReadyMap.get(guestReadySourceKey);
 

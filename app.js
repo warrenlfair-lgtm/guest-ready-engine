@@ -3,6 +3,17 @@ let cleaningTasks = [];
 let reservations = [];
 let operationsReminders = [];
 
+const DEFAULT_COMPANY_PROFILE = {
+  company_name: "Guest Ready Pool Pros",
+  tagline: "Vacation Rental Pool Service Specialists",
+  phone_number: "",
+  email: "",
+  logo_url: "",
+  admin_pin: "1234",
+};
+
+let companyProfile = { ...DEFAULT_COMPANY_PROFILE };
+
 let editingPropertyId = null;
 let selectedCleaningPropertyId = null;
 let editingCleaningId = null;
@@ -13,6 +24,9 @@ let selectedPropertyFilter = "";
 let selectedMonthFilter = "current";
 let collapsedPropertyCards = new Set();
 let weekViewMode = localStorage.getItem("guestReadyDefaultWeekView") || "calendar";
+const PROTECTED_VIEWS = new Set(["billing", "messages"]);
+let isProtectedAccessUnlocked = false;
+let pinModalResolver = null;
 
 const addPropertyBtn = document.getElementById("addPropertyBtn");
 const propertyModal = document.getElementById("propertyModal");
@@ -30,6 +44,7 @@ const propertyAddress = document.getElementById("propertyAddress");
 const propertyIcal = document.getElementById("propertyIcal");
 const standardDay = document.getElementById("standardDay");
 const coverageDays = document.getElementById("coverageDays");
+const coverageRule = document.getElementById("coverageRule");
 const offCycleCharge = document.getElementById("offCycleCharge");
 
 const cleaningDate = document.getElementById("cleaningDate");
@@ -51,6 +66,11 @@ const saveReminderBtn = document.getElementById("saveReminderBtn");
 const alertDetailModal = document.getElementById("alertDetailModal");
 const alertDetailBody = document.getElementById("alertDetailBody");
 const closeAlertDetailBtn = document.getElementById("closeAlertDetailBtn");
+const pinModal = document.getElementById("pinModal");
+const pinInput = document.getElementById("pinInput");
+const pinError = document.getElementById("pinError");
+const pinUnlockBtn = document.getElementById("pinUnlockBtn");
+const pinCancelBtn = document.getElementById("pinCancelBtn");
 const weekTasksContainer = document.getElementById("weekTasks");
 const weekTasksCalendarContainer = document.getElementById("weekTasksCalendar");
 const weekViewToggleButtons = Array.from(document.querySelectorAll(".week-view-btn"));
@@ -66,6 +86,20 @@ const billingReconciledOnly = document.getElementById("billingReconciledOnly");
 const billingRunBtn = document.getElementById("billingRunBtn");
 const billingPrintBtn = document.getElementById("billingPrintBtn");
 const billingReportContainer = document.getElementById("billingReportContainer");
+const messageWeekDate = document.getElementById("messageWeekDate");
+const messageUnassignedName = document.getElementById("messageUnassignedName");
+const messagesByTech = document.getElementById("messagesByTech");
+const companyHeaderName = document.getElementById("companyHeaderName");
+const companyHeaderTagline = document.getElementById("companyHeaderTagline");
+const companyNameInput = document.getElementById("companyNameInput");
+const companyTaglineInput = document.getElementById("companyTaglineInput");
+const companyPhoneInput = document.getElementById("companyPhoneInput");
+const companyEmailInput = document.getElementById("companyEmailInput");
+const companyLogoUrlInput = document.getElementById("companyLogoUrlInput");
+const adminPinInput = document.getElementById("adminPinInput");
+const confirmAdminPinInput = document.getElementById("confirmAdminPinInput");
+const saveCompanyProfileBtn = document.getElementById("saveCompanyProfileBtn");
+const settingsStatus = document.getElementById("settingsStatus");
 
 addPropertyBtn.onclick = openAddModal;
 cancelBtn.onclick = closePropertyModal;
@@ -89,7 +123,9 @@ Array.from(document.querySelectorAll(".quick-btn")).forEach((btn) => {
 });
 
 viewButtons.forEach((button) => {
-  button.addEventListener("click", () => showView(button.dataset.view));
+  button.addEventListener("click", async () => {
+    await navigateToView(button.dataset.view);
+  });
 });
 
 propertyFilterSelect.addEventListener("change", (e) => {
@@ -97,9 +133,11 @@ propertyFilterSelect.addEventListener("change", (e) => {
   renderProperties();
 });
 
-monthFilterSelect.addEventListener("change", (e) => {
+monthFilterSelect.addEventListener("change", async (e) => {
   selectedMonthFilter = e.target.value;
+  await ensureWeeklyStandardTasksForMonth(selectedMonthFilter);
   renderProperties();
+  renderTaskViews();
 });
 
 weekViewToggleButtons.forEach((button) => {
@@ -142,8 +180,21 @@ if (billingReconciledOnly) {
   billingReconciledOnly.addEventListener("change", renderBillingReport);
 }
 
+if (messageWeekDate) {
+  messageWeekDate.addEventListener("change", renderMessagesPreview);
+}
+
+if (messageUnassignedName) {
+  messageUnassignedName.addEventListener("input", renderMessagesPreview);
+}
+
+if (saveCompanyProfileBtn) {
+  saveCompanyProfileBtn.addEventListener("click", saveCompanyProfile);
+}
+
 initializeWeekViewMode();
 initializeBillingReportFilters();
+initializeMessagesDefaults();
 loadData();
 
 function initializeWeekViewMode() {
@@ -169,6 +220,17 @@ function showView(viewName) {
 
   if (viewName === "billing") {
     renderBillingReport();
+  }
+
+  if (viewName === "messages") {
+    renderMessagesPreview();
+  }
+}
+
+function initializeMessagesDefaults() {
+  if (!messageWeekDate) return;
+  if (!messageWeekDate.value) {
+    messageWeekDate.value = formatDateValue(new Date());
   }
 }
 
@@ -203,7 +265,10 @@ function openEditModal(id) {
   propertyAddress.value = property.address || "";
   propertyIcal.value = property.ical_url || "";
   standardDay.value = property.standard_service_day || "Wednesday";
-  coverageDays.value = property.coverage_days || 2;
+  coverageDays.value = property.coverage_days ?? 1;
+  if (coverageRule) {
+    coverageRule.value = getCoverageRuleForProperty(property);
+  }
   offCycleCharge.value = property.default_off_cycle_charge || 65;
 
   propertyModal.classList.remove("hidden");
@@ -411,16 +476,441 @@ async function deleteReminder(reminderId) {
 async function loadData() {
   statusMessage.textContent = "Loading...";
 
+  await loadCompanyProfile();
   await loadProperties();
   await loadCleaningTasks();
   await loadReservations();
   await loadOperationsReminders();
+  const monthForAutoGeneration = ["current", "next", "previous"].includes(selectedMonthFilter)
+    ? selectedMonthFilter
+    : "current";
+  const generatedWeeklyCount = await ensureWeeklyStandardTasksForMonth(monthForAutoGeneration);
+  if (generatedWeeklyCount > 0) {
+    await loadCleaningTasks();
+  }
 
   statusMessage.textContent = "";
   renderTaskViews();
   renderProperties();
   renderOperationsRemindersWidget();
   renderBillingReport();
+  renderMessagesPreview();
+}
+
+function getMondayStartForDate(dateString) {
+  const selected = parseDateString(dateString);
+  const day = selected.getUTCDay();
+  const mondayOffset = (day + 6) % 7;
+  const monday = new Date(selected);
+  monday.setUTCDate(selected.getUTCDate() - mondayOffset);
+  return monday;
+}
+
+function getWeekRangeForMessage() {
+  const selectedDate = messageWeekDate?.value || formatDateValue(new Date());
+  const weekStartDate = getMondayStartForDate(selectedDate);
+  const weekEndDate = new Date(weekStartDate);
+  weekEndDate.setUTCDate(weekStartDate.getUTCDate() + 6);
+  const weekStart = weekStartDate.toISOString().slice(0, 10);
+  const weekEnd = weekEndDate.toISOString().slice(0, 10);
+  return { weekStart, weekEnd, weekStartDate, weekEndDate };
+}
+
+function formatMessageWeekRange(weekStartDate, weekEndDate) {
+  const startMonth = weekStartDate.toLocaleDateString("en-US", { month: "long", timeZone: "UTC" });
+  const endMonth = weekEndDate.toLocaleDateString("en-US", { month: "long", timeZone: "UTC" });
+  const startDay = weekStartDate.toLocaleDateString("en-US", { day: "numeric", timeZone: "UTC" });
+  const endDay = weekEndDate.toLocaleDateString("en-US", { day: "numeric", timeZone: "UTC" });
+
+  if (startMonth === endMonth) {
+    return `${startMonth} ${startDay}-${endDay}`;
+  }
+
+  return `${startMonth} ${startDay}-${endMonth} ${endDay}`;
+}
+
+function getMessageTasksForWeek(weekStart, weekEnd) {
+  return cleaningTasks
+    .filter((task) => {
+      const taskDate = task.service_date || task.scheduled_date;
+      if (!taskDate) return false;
+      if (shouldSuppressWeeklyStandardTaskDisplay(task)) return false;
+
+      const status = String(task.status || "").trim().toLowerCase();
+      if (status !== "scheduled" && status !== "pending") return false;
+
+      return taskDate >= weekStart && taskDate <= weekEnd;
+    })
+    .sort((a, b) => {
+      const aDate = a.service_date || a.scheduled_date || "";
+      const bDate = b.service_date || b.scheduled_date || "";
+      if (aDate !== bDate) return aDate.localeCompare(bDate);
+      const aTech = String(a.technician || "").trim().toLowerCase();
+      const bTech = String(b.technician || "").trim().toLowerCase();
+      if (aTech !== bTech) return aTech.localeCompare(bTech);
+      return getPropertyName(a.property_id).localeCompare(getPropertyName(b.property_id));
+    });
+}
+
+function getMessageTaskType(task) {
+  if (isTaskGuestReady(task)) {
+    return "Guest Ready Cleaning";
+  }
+  if (task.service_type === "Weekly Standard") {
+    return "Weekly Standard";
+  }
+  return task.service_type || "Manual";
+}
+
+function renderMessagesPreview() {
+  if (!messagesByTech) return;
+
+  const { weekStart, weekEnd, weekStartDate, weekEndDate } = getWeekRangeForMessage();
+  const weekLabel = formatMessageWeekRange(weekStartDate, weekEndDate);
+  const tasks = getMessageTasksForWeek(weekStart, weekEnd);
+
+  if (!tasks.length) {
+    messagesByTech.innerHTML = `<div class="empty">No Scheduled or Pending tasks found for the selected week.</div>`;
+    return;
+  }
+
+  const unassignedLabel = String(messageUnassignedName?.value || "").trim() || "Unassigned";
+  const tasksByTech = tasks.reduce((acc, task) => {
+    const tech = String(task.technician || "").trim() || unassignedLabel;
+    if (!acc[tech]) acc[tech] = [];
+    acc[tech].push(task);
+    return acc;
+  }, {});
+
+  const orderedTechs = Object.keys(tasksByTech).sort((a, b) => {
+    if (a === unassignedLabel) return 1;
+    if (b === unassignedLabel) return -1;
+    return a.localeCompare(b);
+  });
+
+  const techCardsHtml = orderedTechs.map((techName, index) => {
+    const lines = [];
+    lines.push(`Hey ${techName}, here is your pool schedule for ${weekLabel}:`);
+    lines.push("");
+
+    const groupedByDate = tasksByTech[techName].reduce((acc, task) => {
+      const taskDate = task.service_date || task.scheduled_date;
+      if (!acc[taskDate]) acc[taskDate] = [];
+      acc[taskDate].push(task);
+      return acc;
+    }, {});
+
+    Object.keys(groupedByDate)
+      .sort((a, b) => a.localeCompare(b))
+      .forEach((taskDate) => {
+        const dayName = getDayNameFromDateString(taskDate) || "Day";
+        lines.push(`${dayName}:`);
+
+        groupedByDate[taskDate].forEach((task) => {
+          const property = properties.find((p) => p.id === task.property_id);
+          const propertyName = property?.property_name || "Unknown Property";
+          const typeLabel = getMessageTaskType(task);
+          lines.push(`- ${taskDate} - ${propertyName} - ${typeLabel}`);
+
+          if (property?.address) {
+            lines.push(`  Address: ${property.address}`);
+          }
+
+          if (isSameDayCheckInGuestReadyTask(task)) {
+            lines.push("  Same-Day Check-In");
+          }
+
+          if (task.notes) {
+            lines.push(`  Notes: ${task.notes}`);
+          }
+        });
+
+        lines.push("");
+      });
+
+    lines.push("Please mark each task complete after service and send photos after each pool.");
+
+    const previewId = `messagePreviewTech${index}`;
+    const copyStatusId = `messageCopyStatus${index}`;
+    const messageText = lines.join("\n");
+
+    return `
+      <div class="messages-tech-card">
+        <div class="messages-tech-header">
+          <h3>${techName}</h3>
+          <button type="button" onclick="copyTechMessage('${previewId}', '${copyStatusId}')">Copy Message</button>
+        </div>
+        <textarea id="${previewId}" rows="14" readonly>${messageText}</textarea>
+        <div id="${copyStatusId}" class="settings-status"></div>
+      </div>
+    `;
+  }).join("");
+
+  messagesByTech.innerHTML = techCardsHtml;
+}
+
+async function copyTechMessage(previewId, statusId) {
+  const previewElement = document.getElementById(previewId);
+  const statusElement = document.getElementById(statusId);
+  if (!previewElement) return;
+
+  const textToCopy = previewElement.value || "";
+  if (!textToCopy.trim()) return;
+
+  try {
+    await navigator.clipboard.writeText(textToCopy);
+    if (statusElement) {
+      statusElement.textContent = "Copied.";
+      setTimeout(() => {
+        statusElement.textContent = "";
+      }, 2000);
+    }
+  } catch (error) {
+    if (statusElement) {
+      statusElement.textContent = "Copy failed.";
+      setTimeout(() => {
+        statusElement.textContent = "";
+      }, 2500);
+    }
+  }
+}
+
+function getDateOffsetsForMonth(monthType) {
+  if (monthType === "next") return 1;
+  if (monthType === "previous") return -1;
+  return 0;
+}
+
+function getServiceDatesForMonthByDay(standardDayName, monthType) {
+  const standardDayNumber = getDayNumberFromName(standardDayName || "Wednesday");
+  if (standardDayNumber === undefined) return [];
+
+  const now = new Date();
+  const monthOffset = getDateOffsetsForMonth(monthType);
+  const monthStart = new Date(now.getFullYear(), now.getMonth() + monthOffset, 1);
+  const monthEnd = new Date(now.getFullYear(), now.getMonth() + monthOffset + 1, 0);
+
+  const cursor = new Date(monthStart);
+  const daysUntilFirst = (standardDayNumber - cursor.getDay() + 7) % 7;
+  cursor.setDate(cursor.getDate() + daysUntilFirst);
+
+  const serviceDates = [];
+  while (cursor <= monthEnd) {
+    serviceDates.push(formatDateValue(cursor));
+    cursor.setDate(cursor.getDate() + 7);
+  }
+
+  return serviceDates;
+}
+
+function hasGuestReadyInsideCoverageWindow(propertyId, weeklyServiceDate, coverageRuleValue) {
+  return cleaningTasks.some((task) => {
+    if (task.property_id !== propertyId) return false;
+    if (!isTaskGuestReady(task)) return false;
+    if (String(task.status || "").toLowerCase() === "cancelled") return false;
+    const guestReadyDate = task.service_date || task.scheduled_date;
+    if (!guestReadyDate) return false;
+    return isDateWithinCoverageRule(weeklyServiceDate, guestReadyDate, coverageRuleValue);
+  });
+}
+
+function hasExistingWeeklyTask(propertyId, weeklyServiceDate) {
+  const sourceKey = `wk:${propertyId}:${weeklyServiceDate}`;
+  return cleaningTasks.some((task) => {
+    if (task.property_id !== propertyId) return false;
+    if (task.service_type !== "Weekly Standard") return false;
+    if (task.source_key && task.source_key === sourceKey) return true;
+    return !task.source_key && task.service_date === weeklyServiceDate;
+  });
+}
+
+async function ensureWeeklyStandardTasksForMonth(monthType) {
+  if (!["current", "next", "previous"].includes(monthType)) return 0;
+
+  const propertiesForGeneration = properties.filter((property) => {
+    return property.active !== false && Boolean(property.standard_service_day);
+  });
+
+  if (!propertiesForGeneration.length) return 0;
+
+  const weeklyTasksToCreate = [];
+
+  for (const property of propertiesForGeneration) {
+    const standardDayName = property.standard_service_day || "Wednesday";
+    const propertyCoverageRule = getCoverageRuleForProperty(property);
+    const serviceDates = getServiceDatesForMonthByDay(standardDayName, monthType);
+
+    for (const serviceDate of serviceDates) {
+      if (hasExistingWeeklyTask(property.id, serviceDate)) {
+        continue;
+      }
+
+      if (hasGuestReadyInsideCoverageWindow(property.id, serviceDate, propertyCoverageRule)) {
+        continue;
+      }
+
+      weeklyTasksToCreate.push({
+        property_id: property.id,
+        service_date: serviceDate,
+        scheduled_date: serviceDate,
+        suggested_date: serviceDate,
+        check_in_date: null,
+        service_type: "Weekly Standard",
+        status: "Scheduled",
+        off_cycle: false,
+        guest_ready: false,
+        charge: 0,
+        notes: `Auto-created Weekly Standard for ${standardDayName} in ${monthType} month view.`,
+        source_type: "weekly_standard",
+        source_key: `wk:${property.id}:${serviceDate}`,
+        manually_modified: false,
+      });
+    }
+  }
+
+  if (!weeklyTasksToCreate.length) return 0;
+
+  const sourceKeys = weeklyTasksToCreate.map((task) => task.source_key);
+  const { data: existingDuplicates, error: duplicateCheckError } = await supabaseClient
+    .from("cleaning_tasks")
+    .select("source_key")
+    .in("source_key", sourceKeys);
+
+  if (duplicateCheckError) {
+    console.warn("Weekly generation duplicate check failed:", duplicateCheckError.message);
+    return 0;
+  }
+
+  const existingSourceKeys = new Set((existingDuplicates || []).map((row) => row.source_key));
+  const filteredWeeklyTasks = weeklyTasksToCreate.filter((task) => !existingSourceKeys.has(task.source_key));
+
+  if (!filteredWeeklyTasks.length) return 0;
+
+  const { error: insertError } = await supabaseClient
+    .from("cleaning_tasks")
+    .insert(filteredWeeklyTasks);
+
+  if (insertError) {
+    console.warn("Weekly generation insert failed:", insertError.message);
+    return 0;
+  }
+
+  return filteredWeeklyTasks.length;
+}
+
+function getNormalizedCompanyProfile(raw) {
+  return {
+    company_name: String(raw?.company_name || DEFAULT_COMPANY_PROFILE.company_name).trim() || DEFAULT_COMPANY_PROFILE.company_name,
+    tagline: String(raw?.tagline || DEFAULT_COMPANY_PROFILE.tagline).trim() || DEFAULT_COMPANY_PROFILE.tagline,
+    phone_number: String(raw?.phone_number || "").trim(),
+    email: String(raw?.email || "").trim(),
+    logo_url: String(raw?.logo_url || "").trim(),
+    admin_pin: String(raw?.admin_pin || DEFAULT_COMPANY_PROFILE.admin_pin).trim() || DEFAULT_COMPANY_PROFILE.admin_pin,
+  };
+}
+
+function getCurrentAdminPin() {
+  const configured = String(companyProfile?.admin_pin || "").trim();
+  return configured || DEFAULT_COMPANY_PROFILE.admin_pin;
+}
+
+function applyCompanyProfileToApp() {
+  if (companyHeaderName) {
+    companyHeaderName.textContent = companyProfile.company_name;
+  }
+  if (companyHeaderTagline) {
+    companyHeaderTagline.textContent = companyProfile.tagline;
+  }
+  document.title = `${companyProfile.company_name} - Guest Ready Engine`;
+}
+
+function renderCompanyProfileSettings() {
+  if (!companyNameInput) return;
+  companyNameInput.value = companyProfile.company_name || "";
+  companyTaglineInput.value = companyProfile.tagline || "";
+  companyPhoneInput.value = companyProfile.phone_number || "";
+  companyEmailInput.value = companyProfile.email || "";
+  companyLogoUrlInput.value = companyProfile.logo_url || "";
+  if (adminPinInput) adminPinInput.value = "";
+  if (confirmAdminPinInput) confirmAdminPinInput.value = "";
+}
+
+async function loadCompanyProfile() {
+  const { data, error } = await supabaseClient
+    .from("company_profile")
+    .select("*")
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    console.warn("Could not load company profile. Falling back to defaults:", error.message);
+    companyProfile = { ...DEFAULT_COMPANY_PROFILE };
+  } else {
+    companyProfile = getNormalizedCompanyProfile(data || DEFAULT_COMPANY_PROFILE);
+  }
+
+  applyCompanyProfileToApp();
+  renderCompanyProfileSettings();
+}
+
+async function saveCompanyProfile() {
+  if (!companyNameInput || !companyTaglineInput) return;
+
+  const newPin = String(adminPinInput?.value || "").trim();
+  const confirmPin = String(confirmAdminPinInput?.value || "").trim();
+  const isPinUpdateRequested = Boolean(newPin || confirmPin);
+
+  if (isPinUpdateRequested && newPin !== confirmPin) {
+    alert("Admin PIN and Confirm Admin PIN must match.");
+    return;
+  }
+
+  const payload = getNormalizedCompanyProfile({
+    company_name: companyNameInput.value,
+    tagline: companyTaglineInput.value,
+    phone_number: companyPhoneInput?.value,
+    email: companyEmailInput?.value,
+    logo_url: companyLogoUrlInput?.value,
+    admin_pin: isPinUpdateRequested ? newPin : getCurrentAdminPin(),
+  });
+
+  if (!payload.company_name) {
+    alert("Company name is required.");
+    return;
+  }
+
+  if (settingsStatus) {
+    settingsStatus.textContent = "Saving...";
+  }
+
+  const upsertPayload = {
+    id: 1,
+    ...payload,
+    updated_at: new Date().toISOString(),
+  };
+
+  const { error } = await supabaseClient
+    .from("company_profile")
+    .upsert(upsertPayload, { onConflict: "id" });
+
+  if (error) {
+    if (settingsStatus) {
+      settingsStatus.textContent = "";
+    }
+    alert("Error saving company profile: " + error.message);
+    return;
+  }
+
+  companyProfile = payload;
+  applyCompanyProfileToApp();
+  renderBillingReport();
+
+  if (settingsStatus) {
+    settingsStatus.textContent = "Saved.";
+    setTimeout(() => {
+      settingsStatus.textContent = "";
+    }, 2500);
+  }
 }
 
 async function loadProperties() {
@@ -509,12 +999,14 @@ async function loadOperationsReminders() {
 }
 
 async function saveProperty() {
+  const selectedCoverageRule = coverageRule ? coverageRule.value : "both";
   const propertyData = {
     property_name: propertyName.value.trim(),
     address: propertyAddress.value.trim(),
     ical_url: propertyIcal.value.trim(),
     standard_service_day: standardDay.value,
-    coverage_days: Number(coverageDays.value),
+    coverage_days: selectedCoverageRule === "none" ? 0 : 1,
+    coverage_rule: selectedCoverageRule,
     default_off_cycle_charge: Number(offCycleCharge.value),
     active: true
   };
@@ -912,7 +1404,10 @@ function clearPropertyForm() {
   propertyAddress.value = "";
   propertyIcal.value = "";
   standardDay.value = "Wednesday";
-  coverageDays.value = 2;
+  coverageDays.value = 1;
+  if (coverageRule) {
+    coverageRule.value = "both";
+  }
   offCycleCharge.value = 65;
 }
 
@@ -1077,6 +1572,7 @@ function getTodayCleaningTasks() {
 
   const todayTasks = cleaningTasks.filter((task) => {
     if (!task.service_date) return false;
+    if (shouldSuppressWeeklyStandardTaskDisplay(task)) return false;
     return task.service_date === todayString;
   });
 
@@ -1100,6 +1596,7 @@ function getUpcomingCleaningTasks() {
   const filteredTasks = cleaningTasks
     .filter((task) => {
       if (!task.service_date) return false;
+      if (shouldSuppressWeeklyStandardTaskDisplay(task)) return false;
 
       const status = String(task.status || "").trim().toLowerCase();
       if (status === "cancelled") return false;
@@ -1142,16 +1639,62 @@ function getDayNumberFromName(dayName) {
   return days[dayName];
 }
 
-function getIncludedDaysForStandardDay(standardDay) {
+function getCoverageRuleForProperty(property) {
+  const rawRule = String(property?.coverage_rule || "").toLowerCase();
+  if (["none", "before", "after", "both"].includes(rawRule)) {
+    return rawRule;
+  }
+
+  const rawCoverage = Number(property?.coverage_days);
+  if (rawCoverage === 0) return "none";
+  if (rawCoverage === 1) return "both";
+  if (rawCoverage > 1) return "both";
+  return "both";
+}
+
+function getCoverageOffsetsForRule(rule) {
+  if (rule === "none") return [0];
+  if (rule === "before") return [-1, 0];
+  if (rule === "after") return [0, 1];
+  return [-1, 0, 1];
+}
+
+function getCoverageRuleLabel(rule) {
+  if (rule === "none") return "No Flex (service day only)";
+  if (rule === "before") return "Service day -1 day only";
+  if (rule === "after") return "Service day +1 day only";
+  return "Service day +/- 1 day";
+}
+
+function getServiceDateForWeek(checkInDateString, standardDay) {
+  const checkInDate = parseDateString(checkInDateString);
+  const standardDayNumber = getDayNumberFromName(standardDay);
+  if (standardDayNumber === undefined) {
+    return checkInDateString;
+  }
+
+  const checkInDayNumber = checkInDate.getUTCDay();
+  const startOfWeek = new Date(checkInDate);
+  startOfWeek.setUTCDate(checkInDate.getUTCDate() - checkInDayNumber);
+
+  const serviceDate = new Date(startOfWeek);
+  serviceDate.setUTCDate(startOfWeek.getUTCDate() + standardDayNumber);
+  return formatDateValue(serviceDate);
+}
+
+function getIncludedDaysForCoverageRule(standardDay, coverageRuleValue = "both") {
   const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
   const standardDayNumber = getDayNumberFromName(standardDay);
   if (standardDayNumber === undefined) {
-    return new Set(["Tuesday", "Wednesday", "Thursday"]);
+    return new Set(["Wednesday"]);
   }
 
-  const previousDay = dayNames[(standardDayNumber + 6) % 7];
-  const nextDay = dayNames[(standardDayNumber + 1) % 7];
-  return new Set([previousDay, standardDay, nextDay]);
+  const includedDays = new Set();
+  for (const offset of getCoverageOffsetsForRule(coverageRuleValue)) {
+    includedDays.add(dayNames[(standardDayNumber + offset + 7) % 7]);
+  }
+
+  return includedDays;
 }
 
 function formatIncludedDaysLabel(includedDaysSet) {
@@ -1166,12 +1709,53 @@ function isSameDayCheckInGuestReadyTask(task) {
   return Boolean(serviceDate && serviceDate === task.check_in_date);
 }
 
+function isAutoWeeklyTask(task) {
+  const status = String(task.status || "Scheduled");
+  return task.service_type === "Weekly Standard"
+    && !task.manually_modified
+    && status === "Scheduled"
+    && !task.completed_at
+    && !task.invoiced;
+}
+
+function isDateWithinCoverageRule(serviceDate, candidateDate, coverageRuleValue) {
+  if (!serviceDate || !candidateDate) return false;
+  const service = parseDateString(serviceDate);
+  const candidate = parseDateString(candidateDate);
+  const dayDiff = Math.round((candidate.getTime() - service.getTime()) / (1000 * 60 * 60 * 24));
+  return getCoverageOffsetsForRule(coverageRuleValue).includes(dayDiff);
+}
+
+function shouldSuppressWeeklyStandardTaskDisplay(task) {
+  if (!task || task.service_type !== "Weekly Standard") return false;
+
+  const property = properties.find((p) => p.id === task.property_id);
+  if (!property) return false;
+
+  const propertyCoverageRule = getCoverageRuleForProperty(property);
+  const weeklyServiceDate = task.service_date || task.scheduled_date;
+  if (!weeklyServiceDate) return false;
+
+  return cleaningTasks.some((otherTask) => {
+    if (otherTask.id === task.id) return false;
+    if (otherTask.property_id !== task.property_id) return false;
+    if (!isTaskGuestReady(otherTask)) return false;
+
+    const otherStatus = String(otherTask.status || "").toLowerCase();
+    if (otherStatus === "cancelled") return false;
+
+    const otherDate = otherTask.service_date || otherTask.scheduled_date;
+    return isDateWithinCoverageRule(weeklyServiceDate, otherDate, propertyCoverageRule);
+  });
+}
+
 function getGuestReadyBillingDetails(task) {
   const serviceDate = task.service_date || task.scheduled_date;
   const serviceDay = getDayNameFromDateString(serviceDate);
   const property = properties.find((p) => p.id === task.property_id);
   const standardDay = property?.standard_service_day || "Wednesday";
-  const includedDays = getIncludedDaysForStandardDay(standardDay);
+  const propertyCoverageRule = getCoverageRuleForProperty(property);
+  const includedDays = getIncludedDaysForCoverageRule(standardDay, propertyCoverageRule);
   const isIncluded = Boolean(serviceDay && includedDays.has(serviceDay));
 
   if (isIncluded) {
@@ -1181,6 +1765,8 @@ function getGuestReadyBillingDetails(task) {
       effectiveCharge: 0,
       serviceDay,
       standardDay,
+      coverageRule: propertyCoverageRule,
+      coverageRuleLabel: getCoverageRuleLabel(propertyCoverageRule),
       includedDaysLabel: formatIncludedDaysLabel(includedDays),
     };
   }
@@ -1194,6 +1780,8 @@ function getGuestReadyBillingDetails(task) {
     effectiveCharge: rawCharge > 0 ? rawCharge : defaultCharge,
     serviceDay,
     standardDay,
+    coverageRule: propertyCoverageRule,
+    coverageRuleLabel: getCoverageRuleLabel(propertyCoverageRule),
     includedDaysLabel: formatIncludedDaysLabel(includedDays),
   };
 }
@@ -1205,6 +1793,32 @@ function getTaskBillingAmount(task) {
 
   const billing = getGuestReadyBillingDetails(task);
   return billing.isChargeable ? billing.effectiveCharge : 0;
+}
+
+function renderBillingReportHeader() {
+  const logoMarkup = companyProfile.logo_url
+    ? `<img src="${companyProfile.logo_url}" alt="${companyProfile.company_name} logo" class="billing-report-logo" onerror="this.style.display='none'">`
+    : "";
+
+  return `
+    <div class="billing-report-header-block">
+      ${logoMarkup}
+      <div>
+        <div class="billing-report-brand">${companyProfile.company_name}</div>
+        <div class="billing-report-brand-subtitle">${companyProfile.tagline}</div>
+      </div>
+    </div>
+  `;
+}
+
+function renderBillingReportFooter() {
+  const contactParts = [];
+  if (companyProfile.phone_number) contactParts.push(companyProfile.phone_number);
+  if (companyProfile.email) contactParts.push(companyProfile.email);
+
+  if (!contactParts.length) return "";
+
+  return `<div class="billing-report-footer">${contactParts.join(" | ")}</div>`;
 }
 
 function getBillingReportRows() {
@@ -1324,12 +1938,12 @@ function renderBillingReport() {
   if (!rows.length) {
     billingReportContainer.innerHTML = `
       <div class="billing-report-sheet">
-        <div class="billing-report-brand">Guest Ready Pool Pros</div>
-        <div class="billing-report-brand-subtitle">Vacation Rental Pool Service Specialists</div>
+        ${renderBillingReportHeader()}
         <h2 class="billing-report-title">Guest Ready Cleaning Report</h2>
         <div class="billing-report-meta">Billing Period: ${startDate} to ${endDate}</div>
         <div class="billing-report-meta">Generated: ${generatedDate}</div>
         <div class="empty">No billable completed Guest Ready tasks found for the selected filters.</div>
+        ${renderBillingReportFooter()}
       </div>
     `;
     return;
@@ -1337,13 +1951,13 @@ function renderBillingReport() {
 
   billingReportContainer.innerHTML = `
     <div class="billing-report-sheet">
-      <div class="billing-report-brand">Guest Ready Pool Pros</div>
-      <div class="billing-report-brand-subtitle">Vacation Rental Pool Service Specialists</div>
+      ${renderBillingReportHeader()}
       <h2 class="billing-report-title">Guest Ready Cleaning Report</h2>
       <div class="billing-report-meta">Billing Period: ${startDate} to ${endDate}</div>
       <div class="billing-report-meta">Generated: ${generatedDate}</div>
       ${groupMarkup}
       <div class="billing-report-grand-total">Grand Total: $${grandTotal.toFixed(2)}</div>
+      ${renderBillingReportFooter()}
     </div>
   `;
 }
@@ -1705,6 +2319,7 @@ function renderProperties() {
 
   propertyList.innerHTML = filteredProperties.map(property => {
     let tasks = cleaningTasks.filter(task => task.property_id === property.id);
+    tasks = tasks.filter(task => !shouldSuppressWeeklyStandardTaskDisplay(task));
     
     // Apply month filter to tasks
     tasks = tasks.filter(task => taskMatchesDateFilter(task, selectedMonthFilter));
@@ -1725,9 +2340,9 @@ function renderProperties() {
 
         <div class="property-meta">
           <div><strong>Address:</strong> ${property.address || "Not entered"}</div>
-          <div><strong>Weekly Service:</strong> ${property.standard_service_day || "Wednesday"}</div>
-          <div><strong>Coverage Rule:</strong> ${property.standard_service_day || "Wednesday"} +/- 1 day</div>
-          <div><strong>Default Off-Cycle:</strong> $${property.default_off_cycle_charge || 65}</div>
+          <div><strong>Standard Service Day:</strong> ${property.standard_service_day || "Wednesday"}</div>
+          <div><strong>Guest Ready Coverage Rule:</strong> ${getCoverageRuleLabel(getCoverageRuleForProperty(property))}</div>
+          <div><strong>Billable Guest Ready Charge:</strong> $${Number(property.default_off_cycle_charge ?? 65).toFixed(2)}</div>
           <div><strong>iCal:</strong> ${property.ical_url ? "Saved" : "Not entered"}</div>
         </div>
 
@@ -1802,8 +2417,8 @@ function renderProperties() {
 
                   const billingLine = guestReadyBilling
                     ? guestReadyBilling.isIncluded
-                      ? `<div class="task-line"><small>Billing: Included (${guestReadyBilling.serviceDay}; ${guestReadyBilling.standardDay} route window: ${guestReadyBilling.includedDaysLabel})</small></div>`
-                      : `<div class="task-line"><small>Billing: Chargeable (${guestReadyBilling.serviceDay || "Outside route window"}; ${guestReadyBilling.standardDay} route window: ${guestReadyBilling.includedDaysLabel})</small></div>`
+                      ? `<div class="task-line"><small>Billing: Included (${guestReadyBilling.serviceDay}; rule: ${guestReadyBilling.coverageRuleLabel}; included days: ${guestReadyBilling.includedDaysLabel})</small></div>`
+                      : `<div class="task-line"><small>Billing: Chargeable (${guestReadyBilling.serviceDay || "Outside route window"}; rule: ${guestReadyBilling.coverageRuleLabel}; included days: ${guestReadyBilling.includedDaysLabel})</small></div>`
                     : "";
 
                   const sameDayBadge = isSameDayCheckInGuestReadyTask(task)
@@ -1842,4 +2457,98 @@ function renderProperties() {
       </div>
     `;
   }).join("");
+}
+
+async function navigateToView(viewName) {
+  if (!viewName) return;
+
+  if (PROTECTED_VIEWS.has(viewName) && !isProtectedAccessUnlocked) {
+    const unlocked = await promptForProtectedViewPin();
+    if (!unlocked) return;
+    isProtectedAccessUnlocked = true;
+  }
+
+  showView(viewName);
+}
+
+function openPinModal() {
+  if (!pinModal) return;
+  pinModal.classList.remove("hidden");
+  if (pinInput) {
+    pinInput.value = "";
+    pinInput.focus();
+  }
+  if (pinError) {
+    pinError.classList.add("hidden");
+  }
+}
+
+function closePinModal() {
+  if (!pinModal) return;
+  pinModal.classList.add("hidden");
+}
+
+function promptForProtectedViewPin() {
+  if (!pinModal || !pinInput || !pinUnlockBtn || !pinCancelBtn) {
+    return Promise.resolve(true);
+  }
+
+  openPinModal();
+
+  return new Promise((resolve) => {
+    pinModalResolver = resolve;
+
+    const cleanup = () => {
+      pinUnlockBtn.removeEventListener("click", handleUnlock);
+      pinCancelBtn.removeEventListener("click", handleCancel);
+      pinInput.removeEventListener("keydown", handleKeydown);
+      pinModal.removeEventListener("click", handleOverlayClick);
+      pinModalResolver = null;
+    };
+
+    const finish = (allowed) => {
+      cleanup();
+      closePinModal();
+      resolve(allowed);
+    };
+
+    const handleUnlock = () => {
+      const enteredPin = String(pinInput.value || "").trim();
+      if (enteredPin === getCurrentAdminPin()) {
+        finish(true);
+        return;
+      }
+
+      if (pinError) {
+        pinError.classList.remove("hidden");
+      }
+      pinInput.select();
+    };
+
+    const handleCancel = () => {
+      finish(false);
+    };
+
+    const handleKeydown = (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        handleUnlock();
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        handleCancel();
+      }
+    };
+
+    const handleOverlayClick = (event) => {
+      if (event.target === pinModal) {
+        handleCancel();
+      }
+    };
+
+    pinUnlockBtn.addEventListener("click", handleUnlock);
+    pinCancelBtn.addEventListener("click", handleCancel);
+    pinInput.addEventListener("keydown", handleKeydown);
+    pinModal.addEventListener("click", handleOverlayClick);
+  });
 }
