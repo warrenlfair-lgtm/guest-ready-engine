@@ -33,7 +33,7 @@ function isCheckInCoveredByStandardDay(checkInDate, standardDay) {
 }
 
 function getSuggestedGuestReadyDate(checkInDate) {
-  return addDays(checkInDate, -1);
+  return checkInDate;
 }
 
 function buildGuestReadyTask(property, reservation) {

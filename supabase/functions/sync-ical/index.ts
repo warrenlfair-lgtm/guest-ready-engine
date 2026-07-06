@@ -141,12 +141,8 @@ function getCoverageOffsetsForRule(coverageRule: string) {
   return [-1, 0, 1];
 }
 
-function getGuestReadyServiceDate(reservation: { check_in: string; check_out: string | null }, activeReservations: Array<{ check_in: string; check_out: string | null }>) {
-  const hasSameDayTurnover = activeReservations.some((candidate) => {
-    return candidate.check_in && candidate.check_in !== reservation.check_in && candidate.check_out === reservation.check_in;
-  });
-
-  return hasSameDayTurnover ? reservation.check_in : addDays(reservation.check_in, -1);
+function getGuestReadyServiceDate(reservation: { check_in: string; check_out: string | null }) {
+  return reservation.check_in;
 }
 
 function isDateWithinCoverageRule(serviceDate: string, candidateDate: string, coverageRule: string) {
@@ -437,7 +433,7 @@ Deno.serve(async (req) => {
       if (!reservation.check_in) continue;
 
       const service_date = getServiceDateForWeek(reservation.check_in, standardDay);
-      const guestReadyServiceDate = getGuestReadyServiceDate(reservation, activeReservations);
+      const guestReadyServiceDate = getGuestReadyServiceDate(reservation);
       const guestReadyWithinWindow = isDateWithinCoverageRule(service_date, guestReadyServiceDate, coverageRule);
       const isSameDayAsStandard = reservation.check_in === service_date;
       const source_key = `wk:${propertyId}:${service_date}`;
