@@ -47,9 +47,9 @@ function buildGuestReadyTask(property, reservation) {
     check_in_date: reservation.check_in,
     service_type: "Guest Ready",
     status: "Scheduled",
-    off_cycle: true,
+    off_cycle: false,
     guest_ready: true,
-    charge: Number(property.default_off_cycle_charge || 65),
+    charge: 0,
     notes: "Auto-created from reservation check-in."
   };
 }

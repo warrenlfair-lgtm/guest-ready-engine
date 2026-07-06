@@ -2012,10 +2012,14 @@ function shouldShowReconcileForTask(task) {
   if (!task) return false;
   if (task.service_type === "Weekly Standard") return false;
   if (isTaskReconciled(task)) return false;
-  const billingContext = getTaskBillingContext(task);
-  const isChargeable = billingContext.guestReadyBilling?.isChargeable === true;
-  const hasAmount = Number(task.charge || 0) > 0 || billingContext.billableAmount > 0;
-  return isChargeable || hasAmount;
+
+  if (isTaskGuestReady(task)) {
+    const guestReadyBilling = getGuestReadyBillingDetails(task);
+    if (guestReadyBilling.isChargeable) return true;
+    return hasManualBillingOverride(task) && Number(task.charge || 0) > 0;
+  }
+
+  return Number(task.charge || 0) > 0;
 }
 
 function isTaskReconciled(task) {
