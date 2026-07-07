@@ -41,6 +41,7 @@ const cancelCleaningBtn = document.getElementById("cancelCleaningBtn");
 const saveCleaningBtn = document.getElementById("saveCleaningBtn");
 
 const propertyName = document.getElementById("propertyName");
+const propertyClientName = document.getElementById("propertyClientName");
 const propertyAddress = document.getElementById("propertyAddress");
 const propertyIcal = document.getElementById("propertyIcal");
 const standardDay = document.getElementById("standardDay");
@@ -87,6 +88,11 @@ const billingReconciledOnly = document.getElementById("billingReconciledOnly");
 const billingRunBtn = document.getElementById("billingRunBtn");
 const billingPrintBtn = document.getElementById("billingPrintBtn");
 const billingReportContainer = document.getElementById("billingReportContainer");
+const routeFragStartDate = document.getElementById("routeFragStartDate");
+const routeFragEndDate = document.getElementById("routeFragEndDate");
+const routeFragClientSelect = document.getElementById("routeFragClientSelect");
+const routeFragRunBtn = document.getElementById("routeFragRunBtn");
+const routeFragContainer = document.getElementById("routeFragContainer");
 const messageWeekDate = document.getElementById("messageWeekDate");
 const messageUnassignedName = document.getElementById("messageUnassignedName");
 const messagesByTech = document.getElementById("messagesByTech");
@@ -190,6 +196,22 @@ if (billingReconciledOnly) {
   billingReconciledOnly.addEventListener("change", renderBillingReport);
 }
 
+if (routeFragRunBtn) {
+  routeFragRunBtn.addEventListener("click", renderRouteFragmentationAnalytics);
+}
+
+if (routeFragStartDate) {
+  routeFragStartDate.addEventListener("change", renderRouteFragmentationAnalytics);
+}
+
+if (routeFragEndDate) {
+  routeFragEndDate.addEventListener("change", renderRouteFragmentationAnalytics);
+}
+
+if (routeFragClientSelect) {
+  routeFragClientSelect.addEventListener("change", renderRouteFragmentationAnalytics);
+}
+
 if (messageWeekDate) {
   messageWeekDate.addEventListener("change", renderMessagesPreview);
 }
@@ -214,6 +236,7 @@ if (uploadCompanyLogoBtn) {
 
 initializeWeekViewMode();
 initializeBillingReportFilters();
+initializeRouteFragmentationFilters();
 initializeMessagesDefaults();
 loadData();
 
@@ -240,6 +263,10 @@ function showView(viewName) {
 
   if (viewName === "billing") {
     renderBillingReport();
+  }
+
+  if (viewName === "routeFragmentation") {
+    renderRouteFragmentationAnalytics();
   }
 
   if (viewName === "messages") {
@@ -269,6 +296,17 @@ function initializeBillingReportFilters() {
   }
 }
 
+function initializeRouteFragmentationFilters() {
+  if (!routeFragStartDate || !routeFragEndDate) return;
+
+  const today = new Date();
+  const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+  const monthEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+
+  routeFragStartDate.value = formatDateValue(monthStart);
+  routeFragEndDate.value = formatDateValue(monthEnd);
+}
+
 function openAddModal() {
   editingPropertyId = null;
   clearPropertyForm();
@@ -282,6 +320,7 @@ function openEditModal(id) {
   editingPropertyId = id;
 
   propertyName.value = property.property_name || "";
+  propertyClientName.value = property.client_name || "";
   propertyAddress.value = property.address || "";
   propertyIcal.value = property.ical_url || "";
   standardDay.value = property.standard_service_day || "Wednesday";
@@ -515,6 +554,7 @@ async function loadData() {
   renderProperties();
   renderOperationsRemindersWidget();
   renderBillingReport();
+  renderRouteFragmentationAnalytics();
   renderMessagesPreview();
 }
 
@@ -1241,6 +1281,7 @@ async function saveProperty() {
   const selectedCoverageRule = coverageRule ? coverageRule.value : "both";
   const propertyData = {
     property_name: propertyName.value.trim(),
+    client_name: String(propertyClientName?.value || "").trim() || null,
     address: propertyAddress.value.trim(),
     ical_url: propertyIcal.value.trim(),
     standard_service_day: standardDay.value,
@@ -1642,6 +1683,9 @@ async function markCleaningComplete(id) {
 
 function clearPropertyForm() {
   propertyName.value = "";
+  if (propertyClientName) {
+    propertyClientName.value = "";
+  }
   propertyAddress.value = "";
   propertyIcal.value = "";
   standardDay.value = "Wednesday";
@@ -2270,6 +2314,328 @@ function renderBillingReport() {
   `;
 }
 
+function getDateStringsInRange(startDate, endDate) {
+  const dates = [];
+  const cursor = parseDateString(startDate);
+  const end = parseDateString(endDate);
+
+  while (cursor <= end) {
+    dates.push(formatDateValue(cursor));
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+
+  return dates;
+}
+
+function getRouteFragmentationGroupLabel(property) {
+  const clientName = String(property?.client_name || "").trim();
+  return clientName || "Unassigned Client";
+}
+
+function isIncludedFlexServiceTask(task, property) {
+  if (!task || !property) return false;
+  if (!isTaskGuestReady(task)) return false;
+  if (Number(task.charge || 0) !== 0) return false;
+
+  const taskDate = task.service_date || task.scheduled_date;
+  if (!taskDate) return false;
+
+  const standardDay = property.standard_service_day || "Wednesday";
+  const scheduledWeeklyServiceDate = getServiceDateForWeek(taskDate, standardDay);
+  if (!scheduledWeeklyServiceDate || taskDate === scheduledWeeklyServiceDate) return false;
+
+  const coverageRule = getCoverageRuleForProperty(property);
+  return isDateWithinCoverageRule(scheduledWeeklyServiceDate, taskDate, coverageRule);
+}
+
+function isRouteBillableEvent(task) {
+  if (isTaskReconciled(task)) return true;
+  const billingContext = getTaskBillingContext(task);
+  if (billingContext.guestReadyBilling) {
+    return billingContext.guestReadyBilling.isChargeable === true;
+  }
+  return Number(billingContext.billableAmount || 0) > 0;
+}
+
+function renderRouteFragmentationAnalytics() {
+  if (!routeFragContainer) return;
+
+  const startDate = routeFragStartDate?.value || "";
+  const endDate = routeFragEndDate?.value || "";
+  if (!startDate || !endDate) {
+    routeFragContainer.innerHTML = `<div class="empty">Select a start and end date to run route fragmentation analytics.</div>`;
+    return;
+  }
+
+  const activeProperties = properties.filter((property) => property.active !== false);
+  if (!activeProperties.length) {
+    routeFragContainer.innerHTML = `<div class="empty">No active properties found.</div>`;
+    return;
+  }
+
+  const clientLabels = Array.from(new Set(activeProperties.map((property) => getRouteFragmentationGroupLabel(property))))
+    .sort((a, b) => a.localeCompare(b));
+
+  if (routeFragClientSelect) {
+    const previousValue = routeFragClientSelect.value;
+    const options = `<option value="">All Clients</option>${clientLabels.map((label) => `<option value="${label}">${label}</option>`).join("")}`;
+    if (routeFragClientSelect.innerHTML !== options) {
+      routeFragClientSelect.innerHTML = options;
+    }
+    routeFragClientSelect.value = clientLabels.includes(previousValue) ? previousValue : "";
+  }
+
+  const selectedClient = routeFragClientSelect?.value || "";
+  const filteredProperties = selectedClient
+    ? activeProperties.filter((property) => getRouteFragmentationGroupLabel(property) === selectedClient)
+    : activeProperties;
+
+  if (!filteredProperties.length) {
+    routeFragContainer.innerHTML = `<div class="empty">No properties found for the selected client.</div>`;
+    return;
+  }
+
+  const propertyMap = new Map(filteredProperties.map((property) => [property.id, property]));
+  const groupMap = new Map();
+  for (const property of filteredProperties) {
+    const groupLabel = getRouteFragmentationGroupLabel(property);
+    if (!groupMap.has(groupLabel)) {
+      groupMap.set(groupLabel, {
+        clientName: groupLabel,
+        properties: [],
+        propertyIds: new Set(),
+        scheduledDayNames: new Set(),
+      });
+    }
+
+    const group = groupMap.get(groupLabel);
+    group.properties.push(property);
+    group.propertyIds.add(property.id);
+    if (property.standard_service_day) {
+      group.scheduledDayNames.add(property.standard_service_day);
+    }
+  }
+
+  const taskInRange = cleaningTasks.filter((task) => {
+    if (!task?.property_id) return false;
+    if (!propertyMap.has(task.property_id)) return false;
+    const status = String(task.status || "").toLowerCase();
+    if (status === "cancelled") return false;
+    const taskDate = task.service_date || task.scheduled_date;
+    return Boolean(taskDate && taskDate >= startDate && taskDate <= endDate);
+  });
+
+  const allDateStrings = getDateStringsInRange(startDate, endDate);
+  const dayNameByDate = new Map(allDateStrings.map((dateValue) => [dateValue, getDayNameFromDateString(dateValue)]));
+
+  const rows = Array.from(groupMap.values()).map((group) => {
+    const groupTaskList = taskInRange.filter((task) => group.propertyIds.has(task.property_id));
+    const scheduledDayNumbers = new Set(Array.from(group.scheduledDayNames)
+      .map((dayName) => getDayNumberFromName(dayName))
+      .filter((dayNumber) => dayNumber !== undefined));
+
+    const scheduledRouteDates = new Set(allDateStrings.filter((dateValue) => {
+      const dayName = dayNameByDate.get(dateValue);
+      const dayNumber = getDayNumberFromName(dayName);
+      return dayNumber !== undefined && scheduledDayNumbers.has(dayNumber);
+    }));
+
+    const actualRouteDates = new Set(groupTaskList
+      .map((task) => task.service_date || task.scheduled_date)
+      .filter(Boolean));
+
+    const additionalRouteDates = new Set(Array.from(actualRouteDates).filter((dateValue) => !scheduledRouteDates.has(dateValue)));
+    const billableByDate = new Map();
+    const includedFlexByDate = new Map();
+    const propertiesByDate = new Map();
+    const recoveredRevenueByDate = new Map();
+
+    let billableEvents = 0;
+    let includedFlexServices = 0;
+    let recoveredRevenue = 0;
+
+    for (const task of groupTaskList) {
+      const serviceDate = task.service_date || task.scheduled_date;
+      const propertyName = getPropertyName(task.property_id);
+      const property = propertyMap.get(task.property_id);
+
+      if (!propertiesByDate.has(serviceDate)) propertiesByDate.set(serviceDate, new Set());
+      propertiesByDate.get(serviceDate).add(propertyName);
+
+      if (isIncludedFlexServiceTask(task, property)) {
+        includedFlexServices += 1;
+        includedFlexByDate.set(serviceDate, (includedFlexByDate.get(serviceDate) || 0) + 1);
+      }
+
+      if (!isRouteBillableEvent(task)) continue;
+
+      const amount = Number(getTaskBillingAmount(task) || 0);
+      billableEvents += 1;
+      recoveredRevenue += amount;
+      billableByDate.set(serviceDate, (billableByDate.get(serviceDate) || 0) + 1);
+      recoveredRevenueByDate.set(serviceDate, (recoveredRevenueByDate.get(serviceDate) || 0) + amount);
+    }
+
+    const recoveredAdditionalRouteDays = Array.from(additionalRouteDates).filter((dateValue) => (billableByDate.get(dateValue) || 0) > 0).length;
+    const scheduledRouteDays = scheduledRouteDates.size;
+    const actualRouteDays = actualRouteDates.size;
+    const additionalRouteDays = Math.max(0, actualRouteDays - scheduledRouteDays);
+    const unrecoveredRouteDays = Math.max(0, additionalRouteDays - recoveredAdditionalRouteDays);
+
+    const weekKeys = new Set(groupTaskList
+      .map((task) => task.service_date || task.scheduled_date)
+      .filter(Boolean)
+      .map((dateValue) => formatDateValue(getMondayStartForDate(dateValue))));
+    const weeksAnalyzed = weekKeys.size;
+    const potentialStandardServices = group.propertyIds.size * weeksAnalyzed;
+    const flexRatePercent = potentialStandardServices > 0
+      ? (includedFlexServices / potentialStandardServices) * 100
+      : 0;
+
+    const weeklyMap = new Map();
+    for (const serviceDate of Array.from(actualRouteDates).sort((a, b) => a.localeCompare(b))) {
+      const weekOf = formatDateValue(getMondayStartForDate(serviceDate));
+      if (!weeklyMap.has(weekOf)) {
+        weeklyMap.set(weekOf, {
+          weekOf,
+          scheduledDayLabel: Array.from(group.scheduledDayNames).sort((a, b) => a.localeCompare(b)).join("/") || "Not set",
+          dates: [],
+        });
+      }
+
+      weeklyMap.get(weekOf).dates.push({
+        date: serviceDate,
+        propertyList: Array.from(propertiesByDate.get(serviceDate) || []).sort((a, b) => a.localeCompare(b)),
+        billableTasks: billableByDate.get(serviceDate) || 0,
+        includedFlexServices: includedFlexByDate.get(serviceDate) || 0,
+        recoveredRevenue: Number(recoveredRevenueByDate.get(serviceDate) || 0),
+      });
+    }
+
+    return {
+      clientName: group.clientName,
+      propertiesCount: group.propertyIds.size,
+      scheduledRouteDays,
+      actualRouteDays,
+      additionalRouteDays,
+      billableEvents,
+      includedFlexServices,
+      potentialStandardServices,
+      flexRatePercent,
+      recoveredRevenue,
+      unrecoveredRouteDays,
+      weeklyDetails: Array.from(weeklyMap.values()).sort((a, b) => a.weekOf.localeCompare(b.weekOf)),
+    };
+  }).sort((a, b) => a.clientName.localeCompare(b.clientName));
+
+  if (!rows.length) {
+    routeFragContainer.innerHTML = `<div class="empty">No route fragmentation data available for the selected range.</div>`;
+    return;
+  }
+
+  const summaryRows = rows.map((row) => `
+    <tr>
+      <td>${row.clientName}</td>
+      <td>${row.propertiesCount}</td>
+      <td>${row.scheduledRouteDays}</td>
+      <td>${row.actualRouteDays}</td>
+      <td>${row.additionalRouteDays}</td>
+      <td>${row.billableEvents}</td>
+      <td>${row.includedFlexServices}</td>
+      <td>${row.potentialStandardServices}</td>
+      <td>${row.flexRatePercent.toFixed(1)}%</td>
+      <td class="route-frag-money">$${row.recoveredRevenue.toFixed(2)}</td>
+      <td>${row.unrecoveredRouteDays}</td>
+    </tr>
+  `).join("");
+
+  const weeklySections = rows.map((row) => {
+    const weeklyRows = row.weeklyDetails.length
+      ? row.weeklyDetails.map((week) => {
+          const actualDates = week.dates.map((dateInfo) => dateInfo.date).join(", ");
+          const propertiesServiced = week.dates
+            .map((dateInfo) => `${dateInfo.date}: ${dateInfo.propertyList.join(", ") || "None"}`)
+            .join("<br>");
+          const billableTasks = week.dates
+            .map((dateInfo) => `${dateInfo.date}: ${dateInfo.billableTasks}`)
+            .join("<br>");
+          const includedFlexServices = week.dates
+            .map((dateInfo) => `${dateInfo.date}: ${dateInfo.includedFlexServices}`)
+            .join("<br>");
+          const recoveredRevenue = week.dates
+            .map((dateInfo) => `${dateInfo.date}: $${dateInfo.recoveredRevenue.toFixed(2)}`)
+            .join("<br>");
+
+          return `
+            <tr>
+              <td>${week.weekOf}</td>
+              <td>${week.scheduledDayLabel}</td>
+              <td>${actualDates || "None"}</td>
+              <td>${propertiesServiced || "None"}</td>
+              <td>${billableTasks || "0"}</td>
+              <td>${includedFlexServices || "0"}</td>
+              <td class="route-frag-money">${recoveredRevenue || "$0.00"}</td>
+            </tr>
+          `;
+        }).join("")
+      : `<tr><td colspan="7">No service activity in selected range.</td></tr>`;
+
+    return `
+      <section class="route-frag-weekly-group">
+        <h3>${row.clientName}</h3>
+        <table class="route-frag-table route-frag-weekly-table">
+          <thead>
+            <tr>
+              <th>Week Of</th>
+              <th>Scheduled Service Day</th>
+              <th>Actual Service Dates</th>
+              <th>Properties Serviced Each Date</th>
+              <th>Billable Tasks on That Date</th>
+              <th>Included Flex Services</th>
+              <th>Recovered Revenue</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${weeklyRows}
+          </tbody>
+        </table>
+      </section>
+    `;
+  }).join("");
+
+  routeFragContainer.innerHTML = `
+    <div class="route-frag-summary-card">
+      <div class="route-frag-meta">Date Range: ${startDate} to ${endDate}</div>
+      <table class="route-frag-table">
+        <thead>
+          <tr>
+            <th>Client Name</th>
+            <th>Property Count</th>
+            <th>Scheduled Route Days</th>
+            <th>Actual Route Days</th>
+            <th>Additional Route Days</th>
+            <th>Billable Events</th>
+            <th>Included Flex Services</th>
+            <th>Potential Standard Services</th>
+            <th>Flex Rate</th>
+            <th>Recovered Revenue</th>
+            <th>Unrecovered Route Days</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${summaryRows}
+        </tbody>
+      </table>
+      <div class="route-frag-meta">Included Flex Services: Guest Ready services provided at no additional charge by flexing service within the coverage window.</div>
+      <div class="route-frag-meta">Potential Standard Services: The number of standard weekly service opportunities based on property count and weeks analyzed.</div>
+      <div class="route-frag-meta">Flex Rate: Percentage of standard service opportunities that required schedule flexibility to accommodate guest arrivals.</div>
+    </div>
+    <div class="route-frag-weekly-wrap">
+      ${weeklySections}
+    </div>
+  `;
+}
+
 function shouldShowReconcileForTask(task) {
   if (!task) return false;
   if (task.service_type === "Weekly Standard") return false;
@@ -2659,6 +3025,7 @@ function renderProperties() {
         </div>
 
         <div class="property-meta">
+          <div><strong>Client Name:</strong> ${property.client_name || ""}</div>
           <div><strong>Address:</strong> ${property.address || "Not entered"}</div>
           <div><strong>Standard Service Day:</strong> ${property.standard_service_day || "Wednesday"}</div>
           <div><strong>Guest Ready Coverage Rule:</strong> ${getCoverageRuleLabel(getCoverageRuleForProperty(property))}</div>

@@ -48,6 +48,7 @@
     <button type="button" class="view-btn" data-view="week">Week View</button>
     <button type="button" class="view-btn" data-view="properties">Properties</button>
     <button type="button" class="view-btn" data-view="billing">Billing Report</button>
+    <button type="button" class="view-btn" data-view="routeFragmentation">Route Fragmentation</button>
     <button type="button" class="view-btn" data-view="messages">Messages</button>
     <button type="button" class="view-btn" data-view="settings">Settings</button>
   </div>
@@ -140,6 +141,33 @@
     <div id="billingReportContainer" class="billing-report-paper"></div>
   </section>
 
+  <section id="routeFragmentationView" class="view-panel">
+    <div class="view-header">
+      <h2>Route Fragmentation</h2>
+      <p>Measure additional route days and revenue recovery by client/property group.</p>
+    </div>
+
+    <div class="route-fragmentation-filters">
+      <div class="filter-group">
+        <label for="routeFragStartDate">Start Date:</label>
+        <input id="routeFragStartDate" type="date">
+      </div>
+      <div class="filter-group">
+        <label for="routeFragEndDate">End Date:</label>
+        <input id="routeFragEndDate" type="date">
+      </div>
+      <div class="filter-group">
+        <label for="routeFragClientSelect">Client:</label>
+        <select id="routeFragClientSelect">
+          <option value="">All Clients</option>
+        </select>
+      </div>
+      <button type="button" id="routeFragRunBtn">Run Analysis</button>
+    </div>
+
+    <div id="routeFragContainer"></div>
+  </section>
+
   <section id="messagesView" class="view-panel">
     <div class="view-header">
       <h2>Messages</h2>
@@ -219,6 +247,9 @@
 
     <label>Property Name</label>
     <input id="propertyName">
+
+    <label>Client Name</label>
+    <input id="propertyClientName" placeholder="Optional client/owner group name">
 
     <label>Address</label>
     <input id="propertyAddress">
