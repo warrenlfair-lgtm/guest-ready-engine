@@ -5,8 +5,8 @@ let operationsReminders = [];
 let chemicalUsageEntries = [];
 
 const DEFAULT_COMPANY_PROFILE = {
-  company_name: "Guest Ready Pool Pros",
-  tagline: "Vacation Rental Pool Service Specialists",
+  company_name: "Guest Ready™",
+  tagline: "Powered by Guest Engine™",
   phone_number: "",
   email: "",
   logo_url: "",
@@ -1258,7 +1258,7 @@ function applyCompanyProfileToApp() {
   }
   applyImageSource(companyHeaderLogo, companyProfile.logo_url);
   renderMessagesBranding();
-  document.title = `${companyProfile.company_name} - Guest Ready Engine`;
+  document.title = companyProfile.company_name || "Guest Ready™";
 }
 
 function renderCompanyProfileSettings() {

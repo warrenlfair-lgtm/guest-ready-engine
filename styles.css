@@ -1899,6 +1899,52 @@ textarea{
     line-height: 1.45;
 }
 
+.app-brand-footer {
+    margin-top: 28px;
+    padding: 14px 8px 4px;
+    border-top: 1px solid #dbe2ea;
+    text-align: center;
+    color: #64748b;
+    font-size: 12px;
+    line-height: 1.45;
+}
+
+.app-brand-footer-title,
+.app-brand-footer-tagline {
+    color: #475569;
+    font-weight: 600;
+    cursor: help;
+}
+
+.app-brand-footer-copy {
+    color: #64748b;
+}
+
+@media (max-width: 640px) {
+    .app-brand-footer {
+        margin-top: 22px;
+        font-size: 11px;
+        padding-left: 4px;
+        padding-right: 4px;
+    }
+}
+
+@media (prefers-color-scheme: dark) {
+    .app-brand-footer {
+        border-top-color: #334155;
+        color: #94a3b8;
+    }
+
+    .app-brand-footer-title,
+    .app-brand-footer-tagline {
+        color: #cbd5e1;
+    }
+
+    .app-brand-footer-copy {
+        color: #94a3b8;
+    }
+}
+
 @media print {
     body {
         background: white;

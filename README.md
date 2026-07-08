@@ -1,4 +1,4 @@
-# Guest Ready Engine
+# Guest Ready™
 
 Vacation Rental Pool Service Scheduling Platform
 

@@ -1,4 +1,4 @@
--- Create the operations_reminders table for Guest Ready Engine
+-- Create the operations_reminders table for Guest Ready™
 -- This table stores operational reminders separate from service tasks
 
 CREATE TABLE IF NOT EXISTS operations_reminders (

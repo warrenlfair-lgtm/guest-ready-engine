@@ -16,7 +16,7 @@ ADD COLUMN IF NOT EXISTS admin_pin TEXT;
 
 -- Ensure one default row exists
 INSERT INTO company_profile (id, company_name, tagline, admin_pin)
-VALUES (1, 'Guest Ready Pool Pros', 'Vacation Rental Pool Service Specialists', '1234')
+VALUES (1, 'Guest Ready™', 'Powered by Guest Engine™', '1234')
 ON CONFLICT (id) DO NOTHING;
 
 UPDATE company_profile
