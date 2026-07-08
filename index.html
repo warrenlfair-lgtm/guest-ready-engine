@@ -26,15 +26,6 @@
       <h2 id="propertyCount">0</h2>
       <p>Properties</p>
     </div>
-
-    <div class="summary-card">
-      <h2 class="billing-card-title">Current Month Billing</h2>
-      <p class="summary-card-sublabel" id="currentMonthLabel">June 2026</p>
-      <div class="billing-card-content">
-        <div class="billing-amount">$<span id="invoicedAmount">0</span> of $<span id="totalBillableAmount">0</span> invoiced</div>
-        <div class="billing-count"><span id="invoicedTaskCount">0</span> of <span id="totalTaskCount">0</span> tasks billed</div>
-      </div>
-    </div>
   </div>
 
   <div class="top-actions">
@@ -119,6 +110,22 @@
       <div class="billing-header-actions">
         <button type="button" onclick="navigateToView('reports')">Back to Reports</button>
         <button type="button" id="billingPrintBtn" class="print-btn">Print / Save as PDF</button>
+      </div>
+    </div>
+
+    <div class="billing-summary-widget">
+      <h3>Current Month Billing Summary</h3>
+      <p class="summary-card-sublabel" id="currentMonthLabel">June 2026</p>
+      <div class="billing-card-content">
+        <div class="billing-amount">$<span id="invoicedAmount">0</span> of $<span id="totalBillableAmount">0</span> invoiced</div>
+        <div class="billing-count"><span id="invoicedTaskCount">0</span> of <span id="totalTaskCount">0</span> tasks billed</div>
+      </div>
+      <div class="billing-progress-row">
+        <span>Billing Progress</span>
+        <span id="billingProgressLabel">0%</span>
+      </div>
+      <div class="billing-progress-track" aria-hidden="true">
+        <div id="billingProgressFill" class="billing-progress-fill"></div>
       </div>
     </div>
 

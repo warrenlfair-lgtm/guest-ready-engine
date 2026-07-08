@@ -2132,11 +2132,23 @@ function refreshBillingCard() {
     }
   });
   
-  // Update billing card display
-  document.getElementById("invoicedAmount").textContent = invoicedAmount;
-  document.getElementById("totalBillableAmount").textContent = totalBillableAmount;
-  document.getElementById("invoicedTaskCount").textContent = invoicedTaskCount;
-  document.getElementById("totalTaskCount").textContent = totalBillableTaskCount;
+  const invoicedAmountEl = document.getElementById("invoicedAmount");
+  const totalBillableAmountEl = document.getElementById("totalBillableAmount");
+  const invoicedTaskCountEl = document.getElementById("invoicedTaskCount");
+  const totalTaskCountEl = document.getElementById("totalTaskCount");
+  const billingProgressLabelEl = document.getElementById("billingProgressLabel");
+  const billingProgressFillEl = document.getElementById("billingProgressFill");
+
+  const progressPercent = totalBillableAmount > 0
+    ? Math.min(100, Math.round((invoicedAmount / totalBillableAmount) * 100))
+    : 0;
+
+  if (invoicedAmountEl) invoicedAmountEl.textContent = invoicedAmount;
+  if (totalBillableAmountEl) totalBillableAmountEl.textContent = totalBillableAmount;
+  if (invoicedTaskCountEl) invoicedTaskCountEl.textContent = invoicedTaskCount;
+  if (totalTaskCountEl) totalTaskCountEl.textContent = totalBillableTaskCount;
+  if (billingProgressLabelEl) billingProgressLabelEl.textContent = `${progressPercent}%`;
+  if (billingProgressFillEl) billingProgressFillEl.style.width = `${progressPercent}%`;
 }
 
 function getPropertyName(propertyId) {
@@ -3515,6 +3527,7 @@ function getAlertBadgeForTask(task) {
 }
 
 function renderOperationsRemindersWidget() {
+  const today = new Date();
   today.setHours(0, 0, 0, 0);
 
   const openReminders = operationsReminders.filter(r => r.status === "Open");
@@ -3809,7 +3822,10 @@ function renderProperties() {
 
   const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
   const monthLabel = `${monthNames[currentMonth]} ${currentYear}`;
-  document.getElementById("currentMonthLabel").textContent = monthLabel;
+  const currentMonthLabelEl = document.getElementById("currentMonthLabel");
+  if (currentMonthLabelEl) {
+    currentMonthLabelEl.textContent = monthLabel;
+  }
 
   refreshBillingCard();
 
