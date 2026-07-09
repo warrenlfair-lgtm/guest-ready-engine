@@ -376,52 +376,57 @@
 </div>
 
 <div id="cleaningModal" class="modal hidden">
-  <div class="modal-card">
-    <h2>Add Cleaning</h2>
-
-    <label>Service Date</label>
-    <input id="cleaningDate" type="date">
-
-    <label>Task Type</label>
-    <select id="cleaningServiceType">
-      <option value="Weekly Standard">Weekly Standard</option>
-      <option value="Guest Ready">Guest Ready</option>
-      <option value="Manual">Manual</option>
-      <option value="Off-Cycle">Off-Cycle</option>
-    </select>
-
-    <label>Status</label>
-    <select id="cleaningStatus">
-      <option value="Scheduled">Scheduled</option>
-      <option value="In Progress">In Progress</option>
-      <option value="Completed">Completed</option>
-      <option value="Cancelled">Cancelled</option>
-    </select>
-
-    <label>Technician</label>
-    <input id="cleaningTechnician" placeholder="Optional">
-
-    <label>Charge</label>
-    <input id="cleaningCharge" type="number" value="0">
-
-    <label>Notes</label>
-    <textarea id="cleaningNotes" rows="3"></textarea>
-
-    <div class="chemical-usage-section">
-      <div class="chemical-usage-header-row">
-        <div>
-          <h3>Chemical Usage</h3>
-          <p>Track chemicals used during this service visit.</p>
-        </div>
-        <button type="button" id="addChemicalBtn">+ Add Chemical</button>
-      </div>
-      <div id="chemicalUsageTaskHint" class="chemical-usage-hint hidden"></div>
-      <div id="chemicalUsageList" class="chemical-usage-list"></div>
+  <div class="modal-card edit-task-modal-card">
+    <div class="edit-task-modal-header">
+      <h2 id="cleaningModalTitle">Edit Task</h2>
+      <button id="closeCleaningXBtn" type="button" class="modal-close-x" aria-label="Close edit task panel">×</button>
     </div>
 
-    <div class="modal-actions">
-      <button id="cancelCleaningBtn">Cancel</button>
-      <button id="saveCleaningBtn">Save Cleaning</button>
+    <div class="edit-task-modal-body">
+      <label>Service Date</label>
+      <input id="cleaningDate" type="date">
+
+      <label>Task Type</label>
+      <select id="cleaningServiceType">
+        <option value="Weekly Standard">Weekly Standard</option>
+        <option value="Guest Ready">Guest Ready</option>
+        <option value="Manual">Manual</option>
+        <option value="Off-Cycle">Off-Cycle</option>
+      </select>
+
+      <label>Status</label>
+      <select id="cleaningStatus">
+        <option value="Scheduled">Scheduled</option>
+        <option value="In Progress">In Progress</option>
+        <option value="Completed">Completed</option>
+        <option value="Cancelled">Cancelled</option>
+      </select>
+
+      <label>Technician</label>
+      <input id="cleaningTechnician" placeholder="Optional">
+
+      <label>Charge</label>
+      <input id="cleaningCharge" type="number" value="0">
+
+      <label>Notes</label>
+      <textarea id="cleaningNotes" rows="3"></textarea>
+
+      <div class="chemical-usage-section">
+        <div class="chemical-usage-header-row">
+          <div>
+            <h3>Chemical Usage</h3>
+            <p>Track chemicals used during this service visit.</p>
+          </div>
+          <button type="button" id="addChemicalBtn">+ Add Chemical</button>
+        </div>
+        <div id="chemicalUsageTaskHint" class="chemical-usage-hint hidden"></div>
+        <div id="chemicalUsageList" class="chemical-usage-list"></div>
+      </div>
+    </div>
+
+    <div class="modal-actions edit-task-modal-footer">
+      <button id="cancelCleaningBtn" type="button">Cancel</button>
+      <button id="saveCleaningBtn" type="button">Save Task</button>
     </div>
   </div>
 </div>

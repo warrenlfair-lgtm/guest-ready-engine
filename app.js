@@ -21,6 +21,7 @@ let editingCleaningId = null;
 let editingReminderPropertyId = null;
 let editingReminderId = null;
 let editingChemicalUsageId = null;
+let cleaningModalInitialState = null;
 
 let selectedPropertyFilter = "";
 let selectedMonthFilter = "current";
@@ -66,6 +67,8 @@ const statusMessage = document.getElementById("statusMessage");
 const cleaningModal = document.getElementById("cleaningModal");
 const cancelCleaningBtn = document.getElementById("cancelCleaningBtn");
 const saveCleaningBtn = document.getElementById("saveCleaningBtn");
+const closeCleaningXBtn = document.getElementById("closeCleaningXBtn");
+const cleaningModalTitle = document.getElementById("cleaningModalTitle");
 
 const propertyName = document.getElementById("propertyName");
 const propertyClientName = document.getElementById("propertyClientName");
@@ -168,6 +171,25 @@ savePropertyBtn.onclick = saveProperty;
 
 cancelCleaningBtn.onclick = closeCleaningModal;
 saveCleaningBtn.onclick = saveCleaningTask;
+
+if (closeCleaningXBtn) {
+  closeCleaningXBtn.addEventListener("click", closeCleaningModal);
+}
+
+if (cleaningModal) {
+  cleaningModal.addEventListener("click", (event) => {
+    if (event.target === cleaningModal) {
+      closeCleaningModal();
+    }
+  });
+}
+
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return;
+  if (cleaningModal?.classList.contains("hidden")) return;
+  event.preventDefault();
+  closeCleaningModal();
+});
 
 if (addChemicalBtn) {
   addChemicalBtn.addEventListener("click", () => openChemicalUsageModal());
@@ -598,6 +620,9 @@ function openCleaningModal(propertyId) {
 
   selectedCleaningPropertyId = propertyId;
   editingCleaningId = null;
+  if (cleaningModalTitle) {
+    cleaningModalTitle.textContent = "Add Task";
+  }
 
   cleaningDate.value = new Date().toISOString().split("T")[0];
   cleaningServiceType.value = "Manual";
@@ -609,6 +634,7 @@ function openCleaningModal(propertyId) {
   renderChemicalUsageForCurrentTask();
 
   cleaningModal.classList.remove("hidden");
+  cleaningModalInitialState = getCleaningModalStateSnapshot();
 }
 
 function openEditCleaning(taskId) {
@@ -617,6 +643,9 @@ function openEditCleaning(taskId) {
 
   editingCleaningId = task.id;
   selectedCleaningPropertyId = task.property_id;
+  if (cleaningModalTitle) {
+    cleaningModalTitle.textContent = "Edit Task";
+  }
 
   cleaningDate.value = task.scheduled_date || task.service_date || "";
   cleaningServiceType.value = task.service_type || "Manual";
@@ -628,12 +657,40 @@ function openEditCleaning(taskId) {
   renderChemicalUsageForCurrentTask();
 
   cleaningModal.classList.remove("hidden");
+  cleaningModalInitialState = getCleaningModalStateSnapshot();
 }
 
-function closeCleaningModal() {
+function getCleaningModalStateSnapshot() {
+  return {
+    propertyId: selectedCleaningPropertyId || "",
+    editingTaskId: editingCleaningId || "",
+    serviceDate: String(cleaningDate?.value || ""),
+    serviceType: String(cleaningServiceType?.value || ""),
+    status: String(cleaningStatus?.value || ""),
+    technician: String(cleaningTechnician?.value || "").trim(),
+    charge: String(cleaningCharge?.value || ""),
+    notes: String(cleaningNotes?.value || "").trim(),
+  };
+}
+
+function hasUnsavedCleaningModalChanges() {
+  if (!cleaningModalInitialState) return false;
+  const currentState = getCleaningModalStateSnapshot();
+  return JSON.stringify(currentState) !== JSON.stringify(cleaningModalInitialState);
+}
+
+function closeCleaningModal(options = {}) {
+  const forceClose = options?.force === true;
+
+  if (!forceClose && hasUnsavedCleaningModalChanges()) {
+    const confirmed = confirm("You have unsaved task changes. Close without saving?");
+    if (!confirmed) return;
+  }
+
   cleaningModal.classList.add("hidden");
   closeChemicalUsageModal();
   editingCleaningId = null;
+  cleaningModalInitialState = null;
   renderChemicalUsageForCurrentTask();
 }
 
@@ -1956,7 +2013,7 @@ async function saveCleaningTask() {
   }
 
   editingCleaningId = null;
-  closeCleaningModal();
+  closeCleaningModal({ force: true });
   await loadData();
 }
 
