@@ -4,6 +4,8 @@ let reservations = [];
 let operationsReminders = [];
 let chemicalUsageEntries = [];
 let chemicals = [];
+let invoices = [];
+let currentInvoiceDraft = null;
 
 const DEFAULT_COMPANY_PROFILE = {
   company_name: "Guest Ready™",
@@ -38,11 +40,17 @@ let latestChemicalReportState = {
   selectedChemical: "",
   rows: [],
 };
+let latestInvoiceCandidates = {
+  tasks: [],
+  chemicalRows: [],
+};
 let weekViewMode = localStorage.getItem("guestReadyDefaultWeekView") || "calendar";
 const PROTECTED_VIEWS = new Set(["reports"]);
 let isProtectedAccessUnlocked = false;
 let pinModalResolver = null;
 const MANUAL_BILLING_OVERRIDE_TAG = "[Manual Override]";
+const INVOICE_STATUSES = ["draft", "finalized", "sent", "paid", "void"];
+const DEFAULT_INVOICE_TERMS = "Net 15";
 const CHEMICAL_UNIT_OPTIONS = ["gallons", "pounds", "ounces", "tablets", "bags", "quarts"];
 const DEFAULT_CHEMICAL_CATALOG = [
   { name: "Liquid Chlorine", default_unit: "gallons", cost_per_unit: 0, billable_rate_per_unit: 0, is_billable: true },
@@ -75,6 +83,10 @@ const cleaningModalTitle = document.getElementById("cleaningModalTitle");
 
 const propertyName = document.getElementById("propertyName");
 const propertyClientName = document.getElementById("propertyClientName");
+const propertyBillingCompanyName = document.getElementById("propertyBillingCompanyName");
+const propertyBillingEmail = document.getElementById("propertyBillingEmail");
+const propertyBillingAddress = document.getElementById("propertyBillingAddress");
+const propertyAccountReference = document.getElementById("propertyAccountReference");
 const propertyAddress = document.getElementById("propertyAddress");
 const propertyIcal = document.getElementById("propertyIcal");
 const safetycultureChecklistUrl = document.getElementById("safetycultureChecklistUrl");
@@ -82,6 +94,11 @@ const standardDay = document.getElementById("standardDay");
 const coverageDays = document.getElementById("coverageDays");
 const coverageRule = document.getElementById("coverageRule");
 const offCycleCharge = document.getElementById("offCycleCharge");
+const propertyDefaultCleaningRate = document.getElementById("propertyDefaultCleaningRate");
+const propertyTaxable = document.getElementById("propertyTaxable");
+const propertyTaxRate = document.getElementById("propertyTaxRate");
+const propertyPaymentTerms = document.getElementById("propertyPaymentTerms");
+const propertyInvoiceNotes = document.getElementById("propertyInvoiceNotes");
 
 const cleaningDate = document.getElementById("cleaningDate");
 const cleaningServiceType = document.getElementById("cleaningServiceType");
@@ -134,6 +151,12 @@ const billingReconciledOnly = document.getElementById("billingReconciledOnly");
 const billingRunBtn = document.getElementById("billingRunBtn");
 const billingPrintBtn = document.getElementById("billingPrintBtn");
 const billingReportContainer = document.getElementById("billingReportContainer");
+const invoiceIncludeNonBillableChemicals = document.getElementById("invoiceIncludeNonBillableChemicals");
+const invoiceTaxEnabled = document.getElementById("invoiceTaxEnabled");
+const generateInvoiceBtn = document.getElementById("generateInvoiceBtn");
+const invoicePreviewContainer = document.getElementById("invoicePreviewContainer");
+const invoiceHistoryContainer = document.getElementById("invoiceHistoryContainer");
+const invoiceStatusFilter = document.getElementById("invoiceStatusFilter");
 const routeFragStartDate = document.getElementById("routeFragStartDate");
 const routeFragEndDate = document.getElementById("routeFragEndDate");
 const routeFragClientSelect = document.getElementById("routeFragClientSelect");
@@ -285,18 +308,56 @@ if (billingPrintBtn) {
 
 if (billingStartDate) {
   billingStartDate.addEventListener("change", renderBillingReport);
+  billingStartDate.addEventListener("change", () => {
+    currentInvoiceDraft = null;
+    renderInvoicePreview();
+  });
 }
 
 if (billingEndDate) {
   billingEndDate.addEventListener("change", renderBillingReport);
+  billingEndDate.addEventListener("change", () => {
+    currentInvoiceDraft = null;
+    renderInvoicePreview();
+  });
 }
 
 if (billingPropertySelect) {
   billingPropertySelect.addEventListener("change", renderBillingReport);
 }
 
+if (billingPropertySelect) {
+  billingPropertySelect.addEventListener("change", () => {
+    currentInvoiceDraft = null;
+    renderInvoicePreview();
+    renderInvoiceHistory();
+  });
+}
+
 if (billingReconciledOnly) {
   billingReconciledOnly.addEventListener("change", renderBillingReport);
+}
+
+if (generateInvoiceBtn) {
+  generateInvoiceBtn.addEventListener("click", generateInvoicePreviewFromFilters);
+}
+
+if (invoiceStatusFilter) {
+  invoiceStatusFilter.addEventListener("change", renderInvoiceHistory);
+}
+
+if (invoiceIncludeNonBillableChemicals) {
+  invoiceIncludeNonBillableChemicals.addEventListener("change", () => {
+    if (!currentInvoiceDraft) return;
+    generateInvoicePreviewFromFilters();
+  });
+}
+
+if (invoiceTaxEnabled) {
+  invoiceTaxEnabled.addEventListener("change", () => {
+    if (!currentInvoiceDraft) return;
+    generateInvoicePreviewFromFilters();
+  });
 }
 
 if (routeFragRunBtn) {
@@ -405,6 +466,8 @@ function showView(viewName) {
 
   if (viewName === "billing") {
     renderBillingReport();
+    renderInvoicePreview();
+    renderInvoiceHistory();
   }
 
   if (viewName === "routeFragmentation") {
@@ -761,6 +824,14 @@ function initializeBillingReportFilters() {
   if (billingReconciledOnly) {
     billingReconciledOnly.checked = true;
   }
+
+  if (invoiceIncludeNonBillableChemicals) {
+    invoiceIncludeNonBillableChemicals.checked = false;
+  }
+
+  if (invoiceTaxEnabled) {
+    invoiceTaxEnabled.value = "property";
+  }
 }
 
 function initializeRouteFragmentationFilters() {
@@ -787,11 +858,11 @@ function initializeChemicalReportFilters() {
 
 function runPrintForView(viewClassName) {
   const body = document.body;
-  body.classList.remove("print-view-billing", "print-view-chemical");
+  body.classList.remove("print-view-billing", "print-view-chemical", "print-view-invoice");
   body.classList.add(viewClassName);
   window.print();
   setTimeout(() => {
-    body.classList.remove("print-view-billing", "print-view-chemical");
+    body.classList.remove("print-view-billing", "print-view-chemical", "print-view-invoice");
   }, 250);
 }
 
@@ -821,6 +892,10 @@ function openEditModal(id) {
 
   propertyName.value = property.property_name || "";
   propertyClientName.value = property.client_name || "";
+  if (propertyBillingCompanyName) propertyBillingCompanyName.value = property.billing_company_name || "";
+  if (propertyBillingEmail) propertyBillingEmail.value = property.billing_email || "";
+  if (propertyBillingAddress) propertyBillingAddress.value = property.billing_address || "";
+  if (propertyAccountReference) propertyAccountReference.value = property.billing_account_reference || "";
   propertyAddress.value = property.address || "";
   propertyIcal.value = property.ical_url || "";
   if (safetycultureChecklistUrl) {
@@ -832,6 +907,11 @@ function openEditModal(id) {
     coverageRule.value = getCoverageRuleForProperty(property);
   }
   offCycleCharge.value = property.default_off_cycle_charge || 65;
+  if (propertyDefaultCleaningRate) propertyDefaultCleaningRate.value = Number(property.default_cleaning_rate || 0);
+  if (propertyTaxable) propertyTaxable.value = property.billing_taxable === false ? "no" : "yes";
+  if (propertyTaxRate) propertyTaxRate.value = Number(property.billing_tax_rate || 0);
+  if (propertyPaymentTerms) propertyPaymentTerms.value = property.payment_terms || DEFAULT_INVOICE_TERMS;
+  if (propertyInvoiceNotes) propertyInvoiceNotes.value = property.invoice_notes || "";
 
   propertyModal.classList.remove("hidden");
 }
@@ -1092,6 +1172,7 @@ async function loadData() {
   await loadOperationsReminders();
   await loadChemicals();
   await loadChemicalUsageEntries();
+  await loadInvoices();
   renderChemicalSettingsSection();
   initializeChemicalUsageOptions();
   const monthForAutoGeneration = ["current", "next", "previous"].includes(selectedMonthFilter)
@@ -1107,6 +1188,8 @@ async function loadData() {
   renderProperties();
   renderOperationsRemindersWidget();
   renderBillingReport();
+  renderInvoicePreview();
+  renderInvoiceHistory();
   renderRouteFragmentationAnalytics();
   if (!document.getElementById("chemicalReportWorkspace")?.classList.contains("hidden")) {
     renderChemicalUsageReport();
@@ -2275,9 +2358,14 @@ async function loadOperationsReminders() {
 
 async function saveProperty() {
   const selectedCoverageRule = coverageRule ? coverageRule.value : "both";
+  const taxable = String(propertyTaxable?.value || "yes") === "yes";
   const propertyData = {
     property_name: propertyName.value.trim(),
     client_name: String(propertyClientName?.value || "").trim() || null,
+    billing_company_name: String(propertyBillingCompanyName?.value || "").trim() || null,
+    billing_email: String(propertyBillingEmail?.value || "").trim() || null,
+    billing_address: String(propertyBillingAddress?.value || "").trim() || null,
+    billing_account_reference: String(propertyAccountReference?.value || "").trim() || null,
     address: propertyAddress.value.trim(),
     ical_url: propertyIcal.value.trim(),
     safetyculture_checklist_url: normalizeSafetyCultureUrl(safetycultureChecklistUrl?.value || "") || null,
@@ -2285,6 +2373,11 @@ async function saveProperty() {
     coverage_days: selectedCoverageRule === "none" ? 0 : 1,
     coverage_rule: selectedCoverageRule,
     default_off_cycle_charge: Number(offCycleCharge.value),
+    default_cleaning_rate: Number(propertyDefaultCleaningRate?.value || 0),
+    billing_taxable: taxable,
+    billing_tax_rate: taxable ? Number(propertyTaxRate?.value || 0) : 0,
+    payment_terms: String(propertyPaymentTerms?.value || "").trim() || DEFAULT_INVOICE_TERMS,
+    invoice_notes: String(propertyInvoiceNotes?.value || "").trim() || null,
     active: true
   };
 
@@ -2306,10 +2399,28 @@ async function saveProperty() {
       .insert([propertyData]);
   }
 
-  const safetyCultureColumnMissing = String(result?.error?.message || "").toLowerCase().includes("safetyculture_checklist_url");
-  if (result.error && safetyCultureColumnMissing) {
-    const legacyPropertyData = { ...propertyData };
-    delete legacyPropertyData.safetyculture_checklist_url;
+  const optionalPropertyColumns = [
+    "safetyculture_checklist_url",
+    "billing_company_name",
+    "billing_email",
+    "billing_address",
+    "billing_account_reference",
+    "default_cleaning_rate",
+    "billing_taxable",
+    "billing_tax_rate",
+    "payment_terms",
+    "invoice_notes",
+  ];
+
+  let legacyPropertyData = { ...propertyData };
+  while (result.error) {
+    const message = String(result.error.message || "").toLowerCase();
+    const missingColumn = optionalPropertyColumns.find((column) => message.includes(column));
+    if (!missingColumn || !(missingColumn in legacyPropertyData)) {
+      break;
+    }
+
+    delete legacyPropertyData[missingColumn];
 
     if (editingPropertyId) {
       result = await supabaseClient
@@ -2700,6 +2811,10 @@ function clearPropertyForm() {
   if (propertyClientName) {
     propertyClientName.value = "";
   }
+  if (propertyBillingCompanyName) propertyBillingCompanyName.value = "";
+  if (propertyBillingEmail) propertyBillingEmail.value = "";
+  if (propertyBillingAddress) propertyBillingAddress.value = "";
+  if (propertyAccountReference) propertyAccountReference.value = "";
   propertyAddress.value = "";
   propertyIcal.value = "";
   if (safetycultureChecklistUrl) {
@@ -2711,6 +2826,11 @@ function clearPropertyForm() {
     coverageRule.value = "both";
   }
   offCycleCharge.value = 65;
+  if (propertyDefaultCleaningRate) propertyDefaultCleaningRate.value = 0;
+  if (propertyTaxable) propertyTaxable.value = "yes";
+  if (propertyTaxRate) propertyTaxRate.value = 0;
+  if (propertyPaymentTerms) propertyPaymentTerms.value = DEFAULT_INVOICE_TERMS;
+  if (propertyInvoiceNotes) propertyInvoiceNotes.value = "";
 }
 
 function toggleInvoiceMarker(taskId) {
@@ -2727,7 +2847,10 @@ function toggleInvoiceMarker(taskId) {
   // Update database
   supabaseClient
     .from("cleaning_tasks")
-    .update({ invoiced: newInvoiced })
+    .update({
+      invoiced: newInvoiced,
+      invoiced_invoice_id: newInvoiced ? (task.invoiced_invoice_id || null) : null,
+    })
     .eq("id", taskId)
     .then(({ error }) => {
       if (error) {
@@ -3767,6 +3890,779 @@ function renderBillingReport() {
   `;
 }
 
+async function loadInvoices() {
+  const { data, error } = await supabaseClient
+    .from("invoices")
+    .select("*")
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    const missingTable = String(error.message || "").toLowerCase().includes("invoices");
+    if (!missingTable) {
+      console.warn("Could not load invoices:", error.message);
+    }
+    invoices = [];
+    return;
+  }
+
+  invoices = data || [];
+}
+
+function isTaskAlreadyInvoiced(task) {
+  return isTaskReconciled(task) || Boolean(task?.invoiced_invoice_id);
+}
+
+function isChemicalUsageAlreadyInvoiced(entry) {
+  const invoiced = entry?.invoiced === true || entry?.invoiced === 1 || entry?.invoiced === "true";
+  return invoiced || Boolean(entry?.invoiced_invoice_id);
+}
+
+function getInvoiceCandidateTasks({ propertyId, startDate, endDate }) {
+  return cleaningTasks
+    .filter((task) => String(task.status || "").toLowerCase() === "completed")
+    .filter((task) => {
+      const taskDate = task.service_date || task.scheduled_date;
+      return Boolean(taskDate && taskDate >= startDate && taskDate <= endDate);
+    })
+    .filter((task) => !propertyId || normalizePropertyId(task.property_id) === normalizePropertyId(propertyId))
+    .filter((task) => getTaskBillingAmount(task) > 0)
+    .filter((task) => !isTaskAlreadyInvoiced(task))
+    .sort((a, b) => String(a.service_date || a.scheduled_date || "").localeCompare(String(b.service_date || b.scheduled_date || "")));
+}
+
+function getInvoiceChemicalCandidates(tasks, { includeNonBillableChemicals = false } = {}) {
+  const taskIdSet = new Set(tasks.map((task) => task.id));
+
+  return chemicalUsageEntries
+    .filter((entry) => taskIdSet.has(entry.task_id))
+    .filter((entry) => !isChemicalUsageAlreadyInvoiced(entry))
+    .map((entry) => {
+      const pricing = getChemicalChargeContext(entry);
+      const includeRow = pricing.isBillable || includeNonBillableChemicals;
+      if (!includeRow) return null;
+      const quantity = Number(entry.quantity || 0);
+      const rate = pricing.isBillable ? Number(pricing.rate || 0) : 0;
+      const amount = Number((quantity * rate).toFixed(2));
+      return {
+        sourceId: entry.id,
+        taskId: entry.task_id || null,
+        description: `${entry.chemical_name || "Chemical"} usage`,
+        serviceDate: entry.service_date || "",
+        quantity,
+        unit: entry.unit || "unit",
+        rate,
+        amount,
+        itemType: "chemical",
+      };
+    })
+    .filter(Boolean);
+}
+
+function getInvoiceTermsDays(terms) {
+  const value = String(terms || "").trim().toLowerCase();
+  const match = value.match(/(\d+)/);
+  if (match) return Number(match[1]);
+  return 15;
+}
+
+function formatInvoiceDate(date) {
+  return formatDateValue(date || new Date());
+}
+
+function buildDraftInvoiceModel({ property, startDate, endDate, includeNonBillableChemicals = false, taxOverride = "property" }) {
+  const invoiceDate = formatInvoiceDate(new Date());
+  const tasks = getInvoiceCandidateTasks({ propertyId: property?.id || "", startDate, endDate });
+  const taskItems = tasks.map((task) => {
+    const amount = Number(getTaskBillingAmount(task) || 0);
+    return {
+      sourceId: task.id,
+      taskId: task.id,
+      chemicalUsageId: null,
+      description: `${task.service_type || "Cleaning Service"} - ${getPropertyName(task.property_id)}`,
+      serviceDate: task.service_date || task.scheduled_date || "",
+      quantity: 1,
+      unit: "service",
+      rate: amount,
+      amount,
+      itemType: "cleaning",
+    };
+  });
+
+  const chemicalItems = getInvoiceChemicalCandidates(tasks, { includeNonBillableChemicals }).map((item) => ({
+    sourceId: item.sourceId,
+    taskId: item.taskId,
+    chemicalUsageId: item.sourceId,
+    description: item.description,
+    serviceDate: item.serviceDate,
+    quantity: item.quantity,
+    unit: item.unit,
+    rate: item.rate,
+    amount: item.amount,
+    itemType: "chemical",
+  }));
+
+  latestInvoiceCandidates = {
+    tasks,
+    chemicalRows: chemicalItems,
+  };
+
+  const items = [...taskItems, ...chemicalItems];
+  const subtotal = Number(items.reduce((sum, item) => sum + Number(item.amount || 0), 0).toFixed(2));
+  const propertyTaxable = property?.billing_taxable !== false;
+  const taxable = taxOverride === "yes" ? true : taxOverride === "no" ? false : propertyTaxable;
+  const taxRate = Number(property?.billing_tax_rate || 0);
+  const tax = taxable && taxRate > 0 ? Number((subtotal * (taxRate / 100)).toFixed(2)) : 0;
+  const total = Number((subtotal + tax).toFixed(2));
+
+  const paymentTerms = String(property?.payment_terms || DEFAULT_INVOICE_TERMS).trim() || DEFAULT_INVOICE_TERMS;
+  const dueDate = (() => {
+    const date = parseDateString(invoiceDate);
+    date.setUTCDate(date.getUTCDate() + getInvoiceTermsDays(paymentTerms));
+    return formatDateValue(date);
+  })();
+
+  return {
+    id: null,
+    invoiceNumber: "(pending)",
+    propertyId: property?.id || "",
+    propertyName: property?.property_name || "",
+    clientName: String(property?.client_name || "").trim() || String(property?.billing_company_name || "").trim() || property?.property_name || "Client",
+    billingCompanyName: String(property?.billing_company_name || "").trim(),
+    billingEmail: String(property?.billing_email || "").trim(),
+    billingAddress: String(property?.billing_address || "").trim(),
+    accountReference: String(property?.billing_account_reference || "").trim(),
+    periodStart: startDate,
+    periodEnd: endDate,
+    invoiceDate,
+    dueDate,
+    status: "draft",
+    notes: String(property?.invoice_notes || "").trim(),
+    paymentTerms,
+    taxable,
+    taxRate,
+    includeNonBillableChemicals,
+    items,
+    subtotal,
+    tax,
+    total,
+  };
+}
+
+function recalculateInvoiceDraftTotals() {
+  if (!currentInvoiceDraft) return;
+  currentInvoiceDraft.items = (currentInvoiceDraft.items || []).map((item) => {
+    const quantity = Number(item.quantity || 0);
+    const rate = Number(item.rate || 0);
+    return {
+      ...item,
+      quantity,
+      rate,
+      amount: Number((quantity * rate).toFixed(2)),
+    };
+  });
+
+  currentInvoiceDraft.subtotal = Number(currentInvoiceDraft.items.reduce((sum, item) => sum + Number(item.amount || 0), 0).toFixed(2));
+  currentInvoiceDraft.tax = currentInvoiceDraft.taxable && Number(currentInvoiceDraft.taxRate || 0) > 0
+    ? Number((currentInvoiceDraft.subtotal * (Number(currentInvoiceDraft.taxRate || 0) / 100)).toFixed(2))
+    : 0;
+  currentInvoiceDraft.total = Number((currentInvoiceDraft.subtotal + currentInvoiceDraft.tax).toFixed(2));
+}
+
+function renderInvoicePreview() {
+  if (!invoicePreviewContainer) return;
+
+  if (!currentInvoiceDraft) {
+    invoicePreviewContainer.classList.add("hidden");
+    invoicePreviewContainer.innerHTML = "";
+    return;
+  }
+
+  invoicePreviewContainer.classList.remove("hidden");
+  recalculateInvoiceDraftTotals();
+  const invoice = currentInvoiceDraft;
+
+  const itemRows = invoice.items.length
+    ? invoice.items.map((item, index) => `
+      <tr>
+        <td><input type="text" value="${escapeHtml(item.description || "")}" onchange="updateInvoiceItemField(${index}, 'description', this.value)"></td>
+        <td><input type="date" value="${item.serviceDate || ""}" onchange="updateInvoiceItemField(${index}, 'serviceDate', this.value)"></td>
+        <td><input type="number" step="0.01" value="${Number(item.quantity || 0)}" onchange="updateInvoiceItemField(${index}, 'quantity', this.value)"></td>
+        <td><input type="text" value="${escapeHtml(item.unit || "")}" onchange="updateInvoiceItemField(${index}, 'unit', this.value)"></td>
+        <td><input type="number" step="0.01" value="${Number(item.rate || 0)}" onchange="updateInvoiceItemField(${index}, 'rate', this.value)"></td>
+        <td class="billing-report-amount">${toMoney(item.amount)}</td>
+        <td><button type="button" class="delete-btn" onclick="removeInvoiceItem(${index})">Remove</button></td>
+      </tr>
+    `).join("")
+    : `<tr><td colspan="7">No line items in this invoice.</td></tr>`;
+
+  const propertyName = invoice.propertyName || getPropertyName(invoice.propertyId);
+  const billingName = invoice.billingCompanyName || invoice.clientName;
+
+  invoicePreviewContainer.innerHTML = `
+    <div class="billing-report-sheet invoice-report-sheet">
+      ${renderBillingReportHeader()}
+      <h2 class="billing-report-title">Invoice Preview</h2>
+      <div class="billing-report-meta"><strong>Guest Ready™</strong> | Fair Ventures LLC</div>
+      <div class="billing-report-meta"><strong>Invoice #:</strong> ${escapeHtml(invoice.invoiceNumber || "(pending)")}</div>
+      <div class="billing-report-meta"><strong>Status:</strong> ${escapeHtml(String(invoice.status || "draft").toUpperCase())}</div>
+      <div class="billing-report-meta"><strong>Property:</strong> ${escapeHtml(propertyName || "")}</div>
+      <div class="billing-report-meta"><strong>Client:</strong> <input type="text" value="${escapeHtml(invoice.clientName || "")}" onchange="updateInvoiceDraftField('clientName', this.value)"></div>
+      <div class="billing-report-meta"><strong>Billing Company:</strong> <input type="text" value="${escapeHtml(billingName || "")}" onchange="updateInvoiceDraftField('billingCompanyName', this.value)"></div>
+      <div class="billing-report-meta"><strong>Billing Email:</strong> <input type="email" value="${escapeHtml(invoice.billingEmail || "")}" onchange="updateInvoiceDraftField('billingEmail', this.value)"></div>
+      <div class="billing-report-meta"><strong>Billing Address:</strong> <input type="text" value="${escapeHtml(invoice.billingAddress || "")}" onchange="updateInvoiceDraftField('billingAddress', this.value)"></div>
+      <div class="billing-report-meta"><strong>Account/Ref:</strong> <input type="text" value="${escapeHtml(invoice.accountReference || "")}" onchange="updateInvoiceDraftField('accountReference', this.value)"></div>
+      <div class="billing-report-meta"><strong>Invoice Date:</strong> ${invoice.invoiceDate}</div>
+      <div class="billing-report-meta"><strong>Due Date:</strong> <input type="date" value="${invoice.dueDate || ""}" onchange="updateInvoiceDraftField('dueDate', this.value)"> (${escapeHtml(invoice.paymentTerms || DEFAULT_INVOICE_TERMS)})</div>
+      <div class="billing-report-meta"><strong>Service Period:</strong> ${invoice.periodStart} to ${invoice.periodEnd}</div>
+      <div class="billing-report-meta"><strong>Taxable:</strong> <input type="checkbox" ${invoice.taxable ? "checked" : ""} onchange="updateInvoiceDraftField('taxable', this.checked)"></div>
+      <div class="billing-report-meta"><strong>Tax Rate (%):</strong> <input type="number" min="0" step="0.01" value="${Number(invoice.taxRate || 0)}" onchange="updateInvoiceDraftField('taxRate', this.value)"></div>
+      <div class="billing-report-meta"><strong>Notes:</strong> <textarea rows="3" onchange="updateInvoiceDraftField('notes', this.value)">${escapeHtml(invoice.notes || "")}</textarea></div>
+
+      <div class="invoice-preview-actions">
+        <button type="button" onclick="addInvoiceManualItem()">Add Line Item</button>
+        <button type="button" onclick="addInvoiceCreditItem()">Add Credit/Discount</button>
+        <button type="button" onclick="saveInvoiceDraft()">Save Draft</button>
+        <button type="button" class="checklist-link-btn" onclick="finalizeInvoiceDraft()">Finalize Invoice</button>
+        <button type="button" id="invoicePrintBtn" class="print-btn" onclick="printInvoicePreview()">Print</button>
+        <button type="button" class="print-btn" onclick="downloadInvoicePdf()">Download PDF</button>
+        <button type="button" onclick="shareInvoicePreview()">Email/Share</button>
+        <button type="button" onclick="exportInvoiceCsv()">Export CSV</button>
+      </div>
+
+      <section class="billing-report-group">
+        <h3>Itemized Charges</h3>
+        <table class="billing-report-table invoice-edit-table">
+          <thead>
+            <tr>
+              <th>Description</th>
+              <th>Service Date</th>
+              <th>Qty</th>
+              <th>Unit</th>
+              <th>Rate</th>
+              <th>Amount</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${itemRows}
+          </tbody>
+        </table>
+      </section>
+
+      <div class="billing-report-subtotal">Subtotal: ${toMoney(invoice.subtotal)}</div>
+      <div class="billing-report-subtotal">Tax (${Number(invoice.taxRate || 0).toFixed(2)}%): ${toMoney(invoice.tax)}</div>
+      <div class="billing-report-grand-total">Total Due: ${toMoney(invoice.total)}</div>
+      <div class="billing-report-meta">Payment Instructions: Please remit payment to Fair Ventures LLC by due date.</div>
+      ${renderBillingReportFooter()}
+    </div>
+  `;
+}
+
+function generateInvoicePreviewFromFilters() {
+  const startDate = billingStartDate?.value || "";
+  const endDate = billingEndDate?.value || "";
+  const selectedPropertyId = billingPropertySelect?.value || "";
+
+  if (!startDate || !endDate) {
+    alert("Select a start and end date before generating an invoice.");
+    return;
+  }
+
+  if (!selectedPropertyId) {
+    alert("Select a property to generate a client invoice.");
+    return;
+  }
+
+  const property = properties.find((item) => normalizePropertyId(item.id) === normalizePropertyId(selectedPropertyId));
+  if (!property) {
+    alert("Property not found.");
+    return;
+  }
+
+  const taxOverride = invoiceTaxEnabled?.value || "property";
+  const includeNonBillable = invoiceIncludeNonBillableChemicals?.checked === true;
+  currentInvoiceDraft = buildDraftInvoiceModel({
+    property,
+    startDate,
+    endDate,
+    includeNonBillableChemicals: includeNonBillable,
+    taxOverride,
+  });
+
+  renderInvoicePreview();
+}
+
+function updateInvoiceItemField(index, field, rawValue) {
+  if (!currentInvoiceDraft) return;
+  const item = currentInvoiceDraft.items[index];
+  if (!item) return;
+
+  const numericFields = new Set(["quantity", "rate"]);
+  item[field] = numericFields.has(field) ? Number(rawValue || 0) : rawValue;
+  recalculateInvoiceDraftTotals();
+  renderInvoicePreview();
+}
+
+function removeInvoiceItem(index) {
+  if (!currentInvoiceDraft) return;
+  currentInvoiceDraft.items = currentInvoiceDraft.items.filter((_, idx) => idx !== index);
+  recalculateInvoiceDraftTotals();
+  renderInvoicePreview();
+}
+
+function addInvoiceManualItem() {
+  if (!currentInvoiceDraft) return;
+  currentInvoiceDraft.items.push({
+    sourceId: null,
+    taskId: null,
+    chemicalUsageId: null,
+    description: "Manual line item",
+    serviceDate: currentInvoiceDraft.periodEnd || "",
+    quantity: 1,
+    unit: "each",
+    rate: 0,
+    amount: 0,
+    itemType: "manual",
+  });
+  renderInvoicePreview();
+}
+
+function addInvoiceCreditItem() {
+  if (!currentInvoiceDraft) return;
+  currentInvoiceDraft.items.push({
+    sourceId: null,
+    taskId: null,
+    chemicalUsageId: null,
+    description: "Credit / Adjustment",
+    serviceDate: currentInvoiceDraft.periodEnd || "",
+    quantity: 1,
+    unit: "credit",
+    rate: -25,
+    amount: -25,
+    itemType: "credit",
+  });
+  renderInvoicePreview();
+}
+
+function buildInvoiceNumber() {
+  const year = new Date().getFullYear();
+  const prefix = `GR-${year}-`;
+  const maxSequence = invoices
+    .map((invoice) => String(invoice.invoice_number || ""))
+    .filter((value) => value.startsWith(prefix))
+    .map((value) => Number(value.split("-").pop() || 0))
+    .reduce((max, current) => Math.max(max, current), 0);
+
+  const next = String(maxSequence + 1).padStart(4, "0");
+  return `${prefix}${next}`;
+}
+
+async function saveInvoiceDraft() {
+  if (!currentInvoiceDraft) return;
+  if (!currentInvoiceDraft.propertyId) {
+    alert("Select a property before saving an invoice draft.");
+    return false;
+  }
+
+  recalculateInvoiceDraftTotals();
+
+  const invoicePayload = {
+    invoice_number: currentInvoiceDraft.id ? currentInvoiceDraft.invoiceNumber : buildInvoiceNumber(),
+    property_id: currentInvoiceDraft.propertyId,
+    client_name: currentInvoiceDraft.clientName || null,
+    billing_email: currentInvoiceDraft.billingEmail || null,
+    billing_address: currentInvoiceDraft.billingAddress || null,
+    period_start: currentInvoiceDraft.periodStart,
+    period_end: currentInvoiceDraft.periodEnd,
+    invoice_date: currentInvoiceDraft.invoiceDate,
+    due_date: currentInvoiceDraft.dueDate,
+    subtotal: currentInvoiceDraft.subtotal,
+    tax: currentInvoiceDraft.tax,
+    total: currentInvoiceDraft.total,
+    status: "draft",
+    notes: currentInvoiceDraft.notes || null,
+  };
+
+  let invoiceId = currentInvoiceDraft.id;
+  if (invoiceId) {
+    const { error } = await supabaseClient
+      .from("invoices")
+      .update(invoicePayload)
+      .eq("id", invoiceId);
+
+    if (error) {
+      alert("Error updating invoice draft: " + error.message);
+      return false;
+    }
+
+    await supabaseClient.from("invoice_items").delete().eq("invoice_id", invoiceId);
+  } else {
+    const { data, error } = await supabaseClient
+      .from("invoices")
+      .insert([invoicePayload])
+      .select("id, invoice_number")
+      .single();
+
+    if (error) {
+      alert("Error saving invoice draft: " + error.message + "\nRun invoice migration first if needed.");
+      return false;
+    }
+
+    invoiceId = data.id;
+    currentInvoiceDraft.id = data.id;
+    currentInvoiceDraft.invoiceNumber = data.invoice_number;
+  }
+
+  const itemsPayload = currentInvoiceDraft.items.map((item) => ({
+    invoice_id: invoiceId,
+    task_id: item.taskId || null,
+    chemical_usage_id: item.chemicalUsageId || null,
+    description: item.description || null,
+    service_date: item.serviceDate || null,
+    quantity: Number(item.quantity || 0),
+    unit: item.unit || null,
+    rate: Number(item.rate || 0),
+    amount: Number(item.amount || 0),
+    item_type: item.itemType || "manual",
+  }));
+
+  if (itemsPayload.length) {
+    const { error: itemError } = await supabaseClient
+      .from("invoice_items")
+      .insert(itemsPayload);
+
+    if (itemError) {
+      alert("Invoice draft saved, but line items failed: " + itemError.message);
+      return false;
+    }
+  }
+
+  alert("Invoice draft saved.");
+  await loadInvoices();
+  renderInvoiceHistory();
+  renderInvoicePreview();
+  return true;
+}
+
+async function finalizeInvoiceDraft() {
+  if (!currentInvoiceDraft) return;
+
+  const saved = await saveInvoiceDraft();
+  if (!saved) return;
+  if (!currentInvoiceDraft?.id) return;
+
+  const cleaningTaskIds = Array.from(new Set(currentInvoiceDraft.items
+    .filter((item) => item.taskId)
+    .map((item) => item.taskId)));
+  const chemicalUsageIds = Array.from(new Set(currentInvoiceDraft.items
+    .filter((item) => item.chemicalUsageId)
+    .map((item) => item.chemicalUsageId)));
+
+  if (cleaningTaskIds.length) {
+    const { data: latestTasks, error: latestTaskError } = await supabaseClient
+      .from("cleaning_tasks")
+      .select("id, invoiced, invoiced_invoice_id")
+      .in("id", cleaningTaskIds);
+
+    if (latestTaskError) {
+      alert("Could not verify task billing status before finalizing: " + latestTaskError.message);
+      return;
+    }
+
+    const duplicateTask = (latestTasks || []).find((task) => isTaskAlreadyInvoiced(task));
+    if (duplicateTask) {
+      alert("One or more selected cleaning tasks are already invoiced. Finalize canceled to prevent duplicate billing.");
+      return;
+    }
+  }
+
+  if (chemicalUsageIds.length) {
+    const { data: latestChemicalRows, error: latestChemicalError } = await supabaseClient
+      .from("chemical_usage")
+      .select("id, invoiced, invoiced_invoice_id")
+      .in("id", chemicalUsageIds);
+
+    if (latestChemicalError) {
+      alert("Could not verify chemical billing status before finalizing: " + latestChemicalError.message);
+      return;
+    }
+
+    const duplicateChemical = (latestChemicalRows || []).find((entry) => isChemicalUsageAlreadyInvoiced(entry));
+    if (duplicateChemical) {
+      alert("One or more chemical entries are already invoiced. Finalize canceled to prevent duplicate billing.");
+      return;
+    }
+  }
+
+  const { error: invoiceStatusError } = await supabaseClient
+    .from("invoices")
+    .update({ status: "finalized" })
+    .eq("id", currentInvoiceDraft.id);
+
+  if (invoiceStatusError) {
+    alert("Could not finalize invoice: " + invoiceStatusError.message);
+    return;
+  }
+
+  if (cleaningTaskIds.length) {
+    const { error: taskUpdateError } = await supabaseClient
+      .from("cleaning_tasks")
+      .update({
+        invoiced: true,
+        invoiced_invoice_id: currentInvoiceDraft.id,
+      })
+      .in("id", cleaningTaskIds);
+
+    if (taskUpdateError) {
+      alert("Invoice finalized, but linking tasks failed: " + taskUpdateError.message);
+      return;
+    }
+  }
+
+  if (chemicalUsageIds.length) {
+    const { error: chemicalUpdateError } = await supabaseClient
+      .from("chemical_usage")
+      .update({
+        invoiced: true,
+        invoiced_invoice_id: currentInvoiceDraft.id,
+      })
+      .in("id", chemicalUsageIds);
+
+    if (chemicalUpdateError) {
+      alert("Invoice finalized, but linking chemical usage failed: " + chemicalUpdateError.message);
+      return;
+    }
+  }
+
+  currentInvoiceDraft.status = "finalized";
+  alert("Invoice finalized and linked billing records were marked as invoiced.");
+  await loadData();
+}
+
+async function updateInvoiceStatus(invoiceId, status) {
+  const normalizedStatus = String(status || "").toLowerCase();
+  if (!INVOICE_STATUSES.includes(normalizedStatus)) {
+    alert("Invalid invoice status.");
+    return;
+  }
+
+  const { error } = await supabaseClient
+    .from("invoices")
+    .update({ status: normalizedStatus })
+    .eq("id", invoiceId);
+
+  if (error) {
+    alert("Could not update invoice status: " + error.message);
+    return;
+  }
+
+  await loadInvoices();
+  renderInvoiceHistory();
+}
+
+async function openInvoiceDraft(invoiceId) {
+  const invoice = invoices.find((row) => row.id === invoiceId);
+  if (!invoice) return;
+
+  const { data: items, error } = await supabaseClient
+    .from("invoice_items")
+    .select("*")
+    .eq("invoice_id", invoiceId)
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    alert("Could not load invoice items: " + error.message);
+    return;
+  }
+
+  const property = properties.find((item) => normalizePropertyId(item.id) === normalizePropertyId(invoice.property_id));
+  currentInvoiceDraft = {
+    id: invoice.id,
+    invoiceNumber: invoice.invoice_number,
+    propertyId: invoice.property_id,
+    propertyName: property?.property_name || "",
+    clientName: invoice.client_name || "",
+    billingCompanyName: property?.billing_company_name || "",
+    billingEmail: invoice.billing_email || property?.billing_email || "",
+    billingAddress: invoice.billing_address || property?.billing_address || "",
+    accountReference: property?.billing_account_reference || "",
+    periodStart: invoice.period_start || "",
+    periodEnd: invoice.period_end || "",
+    invoiceDate: invoice.invoice_date || "",
+    dueDate: invoice.due_date || "",
+    status: invoice.status || "draft",
+    notes: invoice.notes || "",
+    paymentTerms: property?.payment_terms || DEFAULT_INVOICE_TERMS,
+    taxable: (property?.billing_taxable !== false),
+    taxRate: Number(property?.billing_tax_rate || 0),
+    includeNonBillableChemicals: false,
+    items: (items || []).map((item) => ({
+      sourceId: item.chemical_usage_id || item.task_id || null,
+      taskId: item.task_id || null,
+      chemicalUsageId: item.chemical_usage_id || null,
+      description: item.description || "",
+      serviceDate: item.service_date || "",
+      quantity: Number(item.quantity || 0),
+      unit: item.unit || "",
+      rate: Number(item.rate || 0),
+      amount: Number(item.amount || 0),
+      itemType: item.item_type || "manual",
+    })),
+    subtotal: Number(invoice.subtotal || 0),
+    tax: Number(invoice.tax || 0),
+    total: Number(invoice.total || 0),
+  };
+
+  renderInvoicePreview();
+}
+
+function renderInvoiceHistory() {
+  if (!invoiceHistoryContainer) return;
+
+  const selectedPropertyId = billingPropertySelect?.value || "";
+  const selectedStatus = String(invoiceStatusFilter?.value || "").trim().toLowerCase();
+
+  const rows = invoices
+    .filter((invoice) => !selectedPropertyId || normalizePropertyId(invoice.property_id) === normalizePropertyId(selectedPropertyId))
+    .filter((invoice) => !selectedStatus || String(invoice.status || "").toLowerCase() === selectedStatus)
+    .sort((a, b) => String(b.invoice_date || "").localeCompare(String(a.invoice_date || "")));
+
+  if (!rows.length) {
+    invoiceHistoryContainer.innerHTML = `
+      <div class="billing-report-sheet">
+        <h2 class="billing-report-title">Invoice History</h2>
+        <div class="empty">No invoices found for the selected filters.</div>
+      </div>
+    `;
+    return;
+  }
+
+  const tableRows = rows.map((invoice) => {
+    const propertyName = getPropertyName(invoice.property_id);
+    return `
+      <tr>
+        <td>${escapeHtml(invoice.invoice_number || "")}</td>
+        <td>${escapeHtml(propertyName)}</td>
+        <td>${escapeHtml(invoice.client_name || "")}</td>
+        <td>${invoice.invoice_date || ""}</td>
+        <td>${invoice.due_date || ""}</td>
+        <td class="billing-report-amount">${toMoney(invoice.total || 0)}</td>
+        <td>
+          <select onchange="updateInvoiceStatus('${invoice.id}', this.value)">
+            ${INVOICE_STATUSES.map((status) => `<option value="${status}" ${String(invoice.status || "draft").toLowerCase() === status ? "selected" : ""}>${status}</option>`).join("")}
+          </select>
+        </td>
+        <td><button type="button" onclick="openInvoiceDraft('${invoice.id}')">Open</button></td>
+      </tr>
+    `;
+  }).join("");
+
+  invoiceHistoryContainer.innerHTML = `
+    <div class="billing-report-sheet">
+      <h2 class="billing-report-title">Invoice History</h2>
+      <table class="billing-report-table">
+        <thead>
+          <tr>
+            <th>Invoice #</th>
+            <th>Property</th>
+            <th>Client</th>
+            <th>Invoice Date</th>
+            <th>Due Date</th>
+            <th>Total</th>
+            <th>Status</th>
+            <th>Open</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${tableRows}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function printInvoicePreview() {
+  runPrintForView("print-view-invoice");
+}
+
+function downloadInvoicePdf() {
+  runPrintForView("print-view-invoice");
+}
+
+async function shareInvoicePreview() {
+  if (!currentInvoiceDraft) {
+    alert("Generate or open an invoice before sharing.");
+    return;
+  }
+
+  const invoice = currentInvoiceDraft;
+  const lines = [
+    `${companyProfile.company_name} Invoice ${invoice.invoiceNumber || "(pending)"}`,
+    `Client: ${invoice.clientName || ""}`,
+    `Period: ${invoice.periodStart} to ${invoice.periodEnd}`,
+    `Total Due: ${toMoney(invoice.total)}`,
+    `Due Date: ${invoice.dueDate}`,
+  ];
+
+  const body = lines.join("\n");
+
+  if (navigator.share) {
+    try {
+      await navigator.share({
+        title: `Invoice ${invoice.invoiceNumber || ""}`,
+        text: body,
+      });
+      return;
+    } catch (error) {
+      if (error?.name === "AbortError") return;
+    }
+  }
+
+  const subject = encodeURIComponent(`Invoice ${invoice.invoiceNumber || ""} - ${invoice.clientName || "Client"}`);
+  const mailBody = encodeURIComponent(body);
+  window.open(`mailto:${encodeURIComponent(invoice.billingEmail || "")}?subject=${subject}&body=${mailBody}`, "_blank");
+}
+
+function exportInvoiceCsv() {
+  if (!currentInvoiceDraft) {
+    alert("Generate or open an invoice before exporting CSV.");
+    return;
+  }
+
+  const invoice = currentInvoiceDraft;
+  const header = ["invoice_number", "property", "client", "service_date", "item_type", "description", "quantity", "unit", "rate", "amount"];
+  const rows = invoice.items.map((item) => [
+    invoice.invoiceNumber || "",
+    invoice.propertyName || getPropertyName(invoice.propertyId),
+    invoice.clientName || "",
+    item.serviceDate || "",
+    item.itemType || "",
+    item.description || "",
+    Number(item.quantity || 0),
+    item.unit || "",
+    Number(item.rate || 0).toFixed(2),
+    Number(item.amount || 0).toFixed(2),
+  ]);
+
+  rows.push([invoice.invoiceNumber || "", "", "", "", "", "Subtotal", "", "", "", Number(invoice.subtotal || 0).toFixed(2)]);
+  rows.push([invoice.invoiceNumber || "", "", "", "", "", "Tax", "", "", "", Number(invoice.tax || 0).toFixed(2)]);
+  rows.push([invoice.invoiceNumber || "", "", "", "", "", "Total", "", "", "", Number(invoice.total || 0).toFixed(2)]);
+
+  const csv = [header, ...rows]
+    .map((line) => line.map((cell) => `"${String(cell ?? "").replace(/"/g, '""')}"`).join(","))
+    .join("\n");
+
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${invoice.invoiceNumber || "invoice"}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
 function getDateStringsInRange(startDate, endDate) {
   const dates = [];
   const cursor = parseDateString(startDate);
@@ -4708,11 +5604,18 @@ function renderProperties() {
 
         <div class="property-meta">
           <div><strong>Client Name:</strong> ${property.client_name || ""}</div>
+          <div><strong>Billing Company:</strong> ${property.billing_company_name || "Not entered"}</div>
+          <div><strong>Billing Email:</strong> ${property.billing_email || "Not entered"}</div>
+          <div><strong>Account / Reference:</strong> ${property.billing_account_reference || "Not entered"}</div>
           <div><strong>Address:</strong> ${property.address || "Not entered"}</div>
           <div><strong>SafetyCulture Checklist:</strong> ${property.safetyculture_checklist_url ? "Saved" : "Not entered"}</div>
           <div><strong>Standard Service Day:</strong> ${property.standard_service_day || "Wednesday"}</div>
           <div><strong>Guest Ready Coverage Rule:</strong> ${getCoverageRuleLabel(getCoverageRuleForProperty(property))}</div>
           <div><strong>Billable Guest Ready Charge:</strong> $${Number(property.default_off_cycle_charge ?? 65).toFixed(2)}</div>
+          <div><strong>Default Cleaning Rate:</strong> $${Number(property.default_cleaning_rate ?? 0).toFixed(2)}</div>
+          <div><strong>Taxable:</strong> ${property.billing_taxable === false ? "No" : "Yes"}</div>
+          <div><strong>Tax Rate:</strong> ${Number(property.billing_tax_rate || 0).toFixed(2)}%</div>
+          <div><strong>Payment Terms:</strong> ${property.payment_terms || DEFAULT_INVOICE_TERMS}</div>
           <div><strong>iCal:</strong> ${property.ical_url ? "Saved" : "Not entered"}</div>
         </div>
 
@@ -4889,4 +5792,19 @@ async function openReportFromDashboard(reportKey) {
   if (reportKey === "chemical") {
     showChemicalReportWorkspace(true);
   }
+}
+
+function updateInvoiceDraftField(field, rawValue) {
+  if (!currentInvoiceDraft) return;
+
+  if (field === "taxRate") {
+    currentInvoiceDraft.taxRate = Number(rawValue || 0);
+  } else if (field === "taxable") {
+    currentInvoiceDraft.taxable = Boolean(rawValue);
+  } else {
+    currentInvoiceDraft[field] = rawValue;
+  }
+
+  recalculateInvoiceDraftTotals();
+  renderInvoicePreview();
 }

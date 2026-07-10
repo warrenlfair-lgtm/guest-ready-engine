@@ -1777,6 +1777,33 @@ textarea{
     min-width: 160px;
 }
 
+.invoice-history-filters {
+    margin-top: 12px;
+}
+
+.invoice-preview-actions {
+    margin-top: 14px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.invoice-report-sheet {
+    border-top: 4px solid #0f766e;
+}
+
+.invoice-edit-table input,
+.invoice-edit-table select {
+    width: 100%;
+    min-width: 90px;
+    padding: 6px;
+    font-size: 12px;
+}
+
+.invoice-edit-table td {
+    vertical-align: middle;
+}
+
 .billing-checkbox-label {
     display: inline-flex;
     align-items: center;
@@ -2194,14 +2221,19 @@ textarea{
     #billingFilterPanel,
     #billingPrintBtn,
     #billingRunBtn,
+    #generateInvoiceBtn,
     #chemicalReportFilterPanel,
     #chemicalReportActions,
-    #reportsDashboardCards {
+    #reportsDashboardCards,
+    #invoiceHistoryFilterPanel,
+    #invoiceHistoryContainer,
+    #invoicePreviewContainer .invoice-preview-actions {
         display: none !important;
     }
 
     body.print-view-chemical #reportsView,
-    body.print-view-billing #billingView {
+    body.print-view-billing #billingView,
+    body.print-view-invoice #billingView {
         display: block !important;
     }
 
@@ -2217,6 +2249,17 @@ textarea{
 
     body.print-view-chemical #billingView {
         display: none !important;
+    }
+
+    body.print-view-invoice #billingReportContainer,
+    body.print-view-invoice #invoiceHistoryContainer,
+    body.print-view-invoice #billingFilterPanel,
+    body.print-view-invoice #invoiceHistoryFilterPanel {
+        display: none !important;
+    }
+
+    body.print-view-invoice #invoicePreviewContainer {
+        display: block !important;
     }
 
     body.print-view-chemical #reportsView {

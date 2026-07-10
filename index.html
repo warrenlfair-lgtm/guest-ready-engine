@@ -144,7 +144,44 @@
           <option value="">All Properties</option>
         </select>
       </div>
+      <div class="filter-group">
+        <label class="billing-checkbox-label" for="invoiceIncludeNonBillableChemicals">
+          <input id="invoiceIncludeNonBillableChemicals" type="checkbox">
+          Include non-billable chemicals at $0.00
+        </label>
+      </div>
+      <div class="filter-group">
+        <label for="invoiceTaxEnabled">
+          Tax
+        </label>
+        <select id="invoiceTaxEnabled">
+          <option value="property">Use Property Setting</option>
+          <option value="yes">Always Taxable</option>
+          <option value="no">Tax Exempt</option>
+        </select>
+      </div>
+      <div class="filter-group">
+        <button type="button" id="generateInvoiceBtn">Generate Invoice Preview</button>
+      </div>
     </div>
+
+    <div id="invoicePreviewContainer" class="billing-report-paper hidden"></div>
+
+    <div class="billing-filters invoice-history-filters" id="invoiceHistoryFilterPanel">
+      <div class="filter-group">
+        <label for="invoiceStatusFilter">Invoice Status:</label>
+        <select id="invoiceStatusFilter">
+          <option value="">All</option>
+          <option value="draft">Draft</option>
+          <option value="finalized">Finalized</option>
+          <option value="sent">Sent</option>
+          <option value="paid">Paid</option>
+          <option value="void">Void</option>
+        </select>
+      </div>
+    </div>
+
+    <div id="invoiceHistoryContainer" class="billing-report-paper"></div>
 
     <div id="billingReportContainer" class="billing-report-paper"></div>
   </section>
@@ -404,6 +441,18 @@
     <label>Client Name</label>
     <input id="propertyClientName" placeholder="Optional client/owner group name">
 
+    <label>Billing Company Name</label>
+    <input id="propertyBillingCompanyName" placeholder="Optional billing company name">
+
+    <label>Billing Email</label>
+    <input id="propertyBillingEmail" type="email" placeholder="billing@example.com">
+
+    <label>Billing Address</label>
+    <textarea id="propertyBillingAddress" rows="2" placeholder="Street, City, State, ZIP"></textarea>
+
+    <label>Account / Reference Number</label>
+    <input id="propertyAccountReference" placeholder="Optional account number">
+
     <label>Address</label>
     <input id="propertyAddress">
 
@@ -435,6 +484,24 @@
 
     <label>Billable Guest Ready Charge</label>
     <input id="offCycleCharge" type="number" value="65">
+
+    <label>Default Cleaning Rate</label>
+    <input id="propertyDefaultCleaningRate" type="number" min="0" step="0.01" value="0">
+
+    <label>Taxable</label>
+    <select id="propertyTaxable">
+      <option value="yes">Yes</option>
+      <option value="no">No</option>
+    </select>
+
+    <label>Tax Rate (%)</label>
+    <input id="propertyTaxRate" type="number" min="0" step="0.01" value="0">
+
+    <label>Payment Terms</label>
+    <input id="propertyPaymentTerms" placeholder="e.g., Net 15">
+
+    <label>Invoice Notes</label>
+    <textarea id="propertyInvoiceNotes" rows="3" placeholder="Payment instructions or notes"></textarea>
 
     <div class="modal-actions">
       <button id="cancelBtn">Cancel</button>
