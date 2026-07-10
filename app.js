@@ -51,6 +51,23 @@ let pinModalResolver = null;
 const MANUAL_BILLING_OVERRIDE_TAG = "[Manual Override]";
 const INVOICE_STATUSES = ["draft", "finalized", "sent", "paid", "void"];
 const DEFAULT_INVOICE_TERMS = "Net 15";
+const INVOICE_ITEM_SOURCES = {
+  MANUAL: "manual",
+  TASK: "task",
+  CHEMICAL: "chemical",
+};
+const INVOICE_QUICK_ADD_TEMPLATES = {
+  filter_cleaning: { description: "Filter Cleaning", unit: "service", rate: 95, itemType: "manual" },
+  cartridge_cleaning: { description: "Cartridge Cleaning", unit: "service", rate: 125, itemType: "manual" },
+  green_to_clean: { description: "Green-to-Clean Treatment", unit: "treatment", rate: 325, itemType: "manual" },
+  pump_repair: { description: "Pump Repair", unit: "repair", rate: 225, itemType: "manual" },
+  equipment_repair: { description: "Equipment Repair", unit: "repair", rate: 245, itemType: "manual" },
+  emergency_service: { description: "Emergency Service", unit: "service", rate: 175, itemType: "surcharge" },
+  salt_addition: { description: "Salt Addition", unit: "bags", rate: 40, itemType: "manual" },
+  travel_charge: { description: "Travel Charge", unit: "trip", rate: 45, itemType: "surcharge" },
+  discount: { description: "Discount", unit: "discount", rate: -25, itemType: "discount" },
+  credit: { description: "Credit", unit: "credit", rate: -25, itemType: "credit" },
+};
 const CHEMICAL_UNIT_OPTIONS = ["gallons", "pounds", "ounces", "tablets", "bags", "quarts"];
 const DEFAULT_CHEMICAL_CATALOG = [
   { name: "Liquid Chlorine", default_unit: "gallons", cost_per_unit: 0, billable_rate_per_unit: 0, is_billable: true },
@@ -3953,6 +3970,8 @@ function getInvoiceChemicalCandidates(tasks, { includeNonBillableChemicals = fal
         rate,
         amount,
         itemType: "chemical",
+        itemSource: INVOICE_ITEM_SOURCES.CHEMICAL,
+        notes: entry.notes || "",
       };
     })
     .filter(Boolean);
@@ -3985,6 +4004,8 @@ function buildDraftInvoiceModel({ property, startDate, endDate, includeNonBillab
       rate: amount,
       amount,
       itemType: "cleaning",
+      itemSource: INVOICE_ITEM_SOURCES.TASK,
+      notes: stripManualBillingOverrideTag(task.notes || ""),
     };
   });
 
@@ -3999,6 +4020,8 @@ function buildDraftInvoiceModel({ property, startDate, endDate, includeNonBillab
     rate: item.rate,
     amount: item.amount,
     itemType: "chemical",
+    itemSource: INVOICE_ITEM_SOURCES.CHEMICAL,
+    notes: item.notes || "",
   }));
 
   latestInvoiceCandidates = {
@@ -4089,11 +4112,12 @@ function renderInvoicePreview() {
         <td><input type="number" step="0.01" value="${Number(item.quantity || 0)}" onchange="updateInvoiceItemField(${index}, 'quantity', this.value)"></td>
         <td><input type="text" value="${escapeHtml(item.unit || "")}" onchange="updateInvoiceItemField(${index}, 'unit', this.value)"></td>
         <td><input type="number" step="0.01" value="${Number(item.rate || 0)}" onchange="updateInvoiceItemField(${index}, 'rate', this.value)"></td>
+        <td><input type="text" value="${escapeHtml(item.notes || "")}" onchange="updateInvoiceItemField(${index}, 'notes', this.value)"></td>
         <td class="billing-report-amount">${toMoney(item.amount)}</td>
         <td><button type="button" class="delete-btn" onclick="removeInvoiceItem(${index})">Remove</button></td>
       </tr>
     `).join("")
-    : `<tr><td colspan="7">No line items in this invoice.</td></tr>`;
+    : `<tr><td colspan="8">No line items in this invoice.</td></tr>`;
 
   const propertyName = invoice.propertyName || getPropertyName(invoice.propertyId);
   const billingName = invoice.billingCompanyName || invoice.clientName;
@@ -4120,7 +4144,22 @@ function renderInvoicePreview() {
 
       <div class="invoice-preview-actions">
         <button type="button" onclick="addInvoiceManualItem()">Add Line Item</button>
-        <button type="button" onclick="addInvoiceCreditItem()">Add Credit/Discount</button>
+        <button type="button" onclick="addInvoiceDiscountItem()">Add Discount</button>
+        <button type="button" onclick="addInvoiceCreditItem()">Add Credit</button>
+        <button type="button" onclick="addInvoiceSurchargeItem()">Add Surcharge</button>
+        <select id="invoiceQuickAddSelect" onchange="addInvoiceQuickItem(this.value)">
+          <option value="">Quick Add...</option>
+          <option value="filter_cleaning">Filter Cleaning</option>
+          <option value="cartridge_cleaning">Cartridge Cleaning</option>
+          <option value="green_to_clean">Green-to-Clean Treatment</option>
+          <option value="pump_repair">Pump Repair</option>
+          <option value="equipment_repair">Equipment Repair</option>
+          <option value="emergency_service">Emergency Service</option>
+          <option value="salt_addition">Salt Addition</option>
+          <option value="travel_charge">Travel Charge</option>
+          <option value="discount">Discount</option>
+          <option value="credit">Credit</option>
+        </select>
         <button type="button" onclick="saveInvoiceDraft()">Save Draft</button>
         <button type="button" class="checklist-link-btn" onclick="finalizeInvoiceDraft()">Finalize Invoice</button>
         <button type="button" id="invoicePrintBtn" class="print-btn" onclick="printInvoicePreview()">Print</button>
@@ -4139,6 +4178,7 @@ function renderInvoicePreview() {
               <th>Qty</th>
               <th>Unit</th>
               <th>Rate</th>
+              <th>Notes</th>
               <th>Amount</th>
               <th></th>
             </tr>
@@ -4223,6 +4263,8 @@ function addInvoiceManualItem() {
     rate: 0,
     amount: 0,
     itemType: "manual",
+    itemSource: INVOICE_ITEM_SOURCES.MANUAL,
+    notes: "",
   });
   renderInvoicePreview();
 }
@@ -4240,7 +4282,72 @@ function addInvoiceCreditItem() {
     rate: -25,
     amount: -25,
     itemType: "credit",
+    itemSource: INVOICE_ITEM_SOURCES.MANUAL,
+    notes: "",
   });
+  renderInvoicePreview();
+}
+
+function addInvoiceDiscountItem() {
+  if (!currentInvoiceDraft) return;
+  currentInvoiceDraft.items.push({
+    sourceId: null,
+    taskId: null,
+    chemicalUsageId: null,
+    description: "Discount",
+    serviceDate: currentInvoiceDraft.periodEnd || "",
+    quantity: 1,
+    unit: "discount",
+    rate: -25,
+    amount: -25,
+    itemType: "discount",
+    itemSource: INVOICE_ITEM_SOURCES.MANUAL,
+    notes: "",
+  });
+  renderInvoicePreview();
+}
+
+function addInvoiceSurchargeItem() {
+  if (!currentInvoiceDraft) return;
+  currentInvoiceDraft.items.push({
+    sourceId: null,
+    taskId: null,
+    chemicalUsageId: null,
+    description: "Surcharge",
+    serviceDate: currentInvoiceDraft.periodEnd || "",
+    quantity: 1,
+    unit: "surcharge",
+    rate: 25,
+    amount: 25,
+    itemType: "surcharge",
+    itemSource: INVOICE_ITEM_SOURCES.MANUAL,
+    notes: "",
+  });
+  renderInvoicePreview();
+}
+
+function addInvoiceQuickItem(templateKey) {
+  if (!currentInvoiceDraft || !templateKey) return;
+  const template = INVOICE_QUICK_ADD_TEMPLATES[templateKey];
+  if (!template) return;
+
+  currentInvoiceDraft.items.push({
+    sourceId: null,
+    taskId: null,
+    chemicalUsageId: null,
+    description: template.description,
+    serviceDate: currentInvoiceDraft.periodEnd || "",
+    quantity: 1,
+    unit: template.unit,
+    rate: Number(template.rate || 0),
+    amount: Number(template.rate || 0),
+    itemType: template.itemType || "manual",
+    itemSource: INVOICE_ITEM_SOURCES.MANUAL,
+    notes: "",
+  });
+
+  const quickAddSelect = document.getElementById("invoiceQuickAddSelect");
+  if (quickAddSelect) quickAddSelect.value = "";
   renderInvoicePreview();
 }
 
@@ -4324,6 +4431,8 @@ async function saveInvoiceDraft() {
     rate: Number(item.rate || 0),
     amount: Number(item.amount || 0),
     item_type: item.itemType || "manual",
+    item_source: item.itemSource || (item.taskId ? INVOICE_ITEM_SOURCES.TASK : item.chemicalUsageId ? INVOICE_ITEM_SOURCES.CHEMICAL : INVOICE_ITEM_SOURCES.MANUAL),
+    notes: item.notes || null,
   }));
 
   if (itemsPayload.length) {
@@ -4507,6 +4616,8 @@ async function openInvoiceDraft(invoiceId) {
       rate: Number(item.rate || 0),
       amount: Number(item.amount || 0),
       itemType: item.item_type || "manual",
+      itemSource: item.item_source || (item.task_id ? INVOICE_ITEM_SOURCES.TASK : item.chemical_usage_id ? INVOICE_ITEM_SOURCES.CHEMICAL : INVOICE_ITEM_SOURCES.MANUAL),
+      notes: item.notes || "",
     })),
     subtotal: Number(invoice.subtotal || 0),
     tax: Number(invoice.tax || 0),
@@ -4630,18 +4741,20 @@ function exportInvoiceCsv() {
   }
 
   const invoice = currentInvoiceDraft;
-  const header = ["invoice_number", "property", "client", "service_date", "item_type", "description", "quantity", "unit", "rate", "amount"];
+  const header = ["invoice_number", "property", "client", "service_date", "item_source", "item_type", "description", "quantity", "unit", "rate", "amount", "notes"];
   const rows = invoice.items.map((item) => [
     invoice.invoiceNumber || "",
     invoice.propertyName || getPropertyName(invoice.propertyId),
     invoice.clientName || "",
     item.serviceDate || "",
+    item.itemSource || "",
     item.itemType || "",
     item.description || "",
     Number(item.quantity || 0),
     item.unit || "",
     Number(item.rate || 0).toFixed(2),
     Number(item.amount || 0).toFixed(2),
+    item.notes || "",
   ]);
 
   rows.push([invoice.invoiceNumber || "", "", "", "", "", "Subtotal", "", "", "", Number(invoice.subtotal || 0).toFixed(2)]);

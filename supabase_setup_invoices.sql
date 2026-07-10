@@ -48,13 +48,20 @@ CREATE TABLE IF NOT EXISTS invoice_items (
   unit TEXT,
   rate NUMERIC DEFAULT 0,
   amount NUMERIC DEFAULT 0,
+  notes TEXT,
+  item_source TEXT,
   item_type TEXT,
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
+ALTER TABLE invoice_items
+ADD COLUMN IF NOT EXISTS notes TEXT,
+ADD COLUMN IF NOT EXISTS item_source TEXT;
+
 CREATE INDEX IF NOT EXISTS idx_invoice_items_invoice_id ON invoice_items(invoice_id);
 CREATE INDEX IF NOT EXISTS idx_invoice_items_task_id ON invoice_items(task_id);
 CREATE INDEX IF NOT EXISTS idx_invoice_items_chemical_usage_id ON invoice_items(chemical_usage_id);
+CREATE INDEX IF NOT EXISTS idx_invoice_items_item_source ON invoice_items(item_source);
 
 -- Link source records to finalized invoices to prevent duplicate billing
 ALTER TABLE cleaning_tasks
@@ -79,5 +86,18 @@ BEGIN
     ALTER TABLE invoices
     ADD CONSTRAINT invoices_status_check
     CHECK (status IN ('draft', 'finalized', 'sent', 'paid', 'void'));
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'invoice_items_item_source_check'
+  ) THEN
+    ALTER TABLE invoice_items
+    ADD CONSTRAINT invoice_items_item_source_check
+    CHECK (item_source IS NULL OR item_source IN ('manual', 'task', 'chemical'));
   END IF;
 END $$;
