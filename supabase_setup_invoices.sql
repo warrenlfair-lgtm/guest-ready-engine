@@ -65,15 +65,21 @@ CREATE INDEX IF NOT EXISTS idx_invoice_items_item_source ON invoice_items(item_s
 
 -- Link source records to finalized invoices to prevent duplicate billing
 ALTER TABLE cleaning_tasks
-ADD COLUMN IF NOT EXISTS invoiced_invoice_id UUID REFERENCES invoices(id) ON DELETE SET NULL;
+ADD COLUMN IF NOT EXISTS invoiced_invoice_id UUID REFERENCES invoices(id) ON DELETE SET NULL,
+ADD COLUMN IF NOT EXISTS invoice_id UUID REFERENCES invoices(id) ON DELETE SET NULL,
+ADD COLUMN IF NOT EXISTS invoiced_at TIMESTAMPTZ;
 
 ALTER TABLE chemical_usage
 ADD COLUMN IF NOT EXISTS invoiced BOOLEAN DEFAULT false,
-ADD COLUMN IF NOT EXISTS invoiced_invoice_id UUID REFERENCES invoices(id) ON DELETE SET NULL;
+ADD COLUMN IF NOT EXISTS invoiced_invoice_id UUID REFERENCES invoices(id) ON DELETE SET NULL,
+ADD COLUMN IF NOT EXISTS invoice_id UUID REFERENCES invoices(id) ON DELETE SET NULL,
+ADD COLUMN IF NOT EXISTS invoiced_at TIMESTAMPTZ;
 
 CREATE INDEX IF NOT EXISTS idx_cleaning_tasks_invoiced_invoice_id ON cleaning_tasks(invoiced_invoice_id);
+CREATE INDEX IF NOT EXISTS idx_cleaning_tasks_invoice_id ON cleaning_tasks(invoice_id);
 CREATE INDEX IF NOT EXISTS idx_chemical_usage_invoiced ON chemical_usage(invoiced);
 CREATE INDEX IF NOT EXISTS idx_chemical_usage_invoiced_invoice_id ON chemical_usage(invoiced_invoice_id);
+CREATE INDEX IF NOT EXISTS idx_chemical_usage_invoice_id ON chemical_usage(invoice_id);
 
 -- Keep status values constrained to expected workflow states
 DO $$

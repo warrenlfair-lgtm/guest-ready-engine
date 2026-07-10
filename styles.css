@@ -1804,6 +1804,23 @@ textarea{
     vertical-align: middle;
 }
 
+.invoice-eligibility-card {
+    border: 1px solid #dbe2ea;
+    border-radius: 10px;
+    padding: 10px 12px;
+    background: #f8fafc;
+    margin-bottom: 10px;
+}
+
+.invoice-eligibility-reasons {
+    margin-top: 10px;
+    color: #475569;
+}
+
+#invoiceQuickAddSelect {
+    min-width: 220px;
+}
+
 .billing-checkbox-label {
     display: inline-flex;
     align-items: center;
@@ -2227,6 +2244,8 @@ textarea{
     #reportsDashboardCards,
     #invoiceHistoryFilterPanel,
     #invoiceHistoryContainer,
+    #invoiceBatchPreviewContainer,
+    #invoiceEligibilitySummary,
     #invoicePreviewContainer .invoice-preview-actions {
         display: none !important;
     }
@@ -2254,7 +2273,9 @@ textarea{
     body.print-view-invoice #billingReportContainer,
     body.print-view-invoice #invoiceHistoryContainer,
     body.print-view-invoice #billingFilterPanel,
-    body.print-view-invoice #invoiceHistoryFilterPanel {
+    body.print-view-invoice #invoiceHistoryFilterPanel,
+    body.print-view-invoice #invoiceBatchPreviewContainer,
+    body.print-view-invoice #invoiceEligibilitySummary {
         display: none !important;
     }
 

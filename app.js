@@ -6,6 +6,7 @@ let chemicalUsageEntries = [];
 let chemicals = [];
 let invoices = [];
 let currentInvoiceDraft = null;
+let currentInvoiceBatchDrafts = [];
 
 const DEFAULT_COMPANY_PROFILE = {
   company_name: "Guest Ready™",
@@ -163,6 +164,7 @@ const monthFilterSelect = document.getElementById("monthFilterSelect");
 const weekViewDefaultCheckbox = document.getElementById("weekViewDefault");
 const billingStartDate = document.getElementById("billingStartDate");
 const billingEndDate = document.getElementById("billingEndDate");
+const billingClientSelect = document.getElementById("billingClientSelect");
 const billingPropertySelect = document.getElementById("billingPropertySelect");
 const billingReconciledOnly = document.getElementById("billingReconciledOnly");
 const billingRunBtn = document.getElementById("billingRunBtn");
@@ -171,7 +173,9 @@ const billingReportContainer = document.getElementById("billingReportContainer")
 const invoiceIncludeNonBillableChemicals = document.getElementById("invoiceIncludeNonBillableChemicals");
 const invoiceTaxEnabled = document.getElementById("invoiceTaxEnabled");
 const generateInvoiceBtn = document.getElementById("generateInvoiceBtn");
+const invoiceEligibilitySummary = document.getElementById("invoiceEligibilitySummary");
 const invoicePreviewContainer = document.getElementById("invoicePreviewContainer");
+const invoiceBatchPreviewContainer = document.getElementById("invoiceBatchPreviewContainer");
 const invoiceHistoryContainer = document.getElementById("invoiceHistoryContainer");
 const invoiceStatusFilter = document.getElementById("invoiceStatusFilter");
 const routeFragStartDate = document.getElementById("routeFragStartDate");
@@ -327,7 +331,10 @@ if (billingStartDate) {
   billingStartDate.addEventListener("change", renderBillingReport);
   billingStartDate.addEventListener("change", () => {
     currentInvoiceDraft = null;
+    currentInvoiceBatchDrafts = [];
+    clearInvoiceEligibilitySummary();
     renderInvoicePreview();
+    renderInvoiceBatchPreview();
   });
 }
 
@@ -335,7 +342,25 @@ if (billingEndDate) {
   billingEndDate.addEventListener("change", renderBillingReport);
   billingEndDate.addEventListener("change", () => {
     currentInvoiceDraft = null;
+    currentInvoiceBatchDrafts = [];
+    clearInvoiceEligibilitySummary();
     renderInvoicePreview();
+    renderInvoiceBatchPreview();
+  });
+}
+
+if (billingClientSelect) {
+  billingClientSelect.addEventListener("change", () => {
+    if (billingClientSelect.value && billingPropertySelect) {
+      billingPropertySelect.value = "";
+    }
+    renderBillingReport();
+    currentInvoiceDraft = null;
+    currentInvoiceBatchDrafts = [];
+    clearInvoiceEligibilitySummary();
+    renderInvoicePreview();
+    renderInvoiceBatchPreview();
+    renderInvoiceHistory();
   });
 }
 
@@ -345,8 +370,14 @@ if (billingPropertySelect) {
 
 if (billingPropertySelect) {
   billingPropertySelect.addEventListener("change", () => {
+    if (billingPropertySelect.value && billingClientSelect) {
+      billingClientSelect.value = "";
+    }
     currentInvoiceDraft = null;
+    currentInvoiceBatchDrafts = [];
+    clearInvoiceEligibilitySummary();
     renderInvoicePreview();
+    renderInvoiceBatchPreview();
     renderInvoiceHistory();
   });
 }
@@ -365,14 +396,14 @@ if (invoiceStatusFilter) {
 
 if (invoiceIncludeNonBillableChemicals) {
   invoiceIncludeNonBillableChemicals.addEventListener("change", () => {
-    if (!currentInvoiceDraft) return;
+    if (!currentInvoiceDraft && !currentInvoiceBatchDrafts.length) return;
     generateInvoicePreviewFromFilters();
   });
 }
 
 if (invoiceTaxEnabled) {
   invoiceTaxEnabled.addEventListener("change", () => {
-    if (!currentInvoiceDraft) return;
+    if (!currentInvoiceDraft && !currentInvoiceBatchDrafts.length) return;
     generateInvoicePreviewFromFilters();
   });
 }
@@ -484,6 +515,7 @@ function showView(viewName) {
   if (viewName === "billing") {
     renderBillingReport();
     renderInvoicePreview();
+    renderInvoiceBatchPreview();
     renderInvoiceHistory();
   }
 
@@ -1206,6 +1238,7 @@ async function loadData() {
   renderOperationsRemindersWidget();
   renderBillingReport();
   renderInvoicePreview();
+  renderInvoiceBatchPreview();
   renderInvoiceHistory();
   renderRouteFragmentationAnalytics();
   if (!document.getElementById("chemicalReportWorkspace")?.classList.contains("hidden")) {
@@ -3451,6 +3484,104 @@ function applyManualBillingOverrideTag(notes, shouldApply) {
   return cleanNotes ? `${MANUAL_BILLING_OVERRIDE_TAG} ${cleanNotes}` : MANUAL_BILLING_OVERRIDE_TAG;
 }
 
+function resolvePropertyIdsForScope({ selectedPropertyId = "", selectedClientName = "" } = {}) {
+  if (selectedPropertyId) {
+    return properties
+      .filter((property) => normalizePropertyId(property.id) === normalizePropertyId(selectedPropertyId))
+      .map((property) => property.id);
+  }
+
+  if (selectedClientName) {
+    return properties
+      .filter((property) => String(property.client_name || "").trim() === selectedClientName)
+      .map((property) => property.id);
+  }
+
+  return properties.map((property) => property.id);
+}
+
+function getBillingReportRowsForFilters({
+  startDate,
+  endDate,
+  selectedPropertyId = "",
+  selectedClientName = "",
+  includeInvoiced = true,
+} = {}) {
+  if (!startDate || !endDate) return [];
+
+  const scopePropertyIds = new Set(resolvePropertyIdsForScope({ selectedPropertyId, selectedClientName }).map((id) => normalizePropertyId(id)));
+
+  return cleaningTasks
+    .filter((task) => String(task.status || "").toLowerCase() === "completed")
+    .filter((task) => {
+      const taskDate = task.service_date || task.scheduled_date;
+      return Boolean(taskDate && taskDate >= startDate && taskDate <= endDate);
+    })
+    .filter((task) => scopePropertyIds.has(normalizePropertyId(task.property_id)))
+    .filter((task) => includeInvoiced ? true : !isTaskAlreadyInvoiced(task))
+    .map((task) => {
+      const billingContext = getTaskBillingContext(task);
+      const property = properties.find((item) => normalizePropertyId(item.id) === normalizePropertyId(task.property_id));
+      const taskDate = task.service_date || task.scheduled_date || "";
+      const quantity = 1;
+      const amount = Number(billingContext.billableAmount || 0);
+      const rate = quantity > 0 ? Number((amount / quantity).toFixed(2)) : amount;
+      return {
+        ...task,
+        serviceDate: taskDate,
+        propertyName: property?.property_name || getPropertyName(task.property_id),
+        clientName: String(property?.client_name || "").trim(),
+        serviceLabel: task.service_type || "Manual",
+        billableAmount: amount,
+        billingReasonLabel: billingContext.billingReasonLabel,
+        quantity,
+        unit: "service",
+        rate,
+      };
+    })
+    .filter((task) => Number(task.billableAmount || 0) > 0)
+    .sort((a, b) => {
+      const propertyCompare = String(a.propertyName || "").localeCompare(String(b.propertyName || ""));
+      if (propertyCompare !== 0) return propertyCompare;
+      return String(a.serviceDate || "").localeCompare(String(b.serviceDate || ""));
+    });
+}
+
+function getChemicalReportRowsForFilters({
+  startDate,
+  endDate,
+  selectedPropertyId = "",
+  selectedClientName = "",
+  selectedChemical = "",
+  includeInvoiced = true,
+} = {}) {
+  if (!startDate || !endDate) return [];
+
+  const scopePropertyIds = new Set(resolvePropertyIdsForScope({ selectedPropertyId, selectedClientName }).map((id) => normalizePropertyId(id)));
+
+  return chemicalUsageEntries
+    .filter((entry) => {
+      const dateValue = String(entry.service_date || "");
+      return Boolean(dateValue && dateValue >= startDate && dateValue <= endDate);
+    })
+    .filter((entry) => scopePropertyIds.has(normalizePropertyId(entry.property_id)))
+    .filter((entry) => !selectedChemical || String(entry.chemical_name || "") === selectedChemical)
+    .filter((entry) => includeInvoiced ? true : !isChemicalUsageAlreadyInvoiced(entry))
+    .map((entry) => {
+      const property = properties.find((item) => normalizePropertyId(item.id) === normalizePropertyId(entry.property_id));
+      return {
+        ...entry,
+        property_name: entry.property_name || property?.property_name || getPropertyName(entry.property_id),
+        client_name: String(property?.client_name || "").trim(),
+      };
+    })
+    .sort((a, b) => {
+      const propertyCompare = String(a.property_name || "").localeCompare(String(b.property_name || ""));
+      if (propertyCompare !== 0) return propertyCompare;
+      return String(a.service_date || "").localeCompare(String(b.service_date || ""));
+    });
+}
+
 function getChemicalReportRows() {
   if (!chemicalReportStartDate || !chemicalReportEndDate) return [];
 
@@ -3461,18 +3592,13 @@ function getChemicalReportRows() {
   const selectedPropertyId = chemicalReportPropertySelect?.value || "";
   const selectedChemical = chemicalReportTypeSelect?.value || "";
 
-  return chemicalUsageEntries
-    .filter((entry) => {
-      const dateValue = String(entry.service_date || "");
-      return Boolean(dateValue && dateValue >= startDate && dateValue <= endDate);
-    })
-    .filter((entry) => !selectedPropertyId || normalizePropertyId(entry.property_id) === normalizePropertyId(selectedPropertyId))
-    .filter((entry) => !selectedChemical || String(entry.chemical_name || "") === selectedChemical)
-    .sort((a, b) => {
-      const propertyCompare = String(a.property_name || "").localeCompare(String(b.property_name || ""));
-      if (propertyCompare !== 0) return propertyCompare;
-      return String(a.service_date || "").localeCompare(String(b.service_date || ""));
-    });
+  return getChemicalReportRowsForFilters({
+    startDate,
+    endDate,
+    selectedPropertyId,
+    selectedChemical,
+    includeInvoiced: true,
+  });
 }
 
 function renderChemicalUsageReport() {
@@ -3778,36 +3904,34 @@ function getBillingReportRows() {
   if (!startDate || !endDate) return [];
 
   const selectedPropertyId = billingPropertySelect?.value || "";
+  const selectedClientName = billingClientSelect?.value || "";
 
-  return cleaningTasks
-    .filter((task) => String(task.status || "").toLowerCase() === "completed")
-    .filter((task) => {
-      const taskDate = task.service_date || task.scheduled_date;
-      return Boolean(taskDate && taskDate >= startDate && taskDate <= endDate);
-    })
-    .filter((task) => !selectedPropertyId || task.property_id === selectedPropertyId)
-    .filter((task) => isTaskReconciled(task))
-    .map((task) => {
-      const billingContext = getTaskBillingContext(task);
-      return {
-        ...task,
-        billableAmount: billingContext.billableAmount,
-        billingReasonLabel: billingContext.billingReasonLabel,
-      };
-    })
-    .filter((task) => task.billableAmount > 0)
-    .sort((a, b) => {
-      const aName = getPropertyName(a.property_id);
-      const bName = getPropertyName(b.property_id);
-      if (aName !== bName) return aName.localeCompare(bName);
-      const aDate = a.service_date || a.scheduled_date || "";
-      const bDate = b.service_date || b.scheduled_date || "";
-      return aDate.localeCompare(bDate);
-    });
+  return getBillingReportRowsForFilters({
+    startDate,
+    endDate,
+    selectedPropertyId,
+    selectedClientName,
+    includeInvoiced: true,
+  });
 }
 
 function renderBillingReport() {
   if (!billingReportContainer) return;
+
+  const clientOptions = `<option value="">All Clients</option>${Array.from(new Set(
+    properties
+      .map((property) => String(property.client_name || "").trim())
+      .filter(Boolean)
+  ))
+    .sort((a, b) => a.localeCompare(b))
+    .map((clientName) => `<option value="${clientName}">${clientName}</option>`)
+    .join("")}`;
+
+  if (billingClientSelect && billingClientSelect.innerHTML !== clientOptions) {
+    const previousClient = billingClientSelect.value;
+    billingClientSelect.innerHTML = clientOptions;
+    billingClientSelect.value = previousClient;
+  }
 
   const propertyOptions = `<option value="">All Properties</option>${properties
     .slice()
@@ -3926,44 +4050,72 @@ async function loadInvoices() {
 }
 
 function isTaskAlreadyInvoiced(task) {
-  return isTaskReconciled(task) || Boolean(task?.invoiced_invoice_id);
+  return isTaskReconciled(task)
+    || Boolean(task?.invoiced_invoice_id)
+    || Boolean(task?.invoice_id)
+    || Boolean(task?.invoiced_at);
 }
 
 function isChemicalUsageAlreadyInvoiced(entry) {
   const invoiced = entry?.invoiced === true || entry?.invoiced === 1 || entry?.invoiced === "true";
-  return invoiced || Boolean(entry?.invoiced_invoice_id);
+  return invoiced
+    || Boolean(entry?.invoiced_invoice_id)
+    || Boolean(entry?.invoice_id)
+    || Boolean(entry?.invoiced_at);
 }
 
-function getInvoiceCandidateTasks({ propertyId, startDate, endDate }) {
-  return cleaningTasks
-    .filter((task) => String(task.status || "").toLowerCase() === "completed")
-    .filter((task) => {
-      const taskDate = task.service_date || task.scheduled_date;
-      return Boolean(taskDate && taskDate >= startDate && taskDate <= endDate);
-    })
-    .filter((task) => !propertyId || normalizePropertyId(task.property_id) === normalizePropertyId(propertyId))
-    .filter((task) => getTaskBillingAmount(task) > 0)
-    .filter((task) => !isTaskAlreadyInvoiced(task))
-    .sort((a, b) => String(a.service_date || a.scheduled_date || "").localeCompare(String(b.service_date || b.scheduled_date || "")));
+function getInvoiceCandidateTasks({ startDate, endDate, selectedPropertyId = "", selectedClientName = "" }) {
+  return getBillingReportRowsForFilters({
+    startDate,
+    endDate,
+    selectedPropertyId,
+    selectedClientName,
+    includeInvoiced: false,
+  }).map((row) => ({
+    sourceId: row.id,
+    taskId: row.id,
+    chemicalUsageId: null,
+    propertyId: row.property_id,
+    propertyName: row.propertyName || getPropertyName(row.property_id),
+    clientName: row.clientName || "",
+    description: `${row.propertyName || getPropertyName(row.property_id)} - ${row.serviceLabel || row.service_type || "Cleaning Service"} (${row.billingReasonLabel || "Chargeable"})`,
+    serviceDate: row.serviceDate || row.service_date || row.scheduled_date || "",
+    quantity: Number(row.quantity || 1),
+    unit: row.unit || "service",
+    rate: Number(row.rate || row.billableAmount || 0),
+    amount: Number(row.billableAmount || 0),
+    itemType: "cleaning",
+    itemSource: INVOICE_ITEM_SOURCES.TASK,
+    notes: stripManualBillingOverrideTag(row.notes || ""),
+  }));
 }
 
-function getInvoiceChemicalCandidates(tasks, { includeNonBillableChemicals = false } = {}) {
-  const taskIdSet = new Set(tasks.map((task) => task.id));
+function getInvoiceChemicalCandidates({ startDate, endDate, selectedPropertyId = "", selectedClientName = "", includeNonBillableChemicals = false }) {
+  const rows = getChemicalReportRowsForFilters({
+    startDate,
+    endDate,
+    selectedPropertyId,
+    selectedClientName,
+    includeInvoiced: false,
+  });
 
-  return chemicalUsageEntries
-    .filter((entry) => taskIdSet.has(entry.task_id))
-    .filter((entry) => !isChemicalUsageAlreadyInvoiced(entry))
+  return rows
     .map((entry) => {
       const pricing = getChemicalChargeContext(entry);
       const includeRow = pricing.isBillable || includeNonBillableChemicals;
       if (!includeRow) return null;
+
       const quantity = Number(entry.quantity || 0);
       const rate = pricing.isBillable ? Number(pricing.rate || 0) : 0;
       const amount = Number((quantity * rate).toFixed(2));
       return {
         sourceId: entry.id,
         taskId: entry.task_id || null,
-        description: `${entry.chemical_name || "Chemical"} usage`,
+        chemicalUsageId: entry.id,
+        propertyId: entry.property_id,
+        propertyName: entry.property_name || getPropertyName(entry.property_id),
+        clientName: entry.client_name || "",
+        description: `${entry.property_name || getPropertyName(entry.property_id)} - ${entry.chemical_name || "Chemical"}`,
         serviceDate: entry.service_date || "",
         quantity,
         unit: entry.unit || "unit",
@@ -3988,44 +4140,23 @@ function formatInvoiceDate(date) {
   return formatDateValue(date || new Date());
 }
 
-function buildDraftInvoiceModel({ property, startDate, endDate, includeNonBillableChemicals = false, taxOverride = "property" }) {
+function buildDraftInvoiceModel({ property, clientName = "", propertyIds = [], startDate, endDate, includeNonBillableChemicals = false, taxOverride = "property" }) {
   const invoiceDate = formatInvoiceDate(new Date());
-  const tasks = getInvoiceCandidateTasks({ propertyId: property?.id || "", startDate, endDate });
-  const taskItems = tasks.map((task) => {
-    const amount = Number(getTaskBillingAmount(task) || 0);
-    return {
-      sourceId: task.id,
-      taskId: task.id,
-      chemicalUsageId: null,
-      description: `${task.service_type || "Cleaning Service"} - ${getPropertyName(task.property_id)}`,
-      serviceDate: task.service_date || task.scheduled_date || "",
-      quantity: 1,
-      unit: "service",
-      rate: amount,
-      amount,
-      itemType: "cleaning",
-      itemSource: INVOICE_ITEM_SOURCES.TASK,
-      notes: stripManualBillingOverrideTag(task.notes || ""),
-    };
-  });
+  const selectedPropertyId = property?.id || (propertyIds.length === 1 ? propertyIds[0] : "");
+  const selectedClientName = clientName || "";
+  const taskItems = getInvoiceCandidateTasks({ startDate, endDate, selectedPropertyId, selectedClientName })
+    .filter((item) => !propertyIds.length || propertyIds.some((id) => normalizePropertyId(id) === normalizePropertyId(item.propertyId)));
 
-  const chemicalItems = getInvoiceChemicalCandidates(tasks, { includeNonBillableChemicals }).map((item) => ({
-    sourceId: item.sourceId,
-    taskId: item.taskId,
-    chemicalUsageId: item.sourceId,
-    description: item.description,
-    serviceDate: item.serviceDate,
-    quantity: item.quantity,
-    unit: item.unit,
-    rate: item.rate,
-    amount: item.amount,
-    itemType: "chemical",
-    itemSource: INVOICE_ITEM_SOURCES.CHEMICAL,
-    notes: item.notes || "",
-  }));
+  const chemicalItems = getInvoiceChemicalCandidates({
+    startDate,
+    endDate,
+    selectedPropertyId,
+    selectedClientName,
+    includeNonBillableChemicals,
+  }).filter((item) => !propertyIds.length || propertyIds.some((id) => normalizePropertyId(id) === normalizePropertyId(item.propertyId)));
 
   latestInvoiceCandidates = {
-    tasks,
+    tasks: taskItems,
     chemicalRows: chemicalItems,
   };
 
@@ -4048,8 +4179,8 @@ function buildDraftInvoiceModel({ property, startDate, endDate, includeNonBillab
     id: null,
     invoiceNumber: "(pending)",
     propertyId: property?.id || "",
-    propertyName: property?.property_name || "",
-    clientName: String(property?.client_name || "").trim() || String(property?.billing_company_name || "").trim() || property?.property_name || "Client",
+    propertyName: property?.property_name || (propertyIds.length === 1 ? (properties.find((p) => normalizePropertyId(p.id) === normalizePropertyId(propertyIds[0]))?.property_name || "") : "Multiple Properties"),
+    clientName: clientName || String(property?.client_name || "").trim() || String(property?.billing_company_name || "").trim() || property?.property_name || "Client",
     billingCompanyName: String(property?.billing_company_name || "").trim(),
     billingEmail: String(property?.billing_email || "").trim(),
     billingAddress: String(property?.billing_address || "").trim(),
@@ -4198,38 +4329,255 @@ function renderInvoicePreview() {
   `;
 }
 
+function renderInvoiceEligibilitySummary(groups = [], meta = {}) {
+  if (!invoiceEligibilitySummary) return;
+  if (!groups.length) {
+    const messages = meta.emptyReasons?.length
+      ? `<ul class="invoice-eligibility-reasons">${meta.emptyReasons.map((reason) => `<li>${reason}</li>`).join("")}</ul>`
+      : "";
+    invoiceEligibilitySummary.classList.remove("hidden");
+    invoiceEligibilitySummary.innerHTML = `
+      <div class="billing-report-sheet">
+        <h3>Invoice Eligibility Summary</h3>
+        <div class="empty">No eligible charges found for the selected scope and date range.</div>
+        ${messages}
+      </div>
+    `;
+    return;
+  }
+
+  const markup = groups.map((group) => {
+    const cleaningTotal = group.taskItems.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+    const chemicalTotal = group.chemicalItems.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+    const total = cleaningTotal + chemicalTotal;
+    return `
+      <div class="invoice-eligibility-card">
+        <div><strong>${escapeHtml(group.label)}</strong></div>
+        <div>- ${group.taskItems.length} cleaning charges: ${toMoney(cleaningTotal)}</div>
+        <div>- ${group.chemicalItems.length} chemical charges: ${toMoney(chemicalTotal)}</div>
+        <div><strong>Total eligible charges: ${toMoney(total)}</strong></div>
+      </div>
+    `;
+  }).join("");
+
+  invoiceEligibilitySummary.classList.remove("hidden");
+  invoiceEligibilitySummary.innerHTML = `
+    <div class="billing-report-sheet">
+      <h3>Invoice Eligibility Summary</h3>
+      ${markup}
+    </div>
+  `;
+}
+
+function clearInvoiceEligibilitySummary() {
+  if (!invoiceEligibilitySummary) return;
+  invoiceEligibilitySummary.classList.add("hidden");
+  invoiceEligibilitySummary.innerHTML = "";
+}
+
+function renderInvoiceBatchPreview() {
+  if (!invoiceBatchPreviewContainer) return;
+  if (!currentInvoiceBatchDrafts.length) {
+    invoiceBatchPreviewContainer.classList.add("hidden");
+    invoiceBatchPreviewContainer.innerHTML = "";
+    return;
+  }
+
+  invoiceBatchPreviewContainer.classList.remove("hidden");
+  const rows = currentInvoiceBatchDrafts.map((draft, index) => `
+    <tr>
+      <td><input type="checkbox" checked onchange="toggleBatchInvoiceSelection(${index}, this.checked)"></td>
+      <td>${escapeHtml(draft.clientName || draft.propertyName || "Unassigned")}</td>
+      <td>${escapeHtml(draft.propertyName || "Multiple Properties")}</td>
+      <td>${draft.items.length}</td>
+      <td class="billing-report-amount">${toMoney(draft.total)}</td>
+      <td><button type="button" onclick="openBatchInvoiceDraft(${index})">Preview</button></td>
+    </tr>
+  `).join("");
+
+  invoiceBatchPreviewContainer.innerHTML = `
+    <div class="billing-report-sheet">
+      <h2 class="billing-report-title">Batch Invoice Preview</h2>
+      <div class="billing-report-meta">All Properties selection generated separate drafts by client/property.</div>
+      <table class="billing-report-table">
+        <thead>
+          <tr>
+            <th>Select</th>
+            <th>Client Group</th>
+            <th>Property Scope</th>
+            <th>Line Items</th>
+            <th>Total</th>
+            <th>Preview</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <div class="invoice-preview-actions">
+        <button type="button" onclick="saveSelectedBatchInvoiceDrafts()">Create Selected Draft Invoices</button>
+      </div>
+    </div>
+  `;
+}
+
+function toggleBatchInvoiceSelection(index, selected) {
+  const draft = currentInvoiceBatchDrafts[index];
+  if (!draft) return;
+  draft.selected = selected === true;
+}
+
+function openBatchInvoiceDraft(index) {
+  const draft = currentInvoiceBatchDrafts[index];
+  if (!draft) return;
+  currentInvoiceDraft = { ...draft, items: draft.items.map((item) => ({ ...item })) };
+  renderInvoicePreview();
+}
+
+async function saveSelectedBatchInvoiceDrafts() {
+  const selectedDrafts = currentInvoiceBatchDrafts.filter((draft) => draft.selected !== false);
+  if (!selectedDrafts.length) {
+    alert("Select at least one batch invoice draft to create.");
+    return;
+  }
+
+  for (const draft of selectedDrafts) {
+    currentInvoiceDraft = { ...draft, items: draft.items.map((item) => ({ ...item })) };
+    const saved = await saveInvoiceDraft({ silent: true });
+    if (!saved) {
+      alert("Stopped batch creation because one draft failed to save.");
+      return;
+    }
+  }
+
+  await loadData();
+  alert(`Created ${selectedDrafts.length} draft invoice(s).`);
+}
+
 function generateInvoicePreviewFromFilters() {
   const startDate = billingStartDate?.value || "";
   const endDate = billingEndDate?.value || "";
   const selectedPropertyId = billingPropertySelect?.value || "";
+  const selectedClientName = billingClientSelect?.value || "";
 
   if (!startDate || !endDate) {
     alert("Select a start and end date before generating an invoice.");
     return;
   }
 
-  if (!selectedPropertyId) {
-    alert("Select a property to generate a client invoice.");
-    return;
-  }
-
-  const property = properties.find((item) => normalizePropertyId(item.id) === normalizePropertyId(selectedPropertyId));
-  if (!property) {
-    alert("Property not found.");
-    return;
-  }
-
   const taxOverride = invoiceTaxEnabled?.value || "property";
   const includeNonBillable = invoiceIncludeNonBillableChemicals?.checked === true;
-  currentInvoiceDraft = buildDraftInvoiceModel({
-    property,
-    startDate,
-    endDate,
-    includeNonBillableChemicals: includeNonBillable,
-    taxOverride,
-  });
+  const emptyReasons = [
+    "No completed chargeable tasks were found in the selected date range.",
+    "All eligible tasks may already be invoiced.",
+    "Included/no-charge services are excluded.",
+    "Chemical entries may be non-billable or have a $0 rate.",
+  ];
 
+  currentInvoiceDraft = null;
+  currentInvoiceBatchDrafts = [];
+
+  if (selectedPropertyId) {
+    const property = properties.find((item) => normalizePropertyId(item.id) === normalizePropertyId(selectedPropertyId));
+    if (!property) {
+      alert("Property not found.");
+      return;
+    }
+
+    const draft = buildDraftInvoiceModel({
+      property,
+      propertyIds: [property.id],
+      startDate,
+      endDate,
+      includeNonBillableChemicals: includeNonBillable,
+      taxOverride,
+    });
+
+    const taskItems = draft.items.filter((item) => item.itemSource === INVOICE_ITEM_SOURCES.TASK);
+    const chemicalItems = draft.items.filter((item) => item.itemSource === INVOICE_ITEM_SOURCES.CHEMICAL);
+    renderInvoiceEligibilitySummary([{ label: property.property_name, taskItems, chemicalItems }], { emptyReasons });
+    if (!draft.items.length) {
+      renderInvoicePreview();
+      renderInvoiceBatchPreview();
+      return;
+    }
+
+    currentInvoiceDraft = draft;
+    renderInvoicePreview();
+    renderInvoiceBatchPreview();
+    return;
+  }
+
+  if (selectedClientName) {
+    const clientProperties = properties.filter((property) => String(property.client_name || "").trim() === selectedClientName);
+    const primaryProperty = clientProperties[0] || null;
+    const draft = buildDraftInvoiceModel({
+      property: primaryProperty,
+      clientName: selectedClientName,
+      propertyIds: clientProperties.map((property) => property.id),
+      startDate,
+      endDate,
+      includeNonBillableChemicals: includeNonBillable,
+      taxOverride,
+    });
+
+    const taskItems = draft.items.filter((item) => item.itemSource === INVOICE_ITEM_SOURCES.TASK);
+    const chemicalItems = draft.items.filter((item) => item.itemSource === INVOICE_ITEM_SOURCES.CHEMICAL);
+    renderInvoiceEligibilitySummary([{ label: selectedClientName, taskItems, chemicalItems }], { emptyReasons });
+    if (!draft.items.length) {
+      renderInvoicePreview();
+      renderInvoiceBatchPreview();
+      return;
+    }
+
+    currentInvoiceDraft = draft;
+    renderInvoicePreview();
+    renderInvoiceBatchPreview();
+    return;
+  }
+
+  const grouped = new Map();
+  for (const property of properties) {
+    const clientLabel = String(property.client_name || "").trim();
+    const key = clientLabel ? `client:${clientLabel}` : `property:${property.id}`;
+    if (!grouped.has(key)) {
+      grouped.set(key, {
+        key,
+        clientName: clientLabel,
+        properties: [],
+      });
+    }
+    grouped.get(key).properties.push(property);
+  }
+
+  const eligibilityGroups = [];
+  const batchDrafts = [];
+  for (const group of grouped.values()) {
+    const primaryProperty = group.properties[0] || null;
+    const label = group.clientName || primaryProperty?.property_name || "Unassigned";
+    const draft = buildDraftInvoiceModel({
+      property: primaryProperty,
+      clientName: group.clientName,
+      propertyIds: group.properties.map((property) => property.id),
+      startDate,
+      endDate,
+      includeNonBillableChemicals: includeNonBillable,
+      taxOverride,
+    });
+
+    const taskItems = draft.items.filter((item) => item.itemSource === INVOICE_ITEM_SOURCES.TASK);
+    const chemicalItems = draft.items.filter((item) => item.itemSource === INVOICE_ITEM_SOURCES.CHEMICAL);
+    if (taskItems.length || chemicalItems.length) {
+      eligibilityGroups.push({ label, taskItems, chemicalItems });
+      batchDrafts.push({
+        ...draft,
+        selected: true,
+      });
+    }
+  }
+
+  currentInvoiceBatchDrafts = batchDrafts;
+  renderInvoiceEligibilitySummary(eligibilityGroups, { emptyReasons });
   renderInvoicePreview();
+  renderInvoiceBatchPreview();
 }
 
 function updateInvoiceItemField(index, field, rawValue) {
@@ -4364,10 +4712,11 @@ function buildInvoiceNumber() {
   return `${prefix}${next}`;
 }
 
-async function saveInvoiceDraft() {
+async function saveInvoiceDraft(options = {}) {
+  const silent = options?.silent === true;
   if (!currentInvoiceDraft) return;
   if (!currentInvoiceDraft.propertyId) {
-    alert("Select a property before saving an invoice draft.");
+    if (!silent) alert("Select a property before saving an invoice draft.");
     return false;
   }
 
@@ -4398,7 +4747,7 @@ async function saveInvoiceDraft() {
       .eq("id", invoiceId);
 
     if (error) {
-      alert("Error updating invoice draft: " + error.message);
+      if (!silent) alert("Error updating invoice draft: " + error.message);
       return false;
     }
 
@@ -4411,7 +4760,7 @@ async function saveInvoiceDraft() {
       .single();
 
     if (error) {
-      alert("Error saving invoice draft: " + error.message + "\nRun invoice migration first if needed.");
+      if (!silent) alert("Error saving invoice draft: " + error.message + "\nRun invoice migration first if needed.");
       return false;
     }
 
@@ -4441,12 +4790,14 @@ async function saveInvoiceDraft() {
       .insert(itemsPayload);
 
     if (itemError) {
-      alert("Invoice draft saved, but line items failed: " + itemError.message);
+      if (!silent) alert("Invoice draft saved, but line items failed: " + itemError.message);
       return false;
     }
   }
 
-  alert("Invoice draft saved.");
+  if (!silent) {
+    alert("Invoice draft saved.");
+  }
   await loadInvoices();
   renderInvoiceHistory();
   renderInvoicePreview();
@@ -4470,7 +4821,7 @@ async function finalizeInvoiceDraft() {
   if (cleaningTaskIds.length) {
     const { data: latestTasks, error: latestTaskError } = await supabaseClient
       .from("cleaning_tasks")
-      .select("id, invoiced, invoiced_invoice_id")
+      .select("id, invoiced, invoiced_invoice_id, invoice_id, invoiced_at")
       .in("id", cleaningTaskIds);
 
     if (latestTaskError) {
@@ -4488,7 +4839,7 @@ async function finalizeInvoiceDraft() {
   if (chemicalUsageIds.length) {
     const { data: latestChemicalRows, error: latestChemicalError } = await supabaseClient
       .from("chemical_usage")
-      .select("id, invoiced, invoiced_invoice_id")
+      .select("id, invoiced, invoiced_invoice_id, invoice_id, invoiced_at")
       .in("id", chemicalUsageIds);
 
     if (latestChemicalError) {
@@ -4514,11 +4865,14 @@ async function finalizeInvoiceDraft() {
   }
 
   if (cleaningTaskIds.length) {
+    const invoicedAt = new Date().toISOString();
     const { error: taskUpdateError } = await supabaseClient
       .from("cleaning_tasks")
       .update({
         invoiced: true,
         invoiced_invoice_id: currentInvoiceDraft.id,
+        invoice_id: currentInvoiceDraft.id,
+        invoiced_at: invoicedAt,
       })
       .in("id", cleaningTaskIds);
 
@@ -4529,11 +4883,14 @@ async function finalizeInvoiceDraft() {
   }
 
   if (chemicalUsageIds.length) {
+    const invoicedAt = new Date().toISOString();
     const { error: chemicalUpdateError } = await supabaseClient
       .from("chemical_usage")
       .update({
         invoiced: true,
         invoiced_invoice_id: currentInvoiceDraft.id,
+        invoice_id: currentInvoiceDraft.id,
+        invoiced_at: invoicedAt,
       })
       .in("id", chemicalUsageIds);
 
@@ -4555,6 +4912,8 @@ async function updateInvoiceStatus(invoiceId, status) {
     return;
   }
 
+  const existing = invoices.find((invoice) => invoice.id === invoiceId);
+
   const { error } = await supabaseClient
     .from("invoices")
     .update({ status: normalizedStatus })
@@ -4565,7 +4924,41 @@ async function updateInvoiceStatus(invoiceId, status) {
     return;
   }
 
+  if (normalizedStatus === "void" && existing && String(existing.status || "").toLowerCase() !== "void") {
+    const { error: taskReleaseError } = await supabaseClient
+      .from("cleaning_tasks")
+      .update({
+        invoiced: false,
+        invoiced_invoice_id: null,
+        invoice_id: null,
+        invoiced_at: null,
+      })
+      .or(`invoice_id.eq.${invoiceId},invoiced_invoice_id.eq.${invoiceId}`);
+
+    if (taskReleaseError) {
+      alert("Invoice was voided, but task linkage release failed: " + taskReleaseError.message);
+      return;
+    }
+
+    const { error: chemicalReleaseError } = await supabaseClient
+      .from("chemical_usage")
+      .update({
+        invoiced: false,
+        invoiced_invoice_id: null,
+        invoice_id: null,
+        invoiced_at: null,
+      })
+      .or(`invoice_id.eq.${invoiceId},invoiced_invoice_id.eq.${invoiceId}`);
+
+    if (chemicalReleaseError) {
+      alert("Invoice was voided, but chemical linkage release failed: " + chemicalReleaseError.message);
+      return;
+    }
+  }
+
   await loadInvoices();
+  await loadCleaningTasks();
+  await loadChemicalUsageEntries();
   renderInvoiceHistory();
 }
 
