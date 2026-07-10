@@ -320,7 +320,10 @@ if (debugTasksBtn) {
 }
 
 if (billingRunBtn) {
-  billingRunBtn.addEventListener("click", renderBillingReport);
+  billingRunBtn.addEventListener("click", () => {
+    renderBillingReport();
+    refreshBillingCard();
+  });
 }
 
 if (billingPrintBtn) {
@@ -329,6 +332,7 @@ if (billingPrintBtn) {
 
 if (billingStartDate) {
   billingStartDate.addEventListener("change", renderBillingReport);
+  billingStartDate.addEventListener("change", refreshBillingCard);
   billingStartDate.addEventListener("change", () => {
     currentInvoiceDraft = null;
     currentInvoiceBatchDrafts = [];
@@ -340,6 +344,7 @@ if (billingStartDate) {
 
 if (billingEndDate) {
   billingEndDate.addEventListener("change", renderBillingReport);
+  billingEndDate.addEventListener("change", refreshBillingCard);
   billingEndDate.addEventListener("change", () => {
     currentInvoiceDraft = null;
     currentInvoiceBatchDrafts = [];
@@ -355,6 +360,7 @@ if (billingClientSelect) {
       billingPropertySelect.value = "";
     }
     renderBillingReport();
+    refreshBillingCard();
     currentInvoiceDraft = null;
     currentInvoiceBatchDrafts = [];
     clearInvoiceEligibilitySummary();
@@ -366,6 +372,7 @@ if (billingClientSelect) {
 
 if (billingPropertySelect) {
   billingPropertySelect.addEventListener("change", renderBillingReport);
+  billingPropertySelect.addEventListener("change", refreshBillingCard);
 }
 
 if (billingPropertySelect) {
@@ -384,6 +391,7 @@ if (billingPropertySelect) {
 
 if (billingReconciledOnly) {
   billingReconciledOnly.addEventListener("change", renderBillingReport);
+  billingReconciledOnly.addEventListener("change", refreshBillingCard);
 }
 
 if (generateInvoiceBtn) {
@@ -2924,21 +2932,22 @@ function refreshBillingCard() {
     selectedPropertyId,
     selectedClientName,
   });
-  const billedTasks = eligibleTasks.filter((task) => isBillingRowReconciled(task));
+  const billingReportRows = getBillingReportRows();
 
   logBillingSummaryEligibleTasks(eligibleTasks);
-  logBillingSummaryDebugRows(billedTasks, "included in billing summary billed/invoiced totals");
+  logBillingSummaryDebugRows(billingReportRows, "included in billing summary billed/invoiced totals");
 
   const totalBillableAmount = Number(eligibleTasks.reduce((sum, task) => sum + Number(task.billableAmount || 0), 0).toFixed(2));
-  const invoicedAmount = Number(billedTasks.reduce((sum, task) => sum + Number(task.billableAmount || 0), 0).toFixed(2));
+  const invoicedAmount = Number(billingReportRows.reduce((sum, row) => sum + Number(row.billableAmount || row.amount || 0), 0).toFixed(2));
   const totalBillableTaskCount = eligibleTasks.length;
-  const invoicedTaskCount = billedTasks.length;
+  const invoicedTaskCount = billingReportRows.length;
 
-  console.log("[Billing Summary Debug][Final Totals]", {
-    finalBilledAmount: invoicedAmount,
-    finalAvailableAmount: totalBillableAmount,
-    finalBilledCount: invoicedTaskCount,
-    finalAvailableCount: totalBillableTaskCount,
+  console.log({
+    displayedBillingRows: billingReportRows,
+    billedTaskCount: billingReportRows.length,
+    billedAmount: billingReportRows.reduce((sum, row) => sum + Number(row.billableAmount || row.amount || 0), 0),
+    availableTaskCount: totalBillableTaskCount,
+    availableBillableAmount: totalBillableAmount,
   });
   
   const invoicedAmountEl = document.getElementById("invoicedAmount");
