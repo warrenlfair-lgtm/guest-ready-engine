@@ -2917,22 +2917,29 @@ function toggleInvoiceMarker(taskId) {
 }
 
 function refreshBillingCard() {
-  const { startDate, endDate, selectedPropertyId, selectedClientName } = getActiveBillingFilterState();
-  const eligibleRows = getBillingReportRowsForFilters({
+  const { startDate, endDate, selectedPropertyId, selectedClientName } = getCurrentMonthBillingSummaryFilterState();
+  const eligibleTasks = getBillingSummaryEligibleTasks({
     startDate,
     endDate,
     selectedPropertyId,
     selectedClientName,
-    includeInvoiced: true,
   });
-  const countedRows = eligibleRows.filter((row) => isBillingRowReconciled(row));
+  const billedTasks = eligibleTasks.filter((task) => isBillingRowReconciled(task));
 
-  logBillingSummaryDebugRows(countedRows, "included in billing summary billed/invoiced totals");
+  logBillingSummaryEligibleTasks(eligibleTasks);
+  logBillingSummaryDebugRows(billedTasks, "included in billing summary billed/invoiced totals");
 
-  const totalBillableAmount = Number(eligibleRows.reduce((sum, row) => sum + Number(row.billableAmount || 0), 0).toFixed(2));
-  const invoicedAmount = Number(countedRows.reduce((sum, row) => sum + Number(row.billableAmount || 0), 0).toFixed(2));
-  const totalBillableTaskCount = eligibleRows.length;
-  const invoicedTaskCount = countedRows.length;
+  const totalBillableAmount = Number(eligibleTasks.reduce((sum, task) => sum + Number(task.billableAmount || 0), 0).toFixed(2));
+  const invoicedAmount = Number(billedTasks.reduce((sum, task) => sum + Number(task.billableAmount || 0), 0).toFixed(2));
+  const totalBillableTaskCount = eligibleTasks.length;
+  const invoicedTaskCount = billedTasks.length;
+
+  console.log("[Billing Summary Debug][Final Totals]", {
+    finalBilledAmount: invoicedAmount,
+    finalAvailableAmount: totalBillableAmount,
+    finalBilledCount: invoicedTaskCount,
+    finalAvailableCount: totalBillableTaskCount,
+  });
   
   const invoicedAmountEl = document.getElementById("invoicedAmount");
   const totalBillableAmountEl = document.getElementById("totalBillableAmount");
@@ -3940,6 +3947,60 @@ function logBillingSummaryDebugRows(rows, reason) {
       billingReason: row.billingReasonLabel || "Chargeable",
       sourceType: "task",
       whyIncluded: reason,
+    });
+  });
+}
+
+function getCurrentMonthBillingSummaryFilterState() {
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  return {
+    startDate: formatDateValue(monthStart),
+    endDate: formatDateValue(monthEnd),
+    selectedPropertyId: billingPropertySelect?.value || "",
+    selectedClientName: billingClientSelect?.value || "",
+  };
+}
+
+function getBillingSummaryEligibleTasks({ startDate, endDate, selectedPropertyId = "", selectedClientName = "" } = {}) {
+  const scopedPropertyIds = new Set(resolvePropertyIdsForScope({ selectedPropertyId, selectedClientName }).map((id) => normalizePropertyId(id)));
+
+  return cleaningTasks
+    .filter((task) => scopedPropertyIds.has(normalizePropertyId(task.property_id)))
+    .filter((task) => {
+      const status = String(task.status || "").toLowerCase();
+      return status !== "cancelled" && status !== "void" && status !== "deleted";
+    })
+    .map((task) => {
+      const serviceDate = task.service_date || task.scheduled_date || "";
+      const billingContext = getTaskBillingContext(task);
+      const amount = Number(billingContext.billableAmount || 0);
+      const isInRange = Boolean(serviceDate && serviceDate >= startDate && serviceDate <= endDate);
+      const isEligibleChargeable = amount > 0;
+      return {
+        ...task,
+        serviceDate,
+        propertyName: getPropertyName(task.property_id),
+        billingReasonLabel: billingContext.billingReasonLabel,
+        billableAmount: amount,
+        isEligibleChargeable,
+        isInRange,
+      };
+    })
+    .filter((task) => task.isInRange)
+    .filter((task) => task.isEligibleChargeable);
+}
+
+function logBillingSummaryEligibleTasks(tasks) {
+  tasks.forEach((task) => {
+    console.log("[Billing Summary Debug][Eligible Task]", {
+      id: task.id,
+      property: task.propertyName || getPropertyName(task.property_id),
+      serviceDate: task.serviceDate || task.service_date || task.scheduled_date || "",
+      amount: Number(task.billableAmount || 0),
+      billingReason: task.billingReasonLabel || "Chargeable",
+      billedState: isBillingRowReconciled(task) ? "billed" : "unbilled",
     });
   });
 }
