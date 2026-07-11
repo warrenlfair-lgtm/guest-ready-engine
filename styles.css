@@ -691,45 +691,6 @@ button:hover {
     padding: 12px 16px;
 }
 
-.property-modal-card {
-    width: min(680px, 96vw);
-    max-height: 90vh;
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-}
-
-.property-modal-header {
-    position: sticky;
-    top: 0;
-    z-index: 5;
-    background: #ffffff;
-    border-bottom: 1px solid #e2e8f0;
-    padding: 14px 16px;
-}
-
-.property-modal-header h2 {
-    margin: 0;
-    font-size: 1.2rem;
-    color: #0f172a;
-}
-
-.property-modal-body {
-    padding: 0 16px 14px;
-    overflow-y: auto;
-}
-
-.property-modal-footer {
-    position: sticky;
-    bottom: 0;
-    z-index: 5;
-    background: #ffffff;
-    border-top: 1px solid #e2e8f0;
-    margin-top: auto;
-    padding: 12px 16px;
-}
-
 .pin-modal-card {
     width: 360px;
 }
@@ -883,22 +844,6 @@ textarea{
     .edit-task-modal-header,
     .edit-task-modal-footer,
     .edit-task-modal-body {
-        padding-left: 12px;
-        padding-right: 12px;
-    }
-
-    .property-modal-card {
-        width: 100%;
-        max-width: 100%;
-        max-height: 90vh;
-        min-height: auto;
-        border-radius: 12px;
-        padding: 0;
-    }
-
-    .property-modal-header,
-    .property-modal-footer,
-    .property-modal-body {
         padding-left: 12px;
         padding-right: 12px;
     }
