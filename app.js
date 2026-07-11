@@ -4653,17 +4653,7 @@ function getInvoicePropertyNames(invoiceItems = []) {
   ];
 }
 
-function buildInvoicePropertyHeaderLabel({ invoice = {}, invoiceItems = [], selectedPropertyId = "", selectedPropertyName = "" } = {}) {
-  const savedPropertyName = getSavedInvoicePropertyName(invoice);
-  if (savedPropertyName) {
-    return `Property: ${savedPropertyName}`;
-  }
-
-  const selectedName = getSelectedInvoicePropertyName(selectedPropertyId, selectedPropertyName);
-  if (selectedName) {
-    return `Property: ${selectedName}`;
-  }
-
+function buildInvoicePropertyHeaderLabel({ invoice = {}, invoiceItems = [] } = {}) {
   const propertyNames = getInvoicePropertyNames(invoiceItems);
   if (propertyNames.length === 1) {
     return `Property: ${propertyNames[0]}`;
@@ -4671,23 +4661,13 @@ function buildInvoicePropertyHeaderLabel({ invoice = {}, invoiceItems = [], sele
   if (propertyNames.length > 1) {
     return `Properties: ${propertyNames.join(", ")}`;
   }
-  return "Properties: Multiple Properties";
+
+  const savedPropertyName = getSavedInvoicePropertyName(invoice);
+  return savedPropertyName ? `Property: ${savedPropertyName}` : "Properties: Multiple Properties";
 }
 
 function buildInvoicePropertyHistoryLabel({ invoice = {}, invoiceItems = [] } = {}) {
-  const savedPropertyName = getSavedInvoicePropertyName(invoice);
-  if (savedPropertyName) {
-    return savedPropertyName;
-  }
-
-  const propertyNames = getInvoicePropertyNames(invoiceItems);
-  if (propertyNames.length === 1) {
-    return propertyNames[0];
-  }
-  if (propertyNames.length > 1) {
-    return propertyNames.join(", ");
-  }
-  return "Multiple Properties";
+  return buildInvoicePropertyHeaderLabel({ invoice, invoiceItems });
 }
 
 function renderInvoicePreview() {
