@@ -24,6 +24,8 @@ CREATE TABLE IF NOT EXISTS invoices (
   period_end DATE,
   invoice_date DATE,
   due_date DATE,
+  payment_terms TEXT DEFAULT 'Net 15',
+  custom_due_days INTEGER,
   subtotal NUMERIC DEFAULT 0,
   tax NUMERIC DEFAULT 0,
   total NUMERIC DEFAULT 0,

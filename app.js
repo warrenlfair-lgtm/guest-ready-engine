@@ -70,6 +70,7 @@ const INVOICE_QUICK_ADD_TEMPLATES = {
   credit: { description: "Credit", unit: "credit", rate: -25, itemType: "credit" },
 };
 const CHEMICAL_UNIT_OPTIONS = ["gallons", "pounds", "ounces", "tablets", "bags", "quarts"];
+const PAYMENT_TERMS_OPTIONS = ["COD", "Due on Receipt", "Net 7", "Net 15", "Net 30", "Custom"];
 const DEFAULT_CHEMICAL_CATALOG = [
   { name: "Liquid Chlorine", default_unit: "gallons", cost_per_unit: 0, billable_rate_per_unit: 0, is_billable: true },
   { name: "Chlorine Tablets", default_unit: "tablets", cost_per_unit: 0, billable_rate_per_unit: 0, is_billable: true },
@@ -116,6 +117,8 @@ const propertyDefaultCleaningRate = document.getElementById("propertyDefaultClea
 const propertyTaxable = document.getElementById("propertyTaxable");
 const propertyTaxRate = document.getElementById("propertyTaxRate");
 const propertyPaymentTerms = document.getElementById("propertyPaymentTerms");
+const propertyCustomDueDaysGroup = document.getElementById("propertyCustomDueDaysGroup");
+const propertyCustomDueDays = document.getElementById("propertyCustomDueDays");
 const propertyInvoiceNotes = document.getElementById("propertyInvoiceNotes");
 
 const cleaningDate = document.getElementById("cleaningDate");
@@ -191,6 +194,9 @@ const chemicalReportContainer = document.getElementById("chemicalReportContainer
 const chemicalReportPrintBtn = document.getElementById("chemicalReportPrintBtn");
 const chemicalReportPdfBtn = document.getElementById("chemicalReportPdfBtn");
 const chemicalReportShareBtn = document.getElementById("chemicalReportShareBtn");
+const invoicePaymentTermsSelect = document.getElementById("invoicePaymentTerms");
+const invoiceCustomDueDaysInput = document.getElementById("invoiceCustomDueDays");
+const invoicePaymentTermsWarning = document.getElementById("invoicePaymentTermsWarning");
 const messageWeekDate = document.getElementById("messageWeekDate");
 const messageUnassignedName = document.getElementById("messageUnassignedName");
 const messagesByTech = document.getElementById("messagesByTech");
@@ -484,6 +490,10 @@ if (companyLogoUrlInput) {
   companyLogoUrlInput.addEventListener("input", () => {
     renderCompanyLogoPreview(companyLogoUrlInput.value);
   });
+}
+
+if (propertyPaymentTerms) {
+  propertyPaymentTerms.addEventListener("change", togglePropertyCustomDueDaysVisibility);
 }
 
 if (uploadCompanyLogoBtn) {
@@ -967,7 +977,9 @@ function openEditModal(id) {
   if (propertyDefaultCleaningRate) propertyDefaultCleaningRate.value = Number(property.default_cleaning_rate || 0);
   if (propertyTaxable) propertyTaxable.value = property.billing_taxable === false ? "no" : "yes";
   if (propertyTaxRate) propertyTaxRate.value = Number(property.billing_tax_rate || 0);
-  if (propertyPaymentTerms) propertyPaymentTerms.value = property.payment_terms || DEFAULT_INVOICE_TERMS;
+  if (propertyPaymentTerms) propertyPaymentTerms.value = normalizePaymentTerms(property.payment_terms) || DEFAULT_INVOICE_TERMS;
+  if (propertyCustomDueDays) propertyCustomDueDays.value = property.custom_due_days ?? 15;
+  togglePropertyCustomDueDaysVisibility();
   if (propertyInvoiceNotes) propertyInvoiceNotes.value = property.invoice_notes || "";
 
   propertyModal.classList.remove("hidden");
@@ -2434,10 +2446,14 @@ async function saveProperty() {
     default_cleaning_rate: Number(propertyDefaultCleaningRate?.value || 0),
     billing_taxable: taxable,
     billing_tax_rate: taxable ? Number(propertyTaxRate?.value || 0) : 0,
-    payment_terms: String(propertyPaymentTerms?.value || "").trim() || DEFAULT_INVOICE_TERMS,
+    payment_terms: normalizePaymentTerms(propertyPaymentTerms?.value) || DEFAULT_INVOICE_TERMS,
     invoice_notes: String(propertyInvoiceNotes?.value || "").trim() || null,
     active: true
   };
+
+  if (normalizePaymentTerms(propertyPaymentTerms?.value) === "Custom") {
+    propertyData.custom_due_days = Number(propertyCustomDueDays?.value || 0) || null;
+  }
 
   if (!propertyData.property_name) {
     alert("Property name is required.");
@@ -2467,6 +2483,7 @@ async function saveProperty() {
     "billing_taxable",
     "billing_tax_rate",
     "payment_terms",
+    "custom_due_days",
     "invoice_notes",
   ];
 
@@ -2888,7 +2905,15 @@ function clearPropertyForm() {
   if (propertyTaxable) propertyTaxable.value = "yes";
   if (propertyTaxRate) propertyTaxRate.value = 0;
   if (propertyPaymentTerms) propertyPaymentTerms.value = DEFAULT_INVOICE_TERMS;
+  if (propertyCustomDueDays) propertyCustomDueDays.value = "15";
+  togglePropertyCustomDueDaysVisibility();
   if (propertyInvoiceNotes) propertyInvoiceNotes.value = "";
+}
+
+function togglePropertyCustomDueDaysVisibility() {
+  if (!propertyCustomDueDaysGroup || !propertyPaymentTerms) return;
+  const isCustom = normalizePaymentTerms(propertyPaymentTerms.value) === "Custom";
+  propertyCustomDueDaysGroup.classList.toggle("hidden", !isCustom);
 }
 
 function toggleInvoiceMarker(taskId) {
@@ -2980,9 +3005,9 @@ function parseDateString(dateString) {
 }
 
 function formatDateValue(date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(date.getUTCDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
 }
 
@@ -4436,10 +4461,130 @@ function getInvoiceChemicalCandidates({ startDate, endDate, selectedPropertyId =
 }
 
 function getInvoiceTermsDays(terms) {
-  const value = String(terms || "").trim().toLowerCase();
-  const match = value.match(/(\d+)/);
-  if (match) return Number(match[1]);
-  return 15;
+  return getPaymentTermsDayCount(terms);
+}
+
+function normalizePaymentTerms(value) {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) return "";
+  const matched = PAYMENT_TERMS_OPTIONS.find((option) => option.toLowerCase() === trimmed.toLowerCase());
+  return matched || trimmed;
+}
+
+function getPaymentTermsDayCount(paymentTerms, customDueDays = null) {
+  const normalized = normalizePaymentTerms(paymentTerms) || DEFAULT_INVOICE_TERMS;
+  if (normalized === "COD" || normalized === "Due on Receipt") return 0;
+  if (normalized === "Net 7") return 7;
+  if (normalized === "Net 15") return 15;
+  if (normalized === "Net 30") return 30;
+  if (normalized === "Custom") {
+    const days = Number(customDueDays);
+    return Number.isFinite(days) && days >= 0 ? days : 15;
+  }
+
+  const match = normalized.match(/(\d+)/);
+  return match ? Number(match[1]) : 15;
+}
+
+function calculateInvoiceDueDate(invoiceDate, paymentTerms, customDueDays = null) {
+  const date = parseDateString(invoiceDate || formatDateValue(new Date()));
+  date.setUTCDate(date.getUTCDate() + getPaymentTermsDayCount(paymentTerms, customDueDays));
+  return formatDateValue(date);
+}
+
+function getPaymentTermsDisplayValue(paymentTerms) {
+  return normalizePaymentTerms(paymentTerms) || DEFAULT_INVOICE_TERMS;
+}
+
+function getPropertyPaymentTermsConfig(property) {
+  const paymentTerms = normalizePaymentTerms(property?.payment_terms) || DEFAULT_INVOICE_TERMS;
+  const customDueDays = Number(property?.custom_due_days);
+  return {
+    paymentTerms,
+    customDueDays: Number.isFinite(customDueDays) ? customDueDays : null,
+  };
+}
+
+function resolveInvoicePaymentTermsConfig({ property = null, propertyIds = [], clientName = "" } = {}) {
+  const selectedProperties = propertyIds.length
+    ? properties.filter((item) => propertyIds.some((id) => normalizePropertyId(id) === normalizePropertyId(item.id)))
+    : property
+      ? [property]
+      : [];
+
+  const configs = selectedProperties.map((item) => getPropertyPaymentTermsConfig(item));
+  const uniqueTerms = Array.from(new Set(configs.map((config) => config.paymentTerms).filter(Boolean)));
+  const uniqueConfigKeys = Array.from(new Set(configs.map((config) => `${config.paymentTerms}::${config.customDueDays ?? ""}`)));
+
+  if (propertyIds.length > 1 || clientName) {
+    if (uniqueTerms.length === 1 && uniqueConfigKeys.length === 1) {
+      const chosen = uniqueTerms[0];
+      const matchingConfig = configs.find((config) => config.paymentTerms === chosen) || configs[0] || getPropertyPaymentTermsConfig(property);
+      return {
+        paymentTerms: chosen,
+        customDueDays: matchingConfig?.customDueDays ?? null,
+        warning: "",
+        requiresChoice: false,
+      };
+    }
+
+    return {
+      paymentTerms: "",
+      customDueDays: null,
+      warning: selectedProperties.length > 1 ? "Selected properties have different payment terms." : "",
+      requiresChoice: uniqueTerms.length > 1 || uniqueConfigKeys.length > 1,
+    };
+  }
+
+  const config = getPropertyPaymentTermsConfig(property || selectedProperties[0] || null);
+  return {
+    paymentTerms: config.paymentTerms,
+    customDueDays: config.customDueDays,
+    warning: "",
+    requiresChoice: false,
+  };
+}
+
+function buildPaymentTermsOptionsMarkup(selectedValue = "", allowBlank = false) {
+  const normalizedSelected = normalizePaymentTerms(selectedValue);
+  const blankOption = allowBlank ? `<option value="">Choose payment terms...</option>` : "";
+  return `${blankOption}${PAYMENT_TERMS_OPTIONS.map((option) => `<option value="${option}" ${normalizedSelected === option ? "selected" : ""}>${option}</option>`).join("")}`;
+}
+
+function setInvoicePaymentTerms(paymentTerms, options = {}) {
+  if (!currentInvoiceDraft) return;
+
+  const normalized = normalizePaymentTerms(paymentTerms);
+  currentInvoiceDraft.paymentTerms = normalized || "";
+  currentInvoiceDraft.customDueDays = normalized === "Custom"
+    ? Number(options.customDueDays ?? currentInvoiceDraft.customDueDays ?? 15) || 15
+    : null;
+  currentInvoiceDraft.paymentTermsChoiceRequired = false;
+  currentInvoiceDraft.paymentTermsWarning = "";
+
+  const shouldRecalculate = options.recalculateDueDate !== false && !currentInvoiceDraft.dueDateManuallyEdited;
+  if (shouldRecalculate) {
+    currentInvoiceDraft.dueDate = calculateInvoiceDueDate(
+      currentInvoiceDraft.invoiceDate,
+      currentInvoiceDraft.paymentTerms || DEFAULT_INVOICE_TERMS,
+      currentInvoiceDraft.customDueDays
+    );
+  }
+
+  renderInvoicePreview();
+}
+
+function setInvoiceCustomDueDays(customDueDays, options = {}) {
+  if (!currentInvoiceDraft) return;
+
+  const nextDays = Number(customDueDays || 0) || 15;
+  currentInvoiceDraft.customDueDays = nextDays;
+
+  if (normalizePaymentTerms(currentInvoiceDraft.paymentTerms) === "Custom" && options.recalculateDueDate !== false && !currentInvoiceDraft.dueDateManuallyEdited) {
+    currentInvoiceDraft.dueDate = calculateInvoiceDueDate(currentInvoiceDraft.invoiceDate, "Custom", nextDays);
+  }
+
+  renderInvoicePreview();
 }
 
 function formatInvoiceDate(date) {
@@ -4485,12 +4630,16 @@ function buildDraftInvoiceModel({ property, clientName = "", propertyIds = [], s
   const tax = taxable && taxRate > 0 ? Number((subtotal * (taxRate / 100)).toFixed(2)) : 0;
   const total = Number((subtotal + tax).toFixed(2));
 
-  const paymentTerms = String(property?.payment_terms || DEFAULT_INVOICE_TERMS).trim() || DEFAULT_INVOICE_TERMS;
-  const dueDate = (() => {
-    const date = parseDateString(invoiceDate);
-    date.setUTCDate(date.getUTCDate() + getInvoiceTermsDays(paymentTerms));
-    return formatDateValue(date);
-  })();
+  const invoicePaymentTermsConfig = resolveInvoicePaymentTermsConfig({
+    property,
+    propertyIds,
+    clientName: selectedClientName,
+  });
+  const paymentTerms = invoicePaymentTermsConfig.paymentTerms || "";
+  const customDueDays = invoicePaymentTermsConfig.customDueDays ?? null;
+  const paymentTermsWarning = invoicePaymentTermsConfig.warning || "";
+  const paymentTermsChoiceRequired = invoicePaymentTermsConfig.requiresChoice === true;
+  const dueDate = calculateInvoiceDueDate(invoiceDate, paymentTerms || DEFAULT_INVOICE_TERMS, customDueDays);
 
   return {
     id: null,
@@ -4509,6 +4658,9 @@ function buildDraftInvoiceModel({ property, clientName = "", propertyIds = [], s
     status: "draft",
     notes: String(property?.invoice_notes || "").trim(),
     paymentTerms,
+    customDueDays,
+    paymentTermsWarning,
+    paymentTermsChoiceRequired,
     taxable,
     taxRate,
     includeNonBillableChemicals,
@@ -4612,6 +4764,9 @@ function renderInvoicePreview() {
   const accountReference = String(invoice.accountReference || "").trim();
   const notes = String(invoice.notes || "").trim();
   const showTaxLine = invoice.taxable && Number(invoice.taxRate || 0) > 0;
+  const selectedInvoicePaymentTerms = normalizePaymentTerms(invoice.paymentTerms) || "";
+  const invoicePaymentTermsMarkup = buildPaymentTermsOptionsMarkup(selectedInvoicePaymentTerms, invoice.paymentTermsChoiceRequired);
+  const showInvoiceCustomDueDays = selectedInvoicePaymentTerms === "Custom";
 
   invoicePreviewContainer.innerHTML = `
     <div class="invoice-preview-actions no-print">
@@ -4651,7 +4806,10 @@ function renderInvoicePreview() {
         <div class="billing-report-meta"><strong>Account/Ref:</strong> <input type="text" value="${escapeHtml(invoice.accountReference || "")}" onchange="updateInvoiceDraftField('accountReference', this.value)"></div>
         <div class="billing-report-meta"><strong>Invoice #:</strong> ${escapeHtml(invoice.invoiceNumber || "(pending)")}</div>
         <div class="billing-report-meta"><strong>Invoice Date:</strong> ${invoice.invoiceDate}</div>
-        <div class="billing-report-meta"><strong>Due Date:</strong> <input type="date" value="${invoice.dueDate || ""}" onchange="updateInvoiceDraftField('dueDate', this.value)"> (${escapeHtml(invoice.paymentTerms || DEFAULT_INVOICE_TERMS)})</div>
+        <div class="billing-report-meta"><strong>Due Date:</strong> <input type="date" value="${invoice.dueDate || ""}" onchange="updateInvoiceDraftField('dueDate', this.value)"></div>
+        <div class="billing-report-meta"><strong>Payment Terms:</strong> <select id="invoicePaymentTerms" onchange="setInvoicePaymentTerms(this.value)">${invoicePaymentTermsMarkup}</select></div>
+        <div id="invoiceCustomDueDaysGroup" class="billing-report-meta ${showInvoiceCustomDueDays ? "" : "hidden"}"><strong>Custom Due Days:</strong> <input type="number" min="0" step="1" value="${Number(invoice.customDueDays ?? 15)}" onchange="setInvoiceCustomDueDays(this.value)"></div>
+        ${invoice.paymentTermsWarning ? `<div id="invoicePaymentTermsWarning" class="billing-report-meta invoice-terms-warning">${escapeHtml(invoice.paymentTermsWarning)}</div>` : ""}
         <div class="billing-report-meta"><strong>Service Period:</strong> ${invoice.periodStart} to ${invoice.periodEnd}</div>
         <div class="billing-report-meta"><strong>Status:</strong> ${escapeHtml(String(invoice.status || "draft").toUpperCase())}</div>
         <div class="billing-report-meta"><strong>${escapeHtml(propertyHeaderLabel)}:</strong> ${escapeHtml(propertyHeaderValue)}</div>
@@ -5181,6 +5339,17 @@ async function saveInvoiceDraft(options = {}) {
 
   recalculateInvoiceDraftTotals();
 
+  const chosenPaymentTerms = normalizePaymentTerms(currentInvoiceDraft.paymentTerms) || DEFAULT_INVOICE_TERMS;
+  if (currentInvoiceDraft.paymentTermsChoiceRequired && !normalizePaymentTerms(currentInvoiceDraft.paymentTerms)) {
+    if (!silent) alert(currentInvoiceDraft.paymentTermsWarning || "Choose invoice payment terms before saving.");
+    return false;
+  }
+
+  currentInvoiceDraft.paymentTerms = chosenPaymentTerms;
+  currentInvoiceDraft.customDueDays = chosenPaymentTerms === "Custom"
+    ? Number(currentInvoiceDraft.customDueDays || 0) || null
+    : null;
+
   const invoicePayload = {
     invoice_number: currentInvoiceDraft.id ? currentInvoiceDraft.invoiceNumber : buildInvoiceNumber(),
     property_id: currentInvoiceDraft.propertyId || null,
@@ -5191,6 +5360,7 @@ async function saveInvoiceDraft(options = {}) {
     period_end: currentInvoiceDraft.periodEnd,
     invoice_date: currentInvoiceDraft.invoiceDate,
     due_date: currentInvoiceDraft.dueDate,
+    payment_terms: currentInvoiceDraft.paymentTerms || DEFAULT_INVOICE_TERMS,
     subtotal: currentInvoiceDraft.subtotal,
     tax: currentInvoiceDraft.tax,
     total: currentInvoiceDraft.total,
@@ -5198,12 +5368,34 @@ async function saveInvoiceDraft(options = {}) {
     notes: currentInvoiceDraft.notes || null,
   };
 
+  if (chosenPaymentTerms === "Custom") {
+    invoicePayload.custom_due_days = currentInvoiceDraft.customDueDays;
+  }
+
+  const invoicePayloadForSave = { ...invoicePayload };
+  const saveInvoiceRecord = async (payload) => {
+    if (invoiceId) {
+      return supabaseClient
+        .from("invoices")
+        .update(payload)
+        .eq("id", invoiceId);
+    }
+
+    return supabaseClient
+      .from("invoices")
+      .insert([payload])
+      .select("id, invoice_number")
+      .single();
+  };
+
   let invoiceId = currentInvoiceDraft.id;
   if (invoiceId) {
-    const { error } = await supabaseClient
-      .from("invoices")
-      .update(invoicePayload)
-      .eq("id", invoiceId);
+    let { error } = await saveInvoiceRecord(invoicePayloadForSave);
+
+    if (error && String(error.message || "").includes("custom_due_days")) {
+      delete invoicePayloadForSave.custom_due_days;
+      ({ error } = await saveInvoiceRecord(invoicePayloadForSave));
+    }
 
     if (error) {
       if (!silent) alert("Error updating invoice draft: " + error.message);
@@ -5212,11 +5404,12 @@ async function saveInvoiceDraft(options = {}) {
 
     await supabaseClient.from("invoice_items").delete().eq("invoice_id", invoiceId);
   } else {
-    const { data, error } = await supabaseClient
-      .from("invoices")
-      .insert([invoicePayload])
-      .select("id, invoice_number")
-      .single();
+    let { data, error } = await saveInvoiceRecord(invoicePayloadForSave);
+
+    if (error && String(error.message || "").includes("custom_due_days")) {
+      delete invoicePayloadForSave.custom_due_days;
+      ({ data, error } = await saveInvoiceRecord(invoicePayloadForSave));
+    }
 
     if (error) {
       if (!silent) alert("Error saving invoice draft: " + error.message + "\nRun invoice migration first if needed.");
@@ -5605,6 +5798,12 @@ async function openInvoiceDraft(invoiceId) {
   }
 
   const property = properties.find((item) => normalizePropertyId(item.id) === normalizePropertyId(invoice.property_id));
+  const paymentTerms = normalizePaymentTerms(invoice.payment_terms || property?.payment_terms) || DEFAULT_INVOICE_TERMS;
+  const customDueDays = Number.isFinite(Number(invoice.custom_due_days))
+    ? Number(invoice.custom_due_days)
+    : Number.isFinite(Number(property?.custom_due_days))
+      ? Number(property.custom_due_days)
+      : null;
   currentInvoiceDraft = {
     id: invoice.id,
     invoiceNumber: invoice.invoice_number,
@@ -5621,7 +5820,11 @@ async function openInvoiceDraft(invoiceId) {
     dueDate: invoice.due_date || "",
     status: invoice.status || "draft",
     notes: invoice.notes || "",
-    paymentTerms: property?.payment_terms || DEFAULT_INVOICE_TERMS,
+    paymentTerms,
+    customDueDays,
+    paymentTermsWarning: "",
+    paymentTermsChoiceRequired: false,
+    dueDateManuallyEdited: false,
     taxable: (property?.billing_taxable !== false),
     taxRate: Number(property?.billing_tax_rate || 0),
     includeNonBillableChemicals: false,
@@ -6661,6 +6864,10 @@ function renderProperties() {
     const isCollapsed = collapsedPropertyCards.has(property.id);
     const toggleButtonText = isCollapsed ? "Expand" : "Collapse";
     const activeTab = getPropertyDetailTab(property.id);
+    const paymentTermsConfig = getPropertyPaymentTermsConfig(property);
+    const paymentTermsLabel = paymentTermsConfig.paymentTerms === "Custom"
+      ? `Custom (${Number(paymentTermsConfig.customDueDays || 0) || 15} days)`
+      : paymentTermsConfig.paymentTerms;
 
     const taskContent = tasks.length === 0
       ? `<p>No cleanings scheduled.</p>`
@@ -6754,7 +6961,7 @@ function renderProperties() {
           <div><strong>Default Cleaning Rate:</strong> $${Number(property.default_cleaning_rate ?? 0).toFixed(2)}</div>
           <div><strong>Taxable:</strong> ${property.billing_taxable === false ? "No" : "Yes"}</div>
           <div><strong>Tax Rate:</strong> ${Number(property.billing_tax_rate || 0).toFixed(2)}%</div>
-          <div><strong>Payment Terms:</strong> ${property.payment_terms || DEFAULT_INVOICE_TERMS}</div>
+          <div><strong>Payment Terms:</strong> ${paymentTermsLabel || DEFAULT_INVOICE_TERMS}</div>
           <div><strong>iCal:</strong> ${property.ical_url ? "Saved" : "Not entered"}</div>
         </div>
 
@@ -6940,6 +7147,9 @@ function updateInvoiceDraftField(field, rawValue) {
     currentInvoiceDraft.taxRate = Number(rawValue || 0);
   } else if (field === "taxable") {
     currentInvoiceDraft.taxable = Boolean(rawValue);
+  } else if (field === "dueDate") {
+    currentInvoiceDraft.dueDate = rawValue;
+    currentInvoiceDraft.dueDateManuallyEdited = true;
   } else {
     currentInvoiceDraft[field] = rawValue;
   }
