@@ -4603,6 +4603,9 @@ function renderInvoicePreview() {
     : `<tr><td colspan="7">No line items in this invoice.</td></tr>`;
 
   const propertyName = invoice.propertyName || getPropertyName(invoice.propertyId);
+  const hasSpecificProperty = Boolean(invoice.propertyId);
+  const propertyHeaderLabel = hasSpecificProperty ? "Property" : "Properties";
+  const propertyHeaderValue = hasSpecificProperty ? (propertyName || "") : "All Selected Properties";
   const billingName = invoice.billingCompanyName || invoice.clientName;
   const billingEmail = String(invoice.billingEmail || "").trim();
   const billingAddress = String(invoice.billingAddress || "").trim();
@@ -4651,7 +4654,7 @@ function renderInvoicePreview() {
         <div class="billing-report-meta"><strong>Due Date:</strong> <input type="date" value="${invoice.dueDate || ""}" onchange="updateInvoiceDraftField('dueDate', this.value)"> (${escapeHtml(invoice.paymentTerms || DEFAULT_INVOICE_TERMS)})</div>
         <div class="billing-report-meta"><strong>Service Period:</strong> ${invoice.periodStart} to ${invoice.periodEnd}</div>
         <div class="billing-report-meta"><strong>Status:</strong> ${escapeHtml(String(invoice.status || "draft").toUpperCase())}</div>
-        <div class="billing-report-meta"><strong>Property:</strong> ${escapeHtml(propertyName || "")}</div>
+        <div class="billing-report-meta"><strong>${escapeHtml(propertyHeaderLabel)}:</strong> ${escapeHtml(propertyHeaderValue)}</div>
         <h2 class="billing-report-title invoice-document-title">Invoice Preview</h2>
         <div class="billing-report-meta"><strong>Taxable:</strong> <input type="checkbox" ${invoice.taxable ? "checked" : ""} onchange="updateInvoiceDraftField('taxable', this.checked)"></div>
         <div class="billing-report-meta"><strong>Tax Rate (%):</strong> <input type="number" min="0" step="0.01" value="${Number(invoice.taxRate || 0)}" onchange="updateInvoiceDraftField('taxRate', this.value)"></div>
@@ -4709,7 +4712,7 @@ function renderInvoicePreview() {
             <div class="invoice-print-text">Terms: ${escapeHtml(invoice.paymentTerms || DEFAULT_INVOICE_TERMS)}</div>
             <div class="invoice-print-text">Service Period: ${escapeHtml(formatInvoicePrintPeriod(invoice.periodStart || "", invoice.periodEnd || ""))}</div>
             <div class="invoice-print-text">Status: ${escapeHtml(String(invoice.status || "draft").toUpperCase())}</div>
-            <div class="invoice-print-text">Property: ${escapeHtml(propertyName || "")}</div>
+            <div class="invoice-print-text">${escapeHtml(propertyHeaderLabel)}: ${escapeHtml(propertyHeaderValue)}</div>
           </div>
         </div>
 
@@ -5158,7 +5161,13 @@ function buildInvoiceNumber() {
 async function saveInvoiceDraft(options = {}) {
   const silent = options?.silent === true;
   if (!currentInvoiceDraft) return;
-  if (!currentInvoiceDraft.propertyId) {
+  const selectedClientName = String(currentInvoiceDraft.clientName || "").trim();
+  const isAllPropertiesSelection = billingPropertySelect
+    ? !String(billingPropertySelect.value || "").trim()
+    : !currentInvoiceDraft.propertyId;
+  const allowClientAllPropertiesDraft = Boolean(selectedClientName) && isAllPropertiesSelection && !currentInvoiceDraft.propertyId;
+
+  if (!currentInvoiceDraft.propertyId && !allowClientAllPropertiesDraft) {
     if (!silent) alert("Select a property before saving an invoice draft.");
     return false;
   }
@@ -5167,7 +5176,7 @@ async function saveInvoiceDraft(options = {}) {
 
   const invoicePayload = {
     invoice_number: currentInvoiceDraft.id ? currentInvoiceDraft.invoiceNumber : buildInvoiceNumber(),
-    property_id: currentInvoiceDraft.propertyId,
+    property_id: currentInvoiceDraft.propertyId || null,
     client_name: currentInvoiceDraft.clientName || null,
     billing_email: currentInvoiceDraft.billingEmail || null,
     billing_address: currentInvoiceDraft.billingAddress || null,
@@ -5405,6 +5414,174 @@ async function updateInvoiceStatus(invoiceId, status) {
   renderInvoiceHistory();
 }
 
+function confirmDeleteDraftInvoice(invoiceNumber = "") {
+  return new Promise((resolve) => {
+    const modal = document.createElement("div");
+    modal.className = "modal";
+    modal.innerHTML = `
+      <div class="modal-card" role="dialog" aria-modal="true" aria-label="Delete Draft Invoice Confirmation">
+        <h3>Delete draft invoice ${escapeHtml(invoiceNumber || "")}? </h3>
+        <p>This will permanently delete the draft and its invoice line items. The original cleaning tasks and chemical usage will remain available for future invoicing.</p>
+        <div class="modal-actions">
+          <button type="button" id="cancelDeleteInvoiceBtn">Cancel</button>
+          <button type="button" id="confirmDeleteInvoiceBtn" class="delete-btn">Delete Draft</button>
+        </div>
+      </div>
+    `;
+
+    const cleanup = (result) => {
+      modal.remove();
+      resolve(result);
+    };
+
+    const cancelBtn = modal.querySelector("#cancelDeleteInvoiceBtn");
+    const confirmBtn = modal.querySelector("#confirmDeleteInvoiceBtn");
+
+    if (cancelBtn) {
+      cancelBtn.addEventListener("click", () => cleanup(false));
+    }
+    if (confirmBtn) {
+      confirmBtn.addEventListener("click", () => cleanup(true));
+    }
+
+    modal.addEventListener("click", (event) => {
+      if (event.target === modal) cleanup(false);
+    });
+
+    document.body.appendChild(modal);
+  });
+}
+
+async function releaseInvoiceLinkageForTable(tableName, invoiceId) {
+  let updatePayload = {
+    invoiced: false,
+    invoiced_invoice_id: null,
+    invoice_id: null,
+    invoiced_at: null,
+  };
+
+  const applyUpdate = async (queryBuilderFactory) => {
+    let payload = { ...updatePayload };
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const { error } = await queryBuilderFactory(payload);
+      if (!error) {
+        updatePayload = payload;
+        return null;
+      }
+
+      const message = String(error.message || "");
+      if (message.includes("invoice_id") && payload.invoice_id !== undefined) {
+        delete payload.invoice_id;
+        continue;
+      }
+      if (message.includes("invoiced_at") && payload.invoiced_at !== undefined) {
+        delete payload.invoiced_at;
+        continue;
+      }
+      if (message.includes("invoiced_invoice_id") && payload.invoiced_invoice_id !== undefined) {
+        delete payload.invoiced_invoice_id;
+        continue;
+      }
+      if (message.includes("invoiced") && payload.invoiced !== undefined) {
+        delete payload.invoiced;
+        continue;
+      }
+
+      return error;
+    }
+
+    return null;
+  };
+
+  const broadFilterError = await applyUpdate((payload) => supabaseClient
+    .from(tableName)
+    .update(payload)
+    .or(`invoice_id.eq.${invoiceId},invoiced_invoice_id.eq.${invoiceId}`));
+
+  if (!broadFilterError) return null;
+
+  const broadMessage = String(broadFilterError.message || "");
+  if (!broadMessage.includes("invoice_id")) {
+    return broadFilterError;
+  }
+
+  const fallbackError = await applyUpdate((payload) => supabaseClient
+    .from(tableName)
+    .update(payload)
+    .eq("invoiced_invoice_id", invoiceId));
+
+  if (!fallbackError) return null;
+
+  const fallbackMessage = String(fallbackError.message || "");
+  if (fallbackMessage.includes("invoiced_invoice_id")) {
+    return null;
+  }
+
+  return fallbackError;
+}
+
+async function deleteDraftInvoice(invoiceId) {
+  const invoice = invoices.find((row) => row.id === invoiceId);
+  if (!invoice) {
+    alert("Invoice not found.");
+    return;
+  }
+
+  const currentStatus = String(invoice.status || "draft").toLowerCase();
+  if (currentStatus !== "draft") {
+    alert("Only draft invoices can be deleted. Use Void instead for finalized, sent, paid, or void invoices.");
+    return;
+  }
+
+  const confirmed = await confirmDeleteDraftInvoice(invoice.invoice_number || "");
+  if (!confirmed) return;
+
+  const taskReleaseError = await releaseInvoiceLinkageForTable("cleaning_tasks", invoiceId);
+
+  if (taskReleaseError) {
+    alert("Could not release linked cleaning task invoice markers: " + taskReleaseError.message);
+    return;
+  }
+
+  const chemicalReleaseError = await releaseInvoiceLinkageForTable("chemical_usage", invoiceId);
+
+  if (chemicalReleaseError) {
+    alert("Could not release linked chemical invoice markers: " + chemicalReleaseError.message);
+    return;
+  }
+
+  const { error: itemDeleteError } = await supabaseClient
+    .from("invoice_items")
+    .delete()
+    .eq("invoice_id", invoiceId);
+
+  if (itemDeleteError) {
+    alert("Could not delete draft invoice line items: " + itemDeleteError.message);
+    return;
+  }
+
+  const { error: invoiceDeleteError } = await supabaseClient
+    .from("invoices")
+    .delete()
+    .eq("id", invoiceId);
+
+  if (invoiceDeleteError) {
+    alert("Could not delete draft invoice: " + invoiceDeleteError.message);
+    return;
+  }
+
+  if (currentInvoiceDraft?.id === invoiceId) {
+    currentInvoiceDraft = null;
+  }
+
+  await loadInvoices();
+  await loadCleaningTasks();
+  await loadChemicalUsageEntries();
+  renderInvoiceHistory();
+  renderInvoicePreview();
+  alert("Draft invoice deleted successfully.");
+}
+
 async function openInvoiceDraft(invoiceId) {
   const invoice = invoices.find((row) => row.id === invoiceId);
   if (!invoice) return;
@@ -5485,7 +5662,10 @@ function renderInvoiceHistory() {
   }
 
   const tableRows = rows.map((invoice) => {
-    const propertyName = getPropertyName(invoice.property_id);
+    const isClientLevelMultiProperty = !invoice.property_id && Boolean(String(invoice.client_name || "").trim());
+    const propertyName = isClientLevelMultiProperty ? "Multiple Properties" : getPropertyName(invoice.property_id);
+    const status = String(invoice.status || "draft").toLowerCase();
+    const showDeleteDraft = status === "draft";
     return `
       <tr>
         <td>${escapeHtml(invoice.invoice_number || "")}</td>
@@ -5499,7 +5679,10 @@ function renderInvoiceHistory() {
             ${INVOICE_STATUSES.map((status) => `<option value="${status}" ${String(invoice.status || "draft").toLowerCase() === status ? "selected" : ""}>${status}</option>`).join("")}
           </select>
         </td>
-        <td><button type="button" onclick="openInvoiceDraft('${invoice.id}')">Open</button></td>
+        <td>
+          <button type="button" onclick="openInvoiceDraft('${invoice.id}')">Open</button>
+          ${showDeleteDraft ? `<button type="button" class="delete-btn" onclick="deleteDraftInvoice('${invoice.id}')">Delete</button>` : ""}
+        </td>
       </tr>
     `;
   }).join("");
@@ -5517,7 +5700,7 @@ function renderInvoiceHistory() {
             <th>Due Date</th>
             <th>Total</th>
             <th>Status</th>
-            <th>Open</th>
+            <th>Actions</th>
           </tr>
         </thead>
         <tbody>
