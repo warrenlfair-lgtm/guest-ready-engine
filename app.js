@@ -4681,6 +4681,13 @@ function renderInvoicePreview() {
           </table>
         </section>
 
+        <div class="invoice-preview-actions invoice-preview-actions-bottom no-print">
+          <button type="button" onclick="addInvoiceManualItem()">Add Line Item</button>
+          <button type="button" onclick="addInvoiceDiscountItem()">Add Discount</button>
+          <button type="button" onclick="addInvoiceCreditItem()">Add Credit</button>
+          <button type="button" onclick="addInvoiceSurchargeItem()">Add Surcharge</button>
+        </div>
+
         <div class="billing-report-subtotal">Subtotal: ${toMoney(invoice.subtotal)}</div>
         <div class="billing-report-subtotal">Tax (${Number(invoice.taxRate || 0).toFixed(2)}%): ${toMoney(invoice.tax)}</div>
         <div class="billing-report-grand-total">Total Due: ${toMoney(invoice.total)}</div>

@@ -861,6 +861,27 @@ textarea{
         min-height: 44px;
     }
 
+    .invoice-edit-view {
+        padding-bottom: 92px;
+    }
+
+    .invoice-preview-actions-bottom {
+        position: sticky;
+        bottom: 0;
+        z-index: 30;
+        margin-top: 12px;
+        padding: 10px 12px;
+        background: rgba(255, 255, 255, 0.96);
+        backdrop-filter: blur(8px);
+        border-top: 1px solid #dbe2ea;
+        box-shadow: 0 -6px 18px rgba(15, 23, 42, 0.08);
+    }
+
+    .invoice-preview-actions-bottom button {
+        flex: 1 1 calc(50% - 8px);
+        min-height: 44px;
+    }
+
     .chemical-usage-item-head {
         flex-direction: column;
         align-items: flex-start;
@@ -1786,6 +1807,10 @@ textarea{
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
+}
+
+.invoice-preview-actions-bottom {
+    margin-top: 10px;
 }
 
 .invoice-preview-shell {
