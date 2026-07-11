@@ -14,6 +14,11 @@ const DEFAULT_COMPANY_PROFILE = {
   phone_number: "",
   email: "",
   logo_url: "",
+  venmo_username: "",
+  venmo_qr_url: "",
+  zelle_email: "",
+  ach_instructions: "",
+  payment_instructions: "",
   admin_pin: "1234",
 };
 
@@ -203,6 +208,10 @@ const companyTaglineInput = document.getElementById("companyTaglineInput");
 const companyPhoneInput = document.getElementById("companyPhoneInput");
 const companyEmailInput = document.getElementById("companyEmailInput");
 const companyLogoUrlInput = document.getElementById("companyLogoUrlInput");
+const companyVenmoUsernameInput = document.getElementById("companyVenmoUsernameInput");
+const companyZelleEmailInput = document.getElementById("companyZelleEmailInput");
+const companyAchInstructionsInput = document.getElementById("companyAchInstructionsInput");
+const companyPaymentInstructionsInput = document.getElementById("companyPaymentInstructionsInput");
 const companyLogoFileInput = document.getElementById("companyLogoFileInput");
 const uploadCompanyLogoBtn = document.getElementById("uploadCompanyLogoBtn");
 const companyLogoPreview = document.getElementById("companyLogoPreview");
@@ -1749,6 +1758,11 @@ function getNormalizedCompanyProfile(raw) {
     phone_number: String(raw?.phone_number || "").trim(),
     email: String(raw?.email || "").trim(),
     logo_url: String(raw?.logo_url || "").trim(),
+    venmo_username: String(raw?.venmo_username || DEFAULT_COMPANY_PROFILE.venmo_username).trim(),
+    venmo_qr_url: String(raw?.venmo_qr_url || "").trim(),
+    zelle_email: String(raw?.zelle_email || raw?.zelle_label || "").trim(),
+    ach_instructions: String(raw?.ach_instructions || raw?.ach_label || "").trim(),
+    payment_instructions: String(raw?.payment_instructions || "").trim(),
     admin_pin: String(raw?.admin_pin || DEFAULT_COMPANY_PROFILE.admin_pin).trim() || DEFAULT_COMPANY_PROFILE.admin_pin,
   };
 }
@@ -1777,6 +1791,10 @@ function renderCompanyProfileSettings() {
   companyPhoneInput.value = companyProfile.phone_number || "";
   companyEmailInput.value = companyProfile.email || "";
   companyLogoUrlInput.value = companyProfile.logo_url || "";
+  if (companyVenmoUsernameInput) companyVenmoUsernameInput.value = companyProfile.venmo_username || "";
+  if (companyZelleEmailInput) companyZelleEmailInput.value = companyProfile.zelle_email || "";
+  if (companyAchInstructionsInput) companyAchInstructionsInput.value = companyProfile.ach_instructions || "";
+  if (companyPaymentInstructionsInput) companyPaymentInstructionsInput.value = companyProfile.payment_instructions || "";
   renderCompanyLogoPreview(companyProfile.logo_url);
   if (adminPinInput) adminPinInput.value = "";
   if (confirmAdminPinInput) confirmAdminPinInput.value = "";
@@ -2028,11 +2046,16 @@ async function saveCompanyProfile() {
   }
 
   const payload = getNormalizedCompanyProfile({
+    ...companyProfile,
     company_name: companyNameInput.value,
     tagline: companyTaglineInput.value,
     phone_number: companyPhoneInput?.value,
     email: companyEmailInput?.value,
     logo_url: companyLogoUrlInput?.value,
+    venmo_username: companyVenmoUsernameInput?.value,
+    zelle_email: companyZelleEmailInput?.value,
+    ach_instructions: companyAchInstructionsInput?.value,
+    payment_instructions: companyPaymentInstructionsInput?.value,
     admin_pin: isPinUpdateRequested ? newPin : getCurrentAdminPin(),
   });
 
@@ -4609,6 +4632,17 @@ function renderInvoicePreview() {
   const accountReference = String(invoice.accountReference || "").trim();
   const notes = String(invoice.notes || "").trim();
   const showTaxLine = invoice.taxable && Number(invoice.taxRate || 0) > 0;
+  const venmoUsername = String(companyProfile.venmo_username || "").trim();
+  const venmoQrUrl = String(companyProfile.venmo_qr_url || "").trim();
+  const zelleEmail = String(companyProfile.zelle_email || "").trim();
+  const achInstructions = String(companyProfile.ach_instructions || "").trim();
+  const paymentInstructions = String(companyProfile.payment_instructions || "").trim();
+  const hasPaymentMethods = Boolean(venmoUsername || zelleEmail || achInstructions || venmoQrUrl);
+  const paymentNoteText = venmoUsername
+    ? `Please include the Property Name (${escapeHtml(propertyName || "")}) and Invoice Number (${escapeHtml(invoice.invoiceNumber || "Pending")}) in the payment note.`
+    : "";
+  const safeAchInstructions = escapeHtml(achInstructions).replace(/\n/g, "<br>");
+  const safePaymentInstructions = escapeHtml(paymentInstructions).replace(/\n/g, "<br>");
 
   invoicePreviewContainer.innerHTML = `
     <div class="invoice-preview-actions no-print">
@@ -4681,7 +4715,7 @@ function renderInvoicePreview() {
         <div class="billing-report-subtotal">Subtotal: ${toMoney(invoice.subtotal)}</div>
         <div class="billing-report-subtotal">Tax (${Number(invoice.taxRate || 0).toFixed(2)}%): ${toMoney(invoice.tax)}</div>
         <div class="billing-report-grand-total">Total Due: ${toMoney(invoice.total)}</div>
-        <div class="billing-report-meta">Payment Instructions: Please remit payment to Fair Ventures LLC by due date.</div>
+        ${paymentInstructions ? `<div class="billing-report-meta"><strong>Payment Instructions:</strong> ${safePaymentInstructions}</div>` : ""}
         ${renderBillingReportFooter()}
       </div>
 
@@ -4736,8 +4770,20 @@ function renderInvoicePreview() {
         <div class="billing-report-subtotal">Subtotal: ${toMoney(invoice.subtotal)}</div>
         ${showTaxLine ? `<div class="billing-report-subtotal">Tax (${Number(invoice.taxRate || 0).toFixed(2)}%): ${toMoney(invoice.tax)}</div>` : ""}
         <div class="billing-report-grand-total">Total Due: ${toMoney(invoice.total)}</div>
+        ${hasPaymentMethods ? `<section class="invoice-payment-methods">
+          <div class="invoice-payment-title">Payment Methods</div>
+          ${venmoUsername ? `<div class="invoice-payment-line"><strong>Venmo:</strong> ${escapeHtml(venmoUsername)}</div>` : ""}
+          ${paymentNoteText ? `<div class="invoice-payment-note">${paymentNoteText}</div>` : ""}
+          ${venmoQrUrl ? `
+            <div class="invoice-payment-qr-area">
+              <img src="${escapeHtml(venmoQrUrl)}" alt="Venmo QR code" class="invoice-payment-qr" onerror="this.style.display='none'">
+            </div>
+          ` : ""}
+          ${zelleEmail ? `<div class="invoice-payment-line invoice-payment-zelle"><strong>Zelle:</strong> ${escapeHtml(zelleEmail)}</div>` : ""}
+          ${achInstructions ? `<div class="invoice-payment-line invoice-payment-ach"><strong>ACH:</strong> ${safeAchInstructions}</div>` : ""}
+        </section>` : ""}
         ${notes ? `<div class="billing-report-meta"><strong>Notes:</strong> ${escapeHtml(notes)}</div>` : ""}
-        <div class="billing-report-meta">Payment Instructions: Please remit payment to Fair Ventures LLC by due date.</div>
+        ${paymentInstructions ? `<div class="billing-report-meta"><strong>Payment Instructions:</strong> ${safePaymentInstructions}</div>` : ""}
         ${renderBillingReportFooter()}
       </div>
     </div>

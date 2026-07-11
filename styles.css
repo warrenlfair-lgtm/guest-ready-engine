@@ -1827,6 +1827,44 @@ textarea{
     vertical-align: top;
 }
 
+.invoice-payment-methods {
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px solid #dbe2ea;
+    font-size: 12px;
+    line-height: 1.4;
+}
+
+.invoice-payment-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: #0f172a;
+    margin-bottom: 4px;
+}
+
+.invoice-payment-line,
+.invoice-payment-note {
+    color: #334155;
+    margin-bottom: 4px;
+}
+
+.invoice-payment-note {
+    font-size: 11px;
+}
+
+.invoice-payment-qr-area {
+    margin-top: 6px;
+    margin-bottom: 4px;
+}
+
+.invoice-payment-qr {
+    width: 120px;
+    max-width: 100%;
+    height: auto;
+    border: 1px solid #dbe2ea;
+    border-radius: 6px;
+}
+
 @media screen {
     .invoice-print-view {
         display: none;
@@ -2372,6 +2410,12 @@ textarea{
     }
 
     body.print-view-invoice .invoice-items-section {
+        margin-top: 10px;
+    }
+
+    body.print-view-invoice .invoice-payment-methods {
+        break-inside: avoid;
+        page-break-inside: avoid;
         margin-top: 10px;
     }
 
