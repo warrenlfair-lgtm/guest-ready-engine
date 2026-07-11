@@ -2907,7 +2907,6 @@ function toggleInvoiceMarker(taskId) {
     .from("cleaning_tasks")
     .update({
       invoiced: newInvoiced,
-      invoiced_invoice_id: newInvoiced ? (task.invoiced_invoice_id || null) : null,
     })
     .eq("id", taskId)
     .then(({ error }) => {
@@ -3514,7 +3513,7 @@ function getBillingReportRowsForFilters({
   const scopePropertyIds = new Set(resolvePropertyIdsForScope({ selectedPropertyId, selectedClientName }).map((id) => normalizePropertyId(id)));
 
   return cleaningTasks
-    .filter((task) => String(task.status || "").toLowerCase() === "completed")
+    .filter((task) => isTaskReconciled(task) || String(task.status || "").toLowerCase() === "completed")
     .filter((task) => {
       const taskDate = task.service_date || task.scheduled_date;
       return Boolean(taskDate && taskDate >= startDate && taskDate <= endDate);
