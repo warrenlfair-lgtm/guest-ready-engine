@@ -14,21 +14,6 @@ CREATE TABLE IF NOT EXISTS company_profile (
 ALTER TABLE company_profile
 ADD COLUMN IF NOT EXISTS admin_pin TEXT;
 
-ALTER TABLE company_profile
-ADD COLUMN IF NOT EXISTS venmo_username TEXT;
-
-ALTER TABLE company_profile
-ADD COLUMN IF NOT EXISTS venmo_qr_url TEXT;
-
-ALTER TABLE company_profile
-ADD COLUMN IF NOT EXISTS zelle_email TEXT;
-
-ALTER TABLE company_profile
-ADD COLUMN IF NOT EXISTS ach_instructions TEXT;
-
-ALTER TABLE company_profile
-ADD COLUMN IF NOT EXISTS payment_instructions TEXT;
-
 -- Ensure one default row exists
 INSERT INTO company_profile (id, company_name, tagline, admin_pin)
 VALUES (1, 'Guest Ready™', 'Powered by Guest Engine™', '1234')

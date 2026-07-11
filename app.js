@@ -14,11 +14,6 @@ const DEFAULT_COMPANY_PROFILE = {
   phone_number: "",
   email: "",
   logo_url: "",
-  venmo_username: "",
-  venmo_qr_url: "",
-  zelle_email: "",
-  ach_instructions: "",
-  payment_instructions: "",
   admin_pin: "1234",
 };
 
@@ -208,10 +203,6 @@ const companyTaglineInput = document.getElementById("companyTaglineInput");
 const companyPhoneInput = document.getElementById("companyPhoneInput");
 const companyEmailInput = document.getElementById("companyEmailInput");
 const companyLogoUrlInput = document.getElementById("companyLogoUrlInput");
-const companyVenmoUsernameInput = document.getElementById("companyVenmoUsernameInput");
-const companyZelleEmailInput = document.getElementById("companyZelleEmailInput");
-const companyAchInstructionsInput = document.getElementById("companyAchInstructionsInput");
-const companyPaymentInstructionsInput = document.getElementById("companyPaymentInstructionsInput");
 const companyLogoFileInput = document.getElementById("companyLogoFileInput");
 const uploadCompanyLogoBtn = document.getElementById("uploadCompanyLogoBtn");
 const companyLogoPreview = document.getElementById("companyLogoPreview");
@@ -1758,11 +1749,6 @@ function getNormalizedCompanyProfile(raw) {
     phone_number: String(raw?.phone_number || "").trim(),
     email: String(raw?.email || "").trim(),
     logo_url: String(raw?.logo_url || "").trim(),
-    venmo_username: String(raw?.venmo_username || DEFAULT_COMPANY_PROFILE.venmo_username).trim(),
-    venmo_qr_url: String(raw?.venmo_qr_url || "").trim(),
-    zelle_email: String(raw?.zelle_email || raw?.zelle_label || "").trim(),
-    ach_instructions: String(raw?.ach_instructions || raw?.ach_label || "").trim(),
-    payment_instructions: String(raw?.payment_instructions || "").trim(),
     admin_pin: String(raw?.admin_pin || DEFAULT_COMPANY_PROFILE.admin_pin).trim() || DEFAULT_COMPANY_PROFILE.admin_pin,
   };
 }
@@ -1791,10 +1777,6 @@ function renderCompanyProfileSettings() {
   companyPhoneInput.value = companyProfile.phone_number || "";
   companyEmailInput.value = companyProfile.email || "";
   companyLogoUrlInput.value = companyProfile.logo_url || "";
-  if (companyVenmoUsernameInput) companyVenmoUsernameInput.value = companyProfile.venmo_username || "";
-  if (companyZelleEmailInput) companyZelleEmailInput.value = companyProfile.zelle_email || "";
-  if (companyAchInstructionsInput) companyAchInstructionsInput.value = companyProfile.ach_instructions || "";
-  if (companyPaymentInstructionsInput) companyPaymentInstructionsInput.value = companyProfile.payment_instructions || "";
   renderCompanyLogoPreview(companyProfile.logo_url);
   if (adminPinInput) adminPinInput.value = "";
   if (confirmAdminPinInput) confirmAdminPinInput.value = "";
@@ -2046,16 +2028,11 @@ async function saveCompanyProfile() {
   }
 
   const payload = getNormalizedCompanyProfile({
-    ...companyProfile,
     company_name: companyNameInput.value,
     tagline: companyTaglineInput.value,
     phone_number: companyPhoneInput?.value,
     email: companyEmailInput?.value,
     logo_url: companyLogoUrlInput?.value,
-    venmo_username: companyVenmoUsernameInput?.value,
-    zelle_email: companyZelleEmailInput?.value,
-    ach_instructions: companyAchInstructionsInput?.value,
-    payment_instructions: companyPaymentInstructionsInput?.value,
     admin_pin: isPinUpdateRequested ? newPin : getCurrentAdminPin(),
   });
 
@@ -4469,142 +4446,6 @@ function formatInvoiceDate(date) {
   return formatDateValue(date || new Date());
 }
 
-function getSortedUniqueInvoicePropertyNames(names = []) {
-  return Array.from(new Set(
-    (names || [])
-      .map((value) => String(value || "").trim())
-      .filter(Boolean)
-  )).sort((a, b) => a.localeCompare(b));
-}
-
-function getSortedUniqueInvoicePropertyIds(ids = []) {
-  return Array.from(new Set(
-    (ids || [])
-      .map((value) => normalizePropertyId(value))
-      .filter(Boolean)
-  )).sort((a, b) => a.localeCompare(b));
-}
-
-function buildStableClientId(clientName = "") {
-  const normalized = String(clientName || "").trim().toLowerCase();
-  if (!normalized) return null;
-
-  let hashA = 2166136261;
-  let hashB = 2166136261;
-  for (let i = 0; i < normalized.length; i += 1) {
-    const code = normalized.charCodeAt(i);
-    hashA ^= code;
-    hashA = Math.imul(hashA, 16777619);
-    hashB ^= (code + i + 17);
-    hashB = Math.imul(hashB, 2246822507);
-  }
-
-  const toHex = (value) => (value >>> 0).toString(16).padStart(8, "0");
-  const hex = `${toHex(hashA)}${toHex(hashB)}${toHex(hashA ^ hashB)}${toHex(hashA + hashB)}`.slice(0, 32);
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
-}
-
-function resolveInvoicePropertyScope({
-  selectedPropertyId = "",
-  propertyIds = [],
-  items = [],
-  fallbackPropertyName = "",
-  persistedScopeNames = "",
-} = {}) {
-  const normalizedSelectedPropertyId = String(selectedPropertyId || "").trim();
-  const selectedProperty = normalizedSelectedPropertyId
-    ? properties.find((item) => normalizePropertyId(item.id) === normalizePropertyId(normalizedSelectedPropertyId))
-    : null;
-
-  const persistedNames = String(persistedScopeNames || "")
-    .split("|")
-    .map((value) => String(value || "").trim())
-    .filter(Boolean);
-
-  const namesFromIds = (propertyIds || [])
-    .map((id) => properties.find((item) => normalizePropertyId(item.id) === normalizePropertyId(id))?.property_name || "")
-    .filter(Boolean);
-
-  const namesFromItems = (items || [])
-    .map((item) => {
-      if (item?.propertyName) return item.propertyName;
-      if (item?.propertyId) return getPropertyName(item.propertyId);
-      return "";
-    })
-    .filter(Boolean);
-
-  const scopeNames = getSortedUniqueInvoicePropertyNames([
-    selectedProperty?.property_name || "",
-    fallbackPropertyName,
-    ...persistedNames,
-    ...namesFromIds,
-    ...namesFromItems,
-  ]);
-
-  const hasExplicitSingleProperty = Boolean(normalizedSelectedPropertyId && normalizedSelectedPropertyId !== "all");
-  if (hasExplicitSingleProperty) {
-    const singleName = selectedProperty?.property_name || scopeNames[0] || "Unknown Property";
-    return {
-      scopeNames: [singleName],
-      scopeLabel: singleName,
-      scopeTitle: "Property",
-      persistedScopeNames: singleName,
-    };
-  }
-
-  if (scopeNames.length <= 1) {
-    const singleName = scopeNames[0] || "All Properties";
-    return {
-      scopeNames: scopeNames.length ? scopeNames : [singleName],
-      scopeLabel: singleName,
-      scopeTitle: "Property",
-      persistedScopeNames: scopeNames.length ? scopeNames.join("|") : singleName,
-    };
-  }
-
-  return {
-    scopeNames,
-    scopeLabel: "All Selected Properties",
-    scopeTitle: "Properties",
-    persistedScopeNames: scopeNames.join("|"),
-  };
-}
-
-function resolveInvoicePropertyIds({ propertyIds = [], items = [], persistedPropertyIds = null } = {}) {
-  const itemPropertyIds = (items || [])
-    .map((item) => item?.propertyId || item?.property_id || "")
-    .filter(Boolean);
-
-  let persistedIds = [];
-  if (Array.isArray(persistedPropertyIds)) {
-    persistedIds = persistedPropertyIds;
-  } else {
-    const rawValue = String(persistedPropertyIds || "").trim();
-    if (rawValue.startsWith("[") && rawValue.endsWith("]")) {
-      try {
-        const parsed = JSON.parse(rawValue);
-        if (Array.isArray(parsed)) {
-          persistedIds = parsed;
-        }
-      } catch (error) {
-        persistedIds = [];
-      }
-    }
-    if (!persistedIds.length) {
-      persistedIds = rawValue
-        .split("|")
-        .map((value) => String(value || "").trim())
-        .filter(Boolean);
-    }
-  }
-
-  return getSortedUniqueInvoicePropertyIds([
-    ...(propertyIds || []),
-    ...itemPropertyIds,
-    ...persistedIds,
-  ]);
-}
-
 function buildDraftInvoiceModel({ property, clientName = "", propertyIds = [], startDate, endDate, includeNonBillableChemicals = false, taxOverride = "property", enableDebugLog = false }) {
   const invoiceDate = formatInvoiceDate(new Date());
   const selectedPropertyId = !clientName && propertyIds.length <= 1
@@ -4651,31 +4492,12 @@ function buildDraftInvoiceModel({ property, clientName = "", propertyIds = [], s
     return formatDateValue(date);
   })();
 
-  const scope = resolveInvoicePropertyScope({
-    selectedPropertyId,
-    propertyIds,
-    items,
-    fallbackPropertyName: property?.property_name || "",
-  });
-  const resolvedPropertyIds = resolveInvoicePropertyIds({
-    propertyIds,
-    items,
-  });
-  const invoiceScope = selectedPropertyId && selectedPropertyId !== "all" ? "property" : "client";
-  const resolvedClientName = clientName || String(property?.client_name || "").trim() || String(property?.billing_company_name || "").trim() || property?.property_name || "Client";
-  const clientId = buildStableClientId(resolvedClientName);
-
   return {
     id: null,
     invoiceNumber: "(pending)",
-    clientId,
-    invoiceScope,
-    propertyId: invoiceScope === "property" ? (property?.id || (propertyIds.length === 1 ? propertyIds[0] : "")) : "",
-    propertyIds: resolvedPropertyIds,
-    propertyName: scope.scopeLabel,
-    propertyScopeTitle: scope.scopeTitle,
-    propertyScopeNames: scope.persistedScopeNames,
-    clientName: resolvedClientName,
+    propertyId: property?.id || "",
+    propertyName: property?.property_name || (propertyIds.length === 1 ? (properties.find((p) => normalizePropertyId(p.id) === normalizePropertyId(propertyIds[0]))?.property_name || "") : "Multiple Properties"),
+    clientName: clientName || String(property?.client_name || "").trim() || String(property?.billing_company_name || "").trim() || property?.property_name || "Client",
     billingCompanyName: String(property?.billing_company_name || "").trim(),
     billingEmail: String(property?.billing_email || "").trim(),
     billingAddress: String(property?.billing_address || "").trim(),
@@ -4780,32 +4602,13 @@ function renderInvoicePreview() {
     `).join("")
     : `<tr><td colspan="7">No line items in this invoice.</td></tr>`;
 
-  const propertyScope = resolveInvoicePropertyScope({
-    selectedPropertyId: invoice.propertyId,
-    propertyIds: invoice.propertyIds,
-    items: invoice.items,
-    fallbackPropertyName: invoice.propertyName || getPropertyName(invoice.propertyId),
-    persistedScopeNames: invoice.propertyScopeNames,
-  });
-  const propertyLabelTitle = propertyScope.scopeTitle || "Property";
-  const propertyLabelValue = propertyScope.scopeLabel || "";
+  const propertyName = invoice.propertyName || getPropertyName(invoice.propertyId);
   const billingName = invoice.billingCompanyName || invoice.clientName;
   const billingEmail = String(invoice.billingEmail || "").trim();
   const billingAddress = String(invoice.billingAddress || "").trim();
   const accountReference = String(invoice.accountReference || "").trim();
   const notes = String(invoice.notes || "").trim();
   const showTaxLine = invoice.taxable && Number(invoice.taxRate || 0) > 0;
-  const venmoUsername = String(companyProfile.venmo_username || "").trim();
-  const venmoQrUrl = String(companyProfile.venmo_qr_url || "").trim();
-  const zelleEmail = String(companyProfile.zelle_email || "").trim();
-  const achInstructions = String(companyProfile.ach_instructions || "").trim();
-  const paymentInstructions = String(companyProfile.payment_instructions || "").trim();
-  const hasPaymentMethods = Boolean(venmoUsername || zelleEmail || achInstructions || venmoQrUrl);
-  const paymentNoteText = venmoUsername
-    ? `Please include the Property Name (${escapeHtml(propertyLabelValue || "")}) and Invoice Number (${escapeHtml(invoice.invoiceNumber || "Pending")}) in the payment note.`
-    : "";
-  const safeAchInstructions = escapeHtml(achInstructions).replace(/\n/g, "<br>");
-  const safePaymentInstructions = escapeHtml(paymentInstructions).replace(/\n/g, "<br>");
 
   invoicePreviewContainer.innerHTML = `
     <div class="invoice-preview-actions no-print">
@@ -4848,7 +4651,7 @@ function renderInvoicePreview() {
         <div class="billing-report-meta"><strong>Due Date:</strong> <input type="date" value="${invoice.dueDate || ""}" onchange="updateInvoiceDraftField('dueDate', this.value)"> (${escapeHtml(invoice.paymentTerms || DEFAULT_INVOICE_TERMS)})</div>
         <div class="billing-report-meta"><strong>Service Period:</strong> ${invoice.periodStart} to ${invoice.periodEnd}</div>
         <div class="billing-report-meta"><strong>Status:</strong> ${escapeHtml(String(invoice.status || "draft").toUpperCase())}</div>
-        <div class="billing-report-meta"><strong>${escapeHtml(propertyLabelTitle)}:</strong> ${escapeHtml(propertyLabelValue || "")}</div>
+        <div class="billing-report-meta"><strong>Property:</strong> ${escapeHtml(propertyName || "")}</div>
         <h2 class="billing-report-title invoice-document-title">Invoice Preview</h2>
         <div class="billing-report-meta"><strong>Taxable:</strong> <input type="checkbox" ${invoice.taxable ? "checked" : ""} onchange="updateInvoiceDraftField('taxable', this.checked)"></div>
         <div class="billing-report-meta"><strong>Tax Rate (%):</strong> <input type="number" min="0" step="0.01" value="${Number(invoice.taxRate || 0)}" onchange="updateInvoiceDraftField('taxRate', this.value)"></div>
@@ -4878,7 +4681,7 @@ function renderInvoicePreview() {
         <div class="billing-report-subtotal">Subtotal: ${toMoney(invoice.subtotal)}</div>
         <div class="billing-report-subtotal">Tax (${Number(invoice.taxRate || 0).toFixed(2)}%): ${toMoney(invoice.tax)}</div>
         <div class="billing-report-grand-total">Total Due: ${toMoney(invoice.total)}</div>
-        ${paymentInstructions ? `<div class="billing-report-meta"><strong>Payment Instructions:</strong> ${safePaymentInstructions}</div>` : ""}
+        <div class="billing-report-meta">Payment Instructions: Please remit payment to Fair Ventures LLC by due date.</div>
         ${renderBillingReportFooter()}
       </div>
 
@@ -4906,7 +4709,7 @@ function renderInvoicePreview() {
             <div class="invoice-print-text">Terms: ${escapeHtml(invoice.paymentTerms || DEFAULT_INVOICE_TERMS)}</div>
             <div class="invoice-print-text">Service Period: ${escapeHtml(formatInvoicePrintPeriod(invoice.periodStart || "", invoice.periodEnd || ""))}</div>
             <div class="invoice-print-text">Status: ${escapeHtml(String(invoice.status || "draft").toUpperCase())}</div>
-            <div class="invoice-print-text">${escapeHtml(propertyLabelTitle)}: ${escapeHtml(propertyLabelValue || "")}</div>
+            <div class="invoice-print-text">Property: ${escapeHtml(propertyName || "")}</div>
           </div>
         </div>
 
@@ -4933,20 +4736,8 @@ function renderInvoicePreview() {
         <div class="billing-report-subtotal">Subtotal: ${toMoney(invoice.subtotal)}</div>
         ${showTaxLine ? `<div class="billing-report-subtotal">Tax (${Number(invoice.taxRate || 0).toFixed(2)}%): ${toMoney(invoice.tax)}</div>` : ""}
         <div class="billing-report-grand-total">Total Due: ${toMoney(invoice.total)}</div>
-        ${hasPaymentMethods ? `<section class="invoice-payment-methods">
-          <div class="invoice-payment-title">Payment Methods</div>
-          ${venmoUsername ? `<div class="invoice-payment-line"><strong>Venmo:</strong> ${escapeHtml(venmoUsername)}</div>` : ""}
-          ${paymentNoteText ? `<div class="invoice-payment-note">${paymentNoteText}</div>` : ""}
-          ${venmoQrUrl ? `
-            <div class="invoice-payment-qr-area">
-              <img src="${escapeHtml(venmoQrUrl)}" alt="Venmo QR code" class="invoice-payment-qr" onerror="this.style.display='none'">
-            </div>
-          ` : ""}
-          ${zelleEmail ? `<div class="invoice-payment-line invoice-payment-zelle"><strong>Zelle:</strong> ${escapeHtml(zelleEmail)}</div>` : ""}
-          ${achInstructions ? `<div class="invoice-payment-line invoice-payment-ach"><strong>ACH:</strong> ${safeAchInstructions}</div>` : ""}
-        </section>` : ""}
         ${notes ? `<div class="billing-report-meta"><strong>Notes:</strong> ${escapeHtml(notes)}</div>` : ""}
-        ${paymentInstructions ? `<div class="billing-report-meta"><strong>Payment Instructions:</strong> ${safePaymentInstructions}</div>` : ""}
+        <div class="billing-report-meta">Payment Instructions: Please remit payment to Fair Ventures LLC by due date.</div>
         ${renderBillingReportFooter()}
       </div>
     </div>
@@ -5022,7 +4813,7 @@ function renderInvoiceBatchPreview() {
     <tr>
       <td><input type="checkbox" checked onchange="toggleBatchInvoiceSelection(${index}, this.checked)"></td>
       <td>${escapeHtml(draft.clientName || draft.propertyName || "Unassigned")}</td>
-      <td>${escapeHtml(draft.propertyName || "All Properties")}</td>
+      <td>${escapeHtml(draft.propertyName || "Multiple Properties")}</td>
       <td>${draft.items.length}</td>
       <td class="billing-report-amount">${toMoney(draft.total)}</td>
       <td><button type="button" onclick="openBatchInvoiceDraft(${index})">Preview</button></td>
@@ -5367,47 +5158,17 @@ function buildInvoiceNumber() {
 async function saveInvoiceDraft(options = {}) {
   const silent = options?.silent === true;
   if (!currentInvoiceDraft) return;
-  const inferredScope = (currentInvoiceDraft.propertyIds?.length || 0) > 1 ? "client" : "property";
-  const invoiceScope = String(currentInvoiceDraft.invoiceScope || inferredScope || "").trim().toLowerCase() || "property";
-  const resolvedClientId = currentInvoiceDraft.clientId || buildStableClientId(currentInvoiceDraft.clientName || "");
-  currentInvoiceDraft.clientId = resolvedClientId;
-  currentInvoiceDraft.invoiceScope = invoiceScope;
-  if (invoiceScope === "property" && !currentInvoiceDraft.propertyId) {
+  if (!currentInvoiceDraft.propertyId) {
     if (!silent) alert("Select a property before saving an invoice draft.");
-    return false;
-  }
-  if (invoiceScope === "client" && !String(resolvedClientId || "").trim()) {
-    if (!silent) alert("Select a client before saving the invoice.");
     return false;
   }
 
   recalculateInvoiceDraftTotals();
 
-  const resolvedPropertyIds = resolveInvoicePropertyIds({
-    propertyIds: currentInvoiceDraft.propertyIds,
-    items: currentInvoiceDraft.items,
-  });
-  const scopeForSave = resolveInvoicePropertyScope({
-    selectedPropertyId: currentInvoiceDraft.propertyId,
-    propertyIds: resolvedPropertyIds,
-    items: currentInvoiceDraft.items,
-    fallbackPropertyName: currentInvoiceDraft.propertyName || getPropertyName(currentInvoiceDraft.propertyId),
-    persistedScopeNames: currentInvoiceDraft.propertyScopeNames,
-  });
-  currentInvoiceDraft.propertyIds = resolvedPropertyIds;
-  currentInvoiceDraft.propertyName = scopeForSave.scopeLabel;
-  currentInvoiceDraft.propertyScopeNames = scopeForSave.persistedScopeNames;
-  currentInvoiceDraft.propertyScopeTitle = scopeForSave.scopeTitle;
-
   const invoicePayload = {
     invoice_number: currentInvoiceDraft.id ? currentInvoiceDraft.invoiceNumber : buildInvoiceNumber(),
-    client_id: resolvedClientId || null,
-    invoice_scope: invoiceScope,
-    property_id: invoiceScope === "property" ? (currentInvoiceDraft.propertyId || null) : null,
-    property_ids: resolvedPropertyIds,
+    property_id: currentInvoiceDraft.propertyId,
     client_name: currentInvoiceDraft.clientName || null,
-    property_scope_label: scopeForSave.scopeLabel || null,
-    property_scope_names: scopeForSave.persistedScopeNames || null,
     billing_email: currentInvoiceDraft.billingEmail || null,
     billing_address: currentInvoiceDraft.billingAddress || null,
     period_start: currentInvoiceDraft.periodStart,
@@ -5423,23 +5184,10 @@ async function saveInvoiceDraft(options = {}) {
 
   let invoiceId = currentInvoiceDraft.id;
   if (invoiceId) {
-    let { error } = await supabaseClient
+    const { error } = await supabaseClient
       .from("invoices")
       .update(invoicePayload)
       .eq("id", invoiceId);
-
-    if (error && /property_scope_|invoice_scope|property_ids|client_id/i.test(String(error.message || ""))) {
-      const fallbackPayload = { ...invoicePayload };
-      delete fallbackPayload.property_scope_label;
-      delete fallbackPayload.property_scope_names;
-      delete fallbackPayload.invoice_scope;
-      delete fallbackPayload.property_ids;
-      delete fallbackPayload.client_id;
-      ({ error } = await supabaseClient
-        .from("invoices")
-        .update(fallbackPayload)
-        .eq("id", invoiceId));
-    }
 
     if (error) {
       if (!silent) alert("Error updating invoice draft: " + error.message);
@@ -5448,25 +5196,11 @@ async function saveInvoiceDraft(options = {}) {
 
     await supabaseClient.from("invoice_items").delete().eq("invoice_id", invoiceId);
   } else {
-    let { data, error } = await supabaseClient
+    const { data, error } = await supabaseClient
       .from("invoices")
       .insert([invoicePayload])
       .select("id, invoice_number")
       .single();
-
-    if (error && /property_scope_|invoice_scope|property_ids|client_id/i.test(String(error.message || ""))) {
-      const fallbackPayload = { ...invoicePayload };
-      delete fallbackPayload.property_scope_label;
-      delete fallbackPayload.property_scope_names;
-      delete fallbackPayload.invoice_scope;
-      delete fallbackPayload.property_ids;
-      delete fallbackPayload.client_id;
-      ({ data, error } = await supabaseClient
-        .from("invoices")
-        .insert([fallbackPayload])
-        .select("id, invoice_number")
-        .single());
-    }
 
     if (error) {
       if (!silent) alert("Error saving invoice draft: " + error.message + "\nRun invoice migration first if needed.");
@@ -5480,10 +5214,6 @@ async function saveInvoiceDraft(options = {}) {
 
   const itemsPayload = currentInvoiceDraft.items.map((item) => ({
     invoice_id: invoiceId,
-    property_id: item.propertyId || null,
-    property_name: item.propertyName || null,
-    source_type: item.itemSource || (item.taskId ? INVOICE_ITEM_SOURCES.TASK : item.chemicalUsageId ? INVOICE_ITEM_SOURCES.CHEMICAL : INVOICE_ITEM_SOURCES.MANUAL),
-    source_id: item.sourceId || item.taskId || item.chemicalUsageId || null,
     task_id: item.taskId || null,
     chemical_usage_id: item.chemicalUsageId || null,
     description: item.description || null,
@@ -5498,24 +5228,9 @@ async function saveInvoiceDraft(options = {}) {
   }));
 
   if (itemsPayload.length) {
-    let { error: itemError } = await supabaseClient
+    const { error: itemError } = await supabaseClient
       .from("invoice_items")
       .insert(itemsPayload);
-
-    if (itemError && /property_id|property_name|source_type|source_id/i.test(String(itemError.message || ""))) {
-      const fallbackItemsPayload = itemsPayload.map((item) => {
-        const next = { ...item };
-        delete next.property_id;
-        delete next.property_name;
-        delete next.source_type;
-        delete next.source_id;
-        return next;
-      });
-
-      ({ error: itemError } = await supabaseClient
-        .from("invoice_items")
-        .insert(fallbackItemsPayload));
-    }
 
     if (itemError) {
       if (!silent) alert("Invoice draft saved, but line items failed: " + itemError.message);
@@ -5709,19 +5424,15 @@ async function openInvoiceDraft(invoiceId) {
   currentInvoiceDraft = {
     id: invoice.id,
     invoiceNumber: invoice.invoice_number,
-    clientId: invoice.client_id || buildStableClientId(invoice.client_name || ""),
-    invoiceScope: invoice.invoice_scope || (invoice.property_id ? "property" : "client"),
     propertyId: invoice.property_id,
-    propertyIds: resolveInvoicePropertyIds({ persistedPropertyIds: invoice.property_ids }),
-    propertyName: invoice.property_scope_label || property?.property_name || "",
-    propertyScopeNames: invoice.property_scope_names || "",
+    propertyName: property?.property_name || "",
     clientName: invoice.client_name || "",
     billingCompanyName: property?.billing_company_name || "",
     billingEmail: invoice.billing_email || property?.billing_email || "",
     billingAddress: invoice.billing_address || property?.billing_address || "",
     accountReference: property?.billing_account_reference || "",
-    periodStart: invoice.period_start || invoice.service_period_start || "",
-    periodEnd: invoice.period_end || invoice.service_period_end || "",
+    periodStart: invoice.period_start || "",
+    periodEnd: invoice.period_end || "",
     invoiceDate: invoice.invoice_date || "",
     dueDate: invoice.due_date || "",
     status: invoice.status || "draft",
@@ -5731,11 +5442,9 @@ async function openInvoiceDraft(invoiceId) {
     taxRate: Number(property?.billing_tax_rate || 0),
     includeNonBillableChemicals: false,
     items: (items || []).map((item) => ({
-      sourceId: item.source_id || item.chemical_usage_id || item.task_id || null,
+      sourceId: item.chemical_usage_id || item.task_id || null,
       taskId: item.task_id || null,
       chemicalUsageId: item.chemical_usage_id || null,
-      propertyId: item.property_id || null,
-      propertyName: item.property_name || getPropertyName(item.property_id || invoice.property_id),
       description: item.description || "",
       serviceDate: item.service_date || "",
       quantity: Number(item.quantity || 0),
@@ -5747,32 +5456,9 @@ async function openInvoiceDraft(invoiceId) {
       notes: item.notes || "",
     })),
     subtotal: Number(invoice.subtotal || 0),
-    tax: Number(invoice.tax ?? invoice.tax_amount || 0),
+    tax: Number(invoice.tax || 0),
     total: Number(invoice.total || 0),
   };
-
-  const resolvedScope = resolveInvoicePropertyScope({
-    selectedPropertyId: currentInvoiceDraft.propertyId,
-    propertyIds: currentInvoiceDraft.propertyIds,
-    items: currentInvoiceDraft.items,
-    fallbackPropertyName: currentInvoiceDraft.propertyName,
-    persistedScopeNames: currentInvoiceDraft.propertyScopeNames,
-  });
-  currentInvoiceDraft.propertyName = resolvedScope.scopeLabel;
-  currentInvoiceDraft.propertyScopeNames = resolvedScope.persistedScopeNames;
-  currentInvoiceDraft.propertyScopeTitle = resolvedScope.scopeTitle;
-
-  currentInvoiceDraft.propertyIds = resolveInvoicePropertyIds({
-    propertyIds: currentInvoiceDraft.propertyIds,
-    items: currentInvoiceDraft.items,
-  });
-
-  if (billingClientSelect) {
-    billingClientSelect.value = currentInvoiceDraft.invoiceScope === "client" ? String(currentInvoiceDraft.clientName || "") : "";
-  }
-  if (billingPropertySelect) {
-    billingPropertySelect.value = currentInvoiceDraft.invoiceScope === "property" ? String(currentInvoiceDraft.propertyId || "") : "";
-  }
 
   renderInvoicePreview();
 }
@@ -5799,7 +5485,7 @@ function renderInvoiceHistory() {
   }
 
   const tableRows = rows.map((invoice) => {
-    const propertyName = String(invoice.property_scope_label || "").trim() || getPropertyName(invoice.property_id);
+    const propertyName = getPropertyName(invoice.property_id);
     return `
       <tr>
         <td>${escapeHtml(invoice.invoice_number || "")}</td>
@@ -5891,17 +5577,10 @@ function exportInvoiceCsv() {
   }
 
   const invoice = currentInvoiceDraft;
-  const propertyScope = resolveInvoicePropertyScope({
-    selectedPropertyId: invoice.propertyId,
-    propertyIds: invoice.propertyIds,
-    items: invoice.items,
-    fallbackPropertyName: invoice.propertyName || getPropertyName(invoice.propertyId),
-    persistedScopeNames: invoice.propertyScopeNames,
-  });
   const header = ["invoice_number", "property", "client", "service_date", "item_source", "item_type", "description", "quantity", "unit", "rate", "amount", "notes"];
   const rows = invoice.items.map((item) => [
     invoice.invoiceNumber || "",
-    propertyScope.scopeLabel || invoice.propertyName || getPropertyName(invoice.propertyId),
+    invoice.propertyName || getPropertyName(invoice.propertyId),
     invoice.clientName || "",
     item.serviceDate || "",
     item.itemSource || "",
