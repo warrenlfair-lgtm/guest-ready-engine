@@ -2932,7 +2932,6 @@ function toggleInvoiceMarker(taskId) {
     .from("cleaning_tasks")
     .update({
       invoiced: newInvoiced,
-      invoiced_invoice_id: newInvoiced ? (task.invoiced_invoice_id || null) : null,
     })
     .eq("id", taskId)
     .then(({ error }) => {
