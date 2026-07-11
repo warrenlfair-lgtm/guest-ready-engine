@@ -4540,6 +4540,26 @@ function recalculateInvoiceDraftTotals() {
   currentInvoiceDraft.total = Number((currentInvoiceDraft.subtotal + currentInvoiceDraft.tax).toFixed(2));
 }
 
+function formatInvoicePrintDateValue(value) {
+  const normalized = normalizeDateKey(value);
+  if (!normalized) return String(value || "");
+
+  const parsed = parseDateString(normalized);
+  if (Number.isNaN(parsed.getTime())) return normalized;
+
+  const month = String(parsed.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(parsed.getUTCDate()).padStart(2, "0");
+  const year = parsed.getUTCFullYear();
+  return `${month}/${day}/${year}`;
+}
+
+function formatInvoicePrintPeriod(startDate, endDate) {
+  if (startDate && endDate) {
+    return `${formatInvoicePrintDateValue(startDate)} – ${formatInvoicePrintDateValue(endDate)}`;
+  }
+  return formatInvoicePrintDateValue(startDate || endDate || "");
+}
+
 function renderInvoicePreview() {
   if (!invoicePreviewContainer) return;
 
@@ -4568,81 +4588,158 @@ function renderInvoicePreview() {
     `).join("")
     : `<tr><td colspan="8">No line items in this invoice.</td></tr>`;
 
+  const printItemRows = invoice.items.length
+    ? invoice.items.map((item) => `
+      <tr>
+        <td>${escapeHtml(item.description || "")}</td>
+        <td>${escapeHtml(formatInvoicePrintDateValue(item.serviceDate || ""))}</td>
+        <td>${escapeHtml(String(Number(item.quantity || 0)))}</td>
+        <td>${escapeHtml(item.unit || "")}</td>
+        <td class="billing-report-amount">${toMoney(item.rate || 0)}</td>
+        <td>${escapeHtml(item.notes || "")}</td>
+        <td class="billing-report-amount">${toMoney(item.amount)}</td>
+      </tr>
+    `).join("")
+    : `<tr><td colspan="7">No line items in this invoice.</td></tr>`;
+
   const propertyName = invoice.propertyName || getPropertyName(invoice.propertyId);
   const billingName = invoice.billingCompanyName || invoice.clientName;
+  const billingEmail = String(invoice.billingEmail || "").trim();
+  const billingAddress = String(invoice.billingAddress || "").trim();
+  const accountReference = String(invoice.accountReference || "").trim();
+  const notes = String(invoice.notes || "").trim();
+  const showTaxLine = invoice.taxable && Number(invoice.taxRate || 0) > 0;
 
   invoicePreviewContainer.innerHTML = `
-    <div class="billing-report-sheet invoice-report-sheet">
-      ${renderBillingReportHeader()}
-      <h2 class="billing-report-title">Invoice Preview</h2>
-      <div class="billing-report-meta"><strong>Guest Ready™</strong> | Fair Ventures LLC</div>
-      <div class="billing-report-meta"><strong>Invoice #:</strong> ${escapeHtml(invoice.invoiceNumber || "(pending)")}</div>
-      <div class="billing-report-meta"><strong>Status:</strong> ${escapeHtml(String(invoice.status || "draft").toUpperCase())}</div>
-      <div class="billing-report-meta"><strong>Property:</strong> ${escapeHtml(propertyName || "")}</div>
-      <div class="billing-report-meta"><strong>Client:</strong> <input type="text" value="${escapeHtml(invoice.clientName || "")}" onchange="updateInvoiceDraftField('clientName', this.value)"></div>
-      <div class="billing-report-meta"><strong>Billing Company:</strong> <input type="text" value="${escapeHtml(billingName || "")}" onchange="updateInvoiceDraftField('billingCompanyName', this.value)"></div>
-      <div class="billing-report-meta"><strong>Billing Email:</strong> <input type="email" value="${escapeHtml(invoice.billingEmail || "")}" onchange="updateInvoiceDraftField('billingEmail', this.value)"></div>
-      <div class="billing-report-meta"><strong>Billing Address:</strong> <input type="text" value="${escapeHtml(invoice.billingAddress || "")}" onchange="updateInvoiceDraftField('billingAddress', this.value)"></div>
-      <div class="billing-report-meta"><strong>Account/Ref:</strong> <input type="text" value="${escapeHtml(invoice.accountReference || "")}" onchange="updateInvoiceDraftField('accountReference', this.value)"></div>
-      <div class="billing-report-meta"><strong>Invoice Date:</strong> ${invoice.invoiceDate}</div>
-      <div class="billing-report-meta"><strong>Due Date:</strong> <input type="date" value="${invoice.dueDate || ""}" onchange="updateInvoiceDraftField('dueDate', this.value)"> (${escapeHtml(invoice.paymentTerms || DEFAULT_INVOICE_TERMS)})</div>
-      <div class="billing-report-meta"><strong>Service Period:</strong> ${invoice.periodStart} to ${invoice.periodEnd}</div>
-      <div class="billing-report-meta"><strong>Taxable:</strong> <input type="checkbox" ${invoice.taxable ? "checked" : ""} onchange="updateInvoiceDraftField('taxable', this.checked)"></div>
-      <div class="billing-report-meta"><strong>Tax Rate (%):</strong> <input type="number" min="0" step="0.01" value="${Number(invoice.taxRate || 0)}" onchange="updateInvoiceDraftField('taxRate', this.value)"></div>
-      <div class="billing-report-meta"><strong>Notes:</strong> <textarea rows="3" onchange="updateInvoiceDraftField('notes', this.value)">${escapeHtml(invoice.notes || "")}</textarea></div>
+    <div class="invoice-preview-actions no-print">
+      <button type="button" onclick="addInvoiceManualItem()">Add Line Item</button>
+      <button type="button" onclick="addInvoiceDiscountItem()">Add Discount</button>
+      <button type="button" onclick="addInvoiceCreditItem()">Add Credit</button>
+      <button type="button" onclick="addInvoiceSurchargeItem()">Add Surcharge</button>
+      <select id="invoiceQuickAddSelect" onchange="addInvoiceQuickItem(this.value)">
+        <option value="">Quick Add...</option>
+        <option value="filter_cleaning">Filter Cleaning</option>
+        <option value="cartridge_cleaning">Cartridge Cleaning</option>
+        <option value="green_to_clean">Green-to-Clean Treatment</option>
+        <option value="pump_repair">Pump Repair</option>
+        <option value="equipment_repair">Equipment Repair</option>
+        <option value="emergency_service">Emergency Service</option>
+        <option value="salt_addition">Salt Addition</option>
+        <option value="travel_charge">Travel Charge</option>
+        <option value="discount">Discount</option>
+        <option value="credit">Credit</option>
+      </select>
+      <button type="button" onclick="saveInvoiceDraft()">Save Draft</button>
+      <button type="button" class="checklist-link-btn" onclick="finalizeInvoiceDraft()">Finalize Invoice</button>
+      <button type="button" id="invoicePrintBtn" class="print-btn" onclick="printInvoicePreview()">Print</button>
+      <button type="button" class="print-btn" onclick="downloadInvoicePdf()">Download PDF</button>
+      <button type="button" onclick="shareInvoicePreview()">Email/Share</button>
+      <button type="button" onclick="exportInvoiceCsv()">Export CSV</button>
+    </div>
 
-      <div class="invoice-preview-actions">
-        <button type="button" onclick="addInvoiceManualItem()">Add Line Item</button>
-        <button type="button" onclick="addInvoiceDiscountItem()">Add Discount</button>
-        <button type="button" onclick="addInvoiceCreditItem()">Add Credit</button>
-        <button type="button" onclick="addInvoiceSurchargeItem()">Add Surcharge</button>
-        <select id="invoiceQuickAddSelect" onchange="addInvoiceQuickItem(this.value)">
-          <option value="">Quick Add...</option>
-          <option value="filter_cleaning">Filter Cleaning</option>
-          <option value="cartridge_cleaning">Cartridge Cleaning</option>
-          <option value="green_to_clean">Green-to-Clean Treatment</option>
-          <option value="pump_repair">Pump Repair</option>
-          <option value="equipment_repair">Equipment Repair</option>
-          <option value="emergency_service">Emergency Service</option>
-          <option value="salt_addition">Salt Addition</option>
-          <option value="travel_charge">Travel Charge</option>
-          <option value="discount">Discount</option>
-          <option value="credit">Credit</option>
-        </select>
-        <button type="button" onclick="saveInvoiceDraft()">Save Draft</button>
-        <button type="button" class="checklist-link-btn" onclick="finalizeInvoiceDraft()">Finalize Invoice</button>
-        <button type="button" id="invoicePrintBtn" class="print-btn" onclick="printInvoicePreview()">Print</button>
-        <button type="button" class="print-btn" onclick="downloadInvoicePdf()">Download PDF</button>
-        <button type="button" onclick="shareInvoicePreview()">Email/Share</button>
-        <button type="button" onclick="exportInvoiceCsv()">Export CSV</button>
+    <div class="invoice-document billing-report-sheet invoice-report-sheet">
+      <div class="invoice-edit-view">
+        ${renderBillingReportHeader()}
+        <div class="billing-report-meta"><strong>Fair Ventures LLC</strong></div>
+        <div class="billing-report-meta"><strong>Client:</strong> <input type="text" value="${escapeHtml(invoice.clientName || "")}" onchange="updateInvoiceDraftField('clientName', this.value)"></div>
+        <div class="billing-report-meta"><strong>Billing Company:</strong> <input type="text" value="${escapeHtml(billingName || "")}" onchange="updateInvoiceDraftField('billingCompanyName', this.value)"></div>
+        <div class="billing-report-meta"><strong>Billing Email:</strong> <input type="email" value="${escapeHtml(invoice.billingEmail || "")}" onchange="updateInvoiceDraftField('billingEmail', this.value)"></div>
+        <div class="billing-report-meta"><strong>Billing Address:</strong> <input type="text" value="${escapeHtml(invoice.billingAddress || "")}" onchange="updateInvoiceDraftField('billingAddress', this.value)"></div>
+        <div class="billing-report-meta"><strong>Account/Ref:</strong> <input type="text" value="${escapeHtml(invoice.accountReference || "")}" onchange="updateInvoiceDraftField('accountReference', this.value)"></div>
+        <div class="billing-report-meta"><strong>Invoice #:</strong> ${escapeHtml(invoice.invoiceNumber || "(pending)")}</div>
+        <div class="billing-report-meta"><strong>Invoice Date:</strong> ${invoice.invoiceDate}</div>
+        <div class="billing-report-meta"><strong>Due Date:</strong> <input type="date" value="${invoice.dueDate || ""}" onchange="updateInvoiceDraftField('dueDate', this.value)"> (${escapeHtml(invoice.paymentTerms || DEFAULT_INVOICE_TERMS)})</div>
+        <div class="billing-report-meta"><strong>Service Period:</strong> ${invoice.periodStart} to ${invoice.periodEnd}</div>
+        <div class="billing-report-meta"><strong>Status:</strong> ${escapeHtml(String(invoice.status || "draft").toUpperCase())}</div>
+        <div class="billing-report-meta"><strong>Property:</strong> ${escapeHtml(propertyName || "")}</div>
+        <h2 class="billing-report-title invoice-document-title">Invoice Preview</h2>
+        <div class="billing-report-meta"><strong>Taxable:</strong> <input type="checkbox" ${invoice.taxable ? "checked" : ""} onchange="updateInvoiceDraftField('taxable', this.checked)"></div>
+        <div class="billing-report-meta"><strong>Tax Rate (%):</strong> <input type="number" min="0" step="0.01" value="${Number(invoice.taxRate || 0)}" onchange="updateInvoiceDraftField('taxRate', this.value)"></div>
+        <div class="billing-report-meta"><strong>Notes:</strong> <textarea rows="3" onchange="updateInvoiceDraftField('notes', this.value)">${escapeHtml(invoice.notes || "")}</textarea></div>
+
+        <section class="billing-report-group">
+          <h3>Itemized Charges</h3>
+          <table class="billing-report-table invoice-edit-table">
+            <thead>
+              <tr>
+                <th>Description</th>
+                <th>Service Date</th>
+                <th>Qty</th>
+                <th>Unit</th>
+                <th>Rate</th>
+                <th>Notes</th>
+                <th>Amount</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              ${itemRows}
+            </tbody>
+          </table>
+        </section>
+
+        <div class="billing-report-subtotal">Subtotal: ${toMoney(invoice.subtotal)}</div>
+        <div class="billing-report-subtotal">Tax (${Number(invoice.taxRate || 0).toFixed(2)}%): ${toMoney(invoice.tax)}</div>
+        <div class="billing-report-grand-total">Total Due: ${toMoney(invoice.total)}</div>
+        <div class="billing-report-meta">Payment Instructions: Please remit payment to Fair Ventures LLC by due date.</div>
+        ${renderBillingReportFooter()}
       </div>
 
-      <section class="billing-report-group">
-        <h3>Itemized Charges</h3>
-        <table class="billing-report-table invoice-edit-table">
-          <thead>
-            <tr>
-              <th>Description</th>
-              <th>Service Date</th>
-              <th>Qty</th>
-              <th>Unit</th>
-              <th>Rate</th>
-              <th>Notes</th>
-              <th>Amount</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            ${itemRows}
-          </tbody>
-        </table>
-      </section>
+      <div class="invoice-print-view">
+        <div class="invoice-print-header">
+          <div>
+            <div class="invoice-brand-row">
+              ${renderBillingReportHeader()}
+            </div>
+            <div class="invoice-print-text"><strong>Fair Ventures LLC</strong></div>
+            <div class="invoice-bill-to">
+              <div class="invoice-bill-to-title">BILL TO</div>
+              <div class="invoice-print-text">${escapeHtml(invoice.clientName || "")}</div>
+              <div class="invoice-print-text">Billing Company: ${escapeHtml(billingName || "")}</div>
+              ${billingEmail ? `<div class="invoice-print-text">Billing Email: ${escapeHtml(billingEmail)}</div>` : ""}
+              ${billingAddress ? `<div class="invoice-print-text">Billing Address: ${escapeHtml(billingAddress)}</div>` : ""}
+              ${accountReference ? `<div class="invoice-print-text">Account/Ref: ${escapeHtml(accountReference)}</div>` : ""}
+            </div>
+          </div>
+          <div class="invoice-meta">
+            <div class="invoice-title">INVOICE</div>
+            <div class="invoice-print-text">Invoice #: ${escapeHtml(invoice.invoiceNumber || "Pending")}</div>
+            <div class="invoice-print-text">Invoice Date: ${escapeHtml(formatInvoicePrintDateValue(invoice.invoiceDate || ""))}</div>
+            <div class="invoice-print-text">Due Date: ${escapeHtml(formatInvoicePrintDateValue(invoice.dueDate || ""))}</div>
+            <div class="invoice-print-text">Terms: ${escapeHtml(invoice.paymentTerms || DEFAULT_INVOICE_TERMS)}</div>
+            <div class="invoice-print-text">Service Period: ${escapeHtml(formatInvoicePrintPeriod(invoice.periodStart || "", invoice.periodEnd || ""))}</div>
+            <div class="invoice-print-text">Status: ${escapeHtml(String(invoice.status || "draft").toUpperCase())}</div>
+            <div class="invoice-print-text">Property: ${escapeHtml(propertyName || "")}</div>
+          </div>
+        </div>
 
-      <div class="billing-report-subtotal">Subtotal: ${toMoney(invoice.subtotal)}</div>
-      <div class="billing-report-subtotal">Tax (${Number(invoice.taxRate || 0).toFixed(2)}%): ${toMoney(invoice.tax)}</div>
-      <div class="billing-report-grand-total">Total Due: ${toMoney(invoice.total)}</div>
-      <div class="billing-report-meta">Payment Instructions: Please remit payment to Fair Ventures LLC by due date.</div>
-      ${renderBillingReportFooter()}
+        <section class="billing-report-group invoice-items-section">
+          <h3>Itemized Charges</h3>
+          <table class="billing-report-table invoice-print-table">
+            <thead>
+              <tr>
+                <th>Description</th>
+                <th>Service Date</th>
+                <th>Qty</th>
+                <th>Unit</th>
+                <th>Rate</th>
+                <th>Notes</th>
+                <th>Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${printItemRows}
+            </tbody>
+          </table>
+        </section>
+
+        <div class="billing-report-subtotal">Subtotal: ${toMoney(invoice.subtotal)}</div>
+        ${showTaxLine ? `<div class="billing-report-subtotal">Tax (${Number(invoice.taxRate || 0).toFixed(2)}%): ${toMoney(invoice.tax)}</div>` : ""}
+        <div class="billing-report-grand-total">Total Due: ${toMoney(invoice.total)}</div>
+        ${notes ? `<div class="billing-report-meta"><strong>Notes:</strong> ${escapeHtml(notes)}</div>` : ""}
+        <div class="billing-report-meta">Payment Instructions: Please remit payment to Fair Ventures LLC by due date.</div>
+        ${renderBillingReportFooter()}
+      </div>
     </div>
   `;
 }

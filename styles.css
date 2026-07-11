@@ -1788,8 +1788,53 @@ textarea{
     gap: 8px;
 }
 
+.invoice-preview-shell {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.invoice-document {
+    background: white;
+}
+
+.invoice-edit-view {
+    display: block;
+}
+
+.invoice-print-view {
+    display: none;
+}
+
+.invoice-brand-row .billing-report-header-block {
+    margin-bottom: 4px;
+}
+
+.invoice-print-text {
+    line-height: 1.4;
+}
+
+.invoice-document-title {
+    margin-top: 14px;
+}
+
 .invoice-report-sheet {
     border-top: 4px solid #0f766e;
+}
+
+.invoice-print-table td,
+.invoice-print-table th {
+    vertical-align: top;
+}
+
+@media screen {
+    .invoice-print-view {
+        display: none;
+    }
+
+    .invoice-edit-view {
+        display: block;
+    }
 }
 
 .invoice-edit-table input,
@@ -2228,8 +2273,114 @@ textarea{
 }
 
 @media print {
+    @page {
+        size: portrait;
+        margin: 0.5in;
+    }
+
     body {
         background: white;
+    }
+
+    body.print-view-invoice * {
+        visibility: hidden;
+    }
+
+    body.print-view-invoice .invoice-document,
+    body.print-view-invoice .invoice-document * {
+        visibility: visible;
+    }
+
+    body.print-view-invoice .invoice-document {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 96%;
+        max-width: 7.25in;
+        margin: 0 auto;
+        box-sizing: border-box;
+    }
+
+    body.print-view-invoice .invoice-document button {
+        display: none !important;
+    }
+
+    body.print-view-invoice .invoice-edit-view {
+        display: none !important;
+    }
+
+    body.print-view-invoice .invoice-print-view {
+        display: block !important;
+        width: 100%;
+        max-width: 100%;
+        box-sizing: border-box;
+    }
+
+    body.print-view-invoice .invoice-print-header {
+        display: grid;
+        grid-template-columns: 1.35fr 0.85fr;
+        gap: 28px;
+        align-items: start;
+        margin-bottom: 14px;
+        padding-bottom: 12px;
+        border-bottom: 2px solid #1d7d70;
+        break-inside: avoid;
+        page-break-inside: avoid;
+    }
+
+    body.print-view-invoice .invoice-brand-row {
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+    }
+
+    body.print-view-invoice .invoice-logo,
+    body.print-view-invoice .billing-report-logo {
+        width: 135px;
+        height: auto;
+        max-width: 135px;
+    }
+
+    body.print-view-invoice .invoice-company-name,
+    body.print-view-invoice .billing-report-brand {
+        font-size: 20px;
+        font-weight: 700;
+        line-height: 1.15;
+    }
+
+    body.print-view-invoice .invoice-tagline,
+    body.print-view-invoice .billing-report-brand-subtitle {
+        font-size: 11px;
+    }
+
+    body.print-view-invoice .invoice-bill-to {
+        margin-top: 10px;
+        line-height: 1.4;
+    }
+
+    body.print-view-invoice .invoice-bill-to-title,
+    body.print-view-invoice .invoice-title {
+        font-size: 18px;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+    }
+
+    body.print-view-invoice .invoice-meta {
+        text-align: right;
+        line-height: 1.5;
+        overflow-wrap: anywhere;
+    }
+
+    body.print-view-invoice .invoice-items-section {
+        margin-top: 10px;
+    }
+
+    body.print-view-invoice .invoice-document-title,
+    body.print-view-invoice input,
+    body.print-view-invoice textarea,
+    body.print-view-invoice select,
+    body.print-view-invoice input[type="checkbox"] {
+        display: none !important;
     }
 
     .header,
@@ -2282,6 +2433,7 @@ textarea{
     }
 
     body.print-view-invoice #billingReportContainer,
+    body.print-view-invoice .billing-summary-widget,
     body.print-view-invoice #invoiceHistoryContainer,
     body.print-view-invoice #billingFilterPanel,
     body.print-view-invoice #invoiceHistoryFilterPanel,
