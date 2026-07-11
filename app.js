@@ -5214,18 +5214,23 @@ async function saveInvoiceDraft(options = {}) {
   const invoicePayload = {
     invoice_number: currentInvoiceDraft.id ? currentInvoiceDraft.invoiceNumber : buildInvoiceNumber(),
     property_id: currentInvoiceDraft.propertyId,
+    client_id: null,
     client_name: currentInvoiceDraft.clientName || null,
     billing_email: currentInvoiceDraft.billingEmail || null,
     billing_address: currentInvoiceDraft.billingAddress || null,
+    service_period_start: currentInvoiceDraft.periodStart,
+    service_period_end: currentInvoiceDraft.periodEnd,
     period_start: currentInvoiceDraft.periodStart,
     period_end: currentInvoiceDraft.periodEnd,
     invoice_date: currentInvoiceDraft.invoiceDate,
     due_date: currentInvoiceDraft.dueDate,
     subtotal: currentInvoiceDraft.subtotal,
+    tax_amount: currentInvoiceDraft.tax,
     tax: currentInvoiceDraft.tax,
     total: currentInvoiceDraft.total,
     status: "draft",
     notes: currentInvoiceDraft.notes || null,
+    updated_at: new Date().toISOString(),
   };
 
   let invoiceId = currentInvoiceDraft.id;
@@ -5260,6 +5265,8 @@ async function saveInvoiceDraft(options = {}) {
 
   const itemsPayload = currentInvoiceDraft.items.map((item) => ({
     invoice_id: invoiceId,
+    source_type: item.itemSource || (item.taskId ? INVOICE_ITEM_SOURCES.TASK : item.chemicalUsageId ? INVOICE_ITEM_SOURCES.CHEMICAL : INVOICE_ITEM_SOURCES.MANUAL),
+    source_id: item.sourceId || item.taskId || item.chemicalUsageId || null,
     task_id: item.taskId || null,
     chemical_usage_id: item.chemicalUsageId || null,
     description: item.description || null,
@@ -5472,13 +5479,13 @@ async function openInvoiceDraft(invoiceId) {
     invoiceNumber: invoice.invoice_number,
     propertyId: invoice.property_id,
     propertyName: property?.property_name || "",
-    clientName: invoice.client_name || "",
+    clientName: invoice.client_name || property?.client_name || "",
     billingCompanyName: property?.billing_company_name || "",
     billingEmail: invoice.billing_email || property?.billing_email || "",
     billingAddress: invoice.billing_address || property?.billing_address || "",
     accountReference: property?.billing_account_reference || "",
-    periodStart: invoice.period_start || "",
-    periodEnd: invoice.period_end || "",
+    periodStart: invoice.period_start || invoice.service_period_start || "",
+    periodEnd: invoice.period_end || invoice.service_period_end || "",
     invoiceDate: invoice.invoice_date || "",
     dueDate: invoice.due_date || "",
     status: invoice.status || "draft",
@@ -5488,7 +5495,7 @@ async function openInvoiceDraft(invoiceId) {
     taxRate: Number(property?.billing_tax_rate || 0),
     includeNonBillableChemicals: false,
     items: (items || []).map((item) => ({
-      sourceId: item.chemical_usage_id || item.task_id || null,
+      sourceId: item.source_id || item.chemical_usage_id || item.task_id || null,
       taskId: item.task_id || null,
       chemicalUsageId: item.chemical_usage_id || null,
       description: item.description || "",
@@ -5502,7 +5509,7 @@ async function openInvoiceDraft(invoiceId) {
       notes: item.notes || "",
     })),
     subtotal: Number(invoice.subtotal || 0),
-    tax: Number(invoice.tax || 0),
+    tax: Number(invoice.tax ?? invoice.tax_amount || 0),
     total: Number(invoice.total || 0),
   };
 
