@@ -5650,6 +5650,156 @@ async function deleteInvoiceDraft(invoiceId) {
   renderInvoiceHistory();
 }
 
+function getInvoiceHistoryDeleteMode(invoice) {
+  const status = String(invoice?.status || "").toLowerCase();
+  if (status === "draft") return "draft";
+  if (status === "finalized") return "finalized";
+  if ((status === "sent" || status === "paid") && isProtectedAccessUnlocked) return "protected";
+  return "blocked";
+}
+
+function getInvoiceItemTaskId(item) {
+  const itemSource = String(item?.item_source || "").toLowerCase();
+  if (item?.task_id) return item.task_id;
+  if (itemSource === "task" && item?.source_id) return item.source_id;
+  return null;
+}
+
+function getInvoiceItemChemicalUsageId(item) {
+  const itemSource = String(item?.item_source || "").toLowerCase();
+  if (item?.chemical_usage_id) return item.chemical_usage_id;
+  if (itemSource === "chemical" && item?.source_id) return item.source_id;
+  return null;
+}
+
+async function updateInvoiceSourceReleaseRows(tableName, ids, fields) {
+  if (!ids.length) return { error: null };
+
+  let payload = { ...fields };
+  let lastError = null;
+
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const { error } = await supabaseClient
+      .from(tableName)
+      .update(payload)
+      .in("id", ids);
+
+    if (!error) {
+      return { error: null };
+    }
+
+    lastError = error;
+    const message = String(error.message || "").toLowerCase();
+    const missingColumns = Object.keys(payload).filter((column) => message.includes(column.toLowerCase()));
+    if (!missingColumns.length) {
+      break;
+    }
+
+    missingColumns.forEach((column) => {
+      delete payload[column];
+    });
+
+    if (!Object.keys(payload).length) {
+      break;
+    }
+  }
+
+  return { error: lastError };
+}
+
+async function deleteFinalizedOrProtectedInvoice(invoiceId) {
+  const invoice = invoices.find((row) => row.id === invoiceId);
+  if (!invoice) return;
+
+  const mode = getInvoiceHistoryDeleteMode(invoice);
+  if (mode === "blocked") {
+    alert("This invoice cannot be deleted unless the app is in admin/test mode.");
+    return;
+  }
+
+  const invoiceNumber = String(invoice.invoice_number || "(pending)");
+  const status = String(invoice.status || "").toLowerCase();
+  const confirmationMessage = status === "finalized"
+    ? `Delete finalized invoice ${invoiceNumber}?\n\nThis will permanently delete the finalized invoice and its invoice items.\nAny linked cleaning tasks and chemical usage must be released so they can be invoiced again.\n\nType DELETE to confirm.`
+    : `Delete ${status} invoice ${invoiceNumber}?\n\nThis will permanently delete the invoice and its invoice items.\nAny linked cleaning tasks and chemical usage must be released so they can be invoiced again.\n\nType DELETE to confirm.`;
+
+  const typedConfirmation = window.prompt(confirmationMessage, "");
+  if (String(typedConfirmation || "").trim().toUpperCase() !== "DELETE") {
+    return;
+  }
+
+  const { data: invoiceItems, error: invoiceItemsError } = await supabaseClient
+    .from("invoice_items")
+    .select("*")
+    .eq("invoice_id", invoiceId);
+
+  if (invoiceItemsError) {
+    alert("Could not load invoice line items for deletion: " + invoiceItemsError.message);
+    return;
+  }
+
+  const taskIds = Array.from(new Set((invoiceItems || []).map(getInvoiceItemTaskId).filter(Boolean)));
+  const chemicalUsageIds = Array.from(new Set((invoiceItems || []).map(getInvoiceItemChemicalUsageId).filter(Boolean)));
+
+  if (taskIds.length) {
+    const { error: taskReleaseError } = await updateInvoiceSourceReleaseRows("cleaning_tasks", taskIds, {
+      invoiced: false,
+      invoiced_invoice_id: null,
+      invoice_id: null,
+      invoiced_at: null,
+    });
+
+    if (taskReleaseError) {
+      alert("Could not release linked cleaning tasks: " + taskReleaseError.message);
+      return;
+    }
+  }
+
+  if (chemicalUsageIds.length) {
+    const { error: chemicalReleaseError } = await updateInvoiceSourceReleaseRows("chemical_usage", chemicalUsageIds, {
+      invoiced: false,
+      invoiced_invoice_id: null,
+      invoice_id: null,
+      invoiced_at: null,
+    });
+
+    if (chemicalReleaseError) {
+      alert("Could not release linked chemical usage: " + chemicalReleaseError.message);
+      return;
+    }
+  }
+
+  const { error: deleteItemsError } = await supabaseClient
+    .from("invoice_items")
+    .delete()
+    .eq("invoice_id", invoiceId);
+
+  if (deleteItemsError) {
+    alert("Could not delete invoice line items: " + deleteItemsError.message);
+    return;
+  }
+
+  const { error: deleteInvoiceError } = await supabaseClient
+    .from("invoices")
+    .delete()
+    .eq("id", invoiceId);
+
+  if (deleteInvoiceError) {
+    alert("Could not delete invoice: " + deleteInvoiceError.message);
+    return;
+  }
+
+  if (currentInvoiceDraft && String(currentInvoiceDraft.id || "") === String(invoiceId)) {
+    currentInvoiceDraft = null;
+    renderInvoicePreview();
+  }
+
+  await loadInvoices();
+  await loadCleaningTasks();
+  await loadChemicalUsageEntries();
+  renderInvoiceHistory();
+}
+
 function renderInvoiceHistory() {
   if (!invoiceHistoryContainer) return;
 
@@ -5673,7 +5823,9 @@ function renderInvoiceHistory() {
 
   const tableRows = rows.map((invoice) => {
     const propertyName = invoicePropertyLabelById.get(String(invoice.id || "")) || "Multiple Properties";
-    const isDraft = String(invoice.status || "").toLowerCase() === "draft";
+    const deleteMode = getInvoiceHistoryDeleteMode(invoice);
+    const showDeleteButton = deleteMode === "draft" || deleteMode === "finalized" || deleteMode === "protected";
+    const deleteHandler = deleteMode === "draft" ? `deleteInvoiceDraft('${invoice.id}')` : `deleteFinalizedOrProtectedInvoice('${invoice.id}')`;
     return `
       <tr>
         <td>${escapeHtml(invoice.invoice_number || "")}</td>
@@ -5689,7 +5841,7 @@ function renderInvoiceHistory() {
         </td>
         <td class="invoice-history-actions">
           <button type="button" onclick="openInvoiceDraft('${invoice.id}')">Open</button>
-          ${isDraft ? `<button type="button" class="delete-btn" onclick="deleteInvoiceDraft('${invoice.id}')">Delete</button>` : ""}
+          ${showDeleteButton ? `<button type="button" class="delete-btn" onclick="${deleteHandler}">Delete</button>` : ""}
         </td>
       </tr>
     `;
