@@ -1682,6 +1682,16 @@ textarea{
     flex-wrap: wrap;
 }
 
+.billing-handoff-message {
+    margin-bottom: 18px;
+    padding: 12px 14px;
+    border-radius: 10px;
+    background: #fff7ed;
+    border: 1px solid #fdba74;
+    color: #9a3412;
+    font-weight: 600;
+}
+
 .reports-dashboard-cards {
     display: grid;
     gap: 14px;

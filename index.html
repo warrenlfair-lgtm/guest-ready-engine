@@ -39,6 +39,7 @@
     <button type="button" class="view-btn" data-view="week">Week View</button>
     <button type="button" class="view-btn" data-view="properties">Properties</button>
     <button type="button" class="view-btn" data-view="reports">Reports</button>
+    <button type="button" class="view-btn" data-view="invoices">Invoices</button>
     <button type="button" class="view-btn" data-view="settings">Settings</button>
   </div>
 
@@ -109,6 +110,7 @@
       </div>
       <div class="billing-header-actions">
         <button type="button" onclick="navigateToView('reports')">Back to Reports</button>
+        <button type="button" id="billingCreateInvoiceBtn">Create Invoice</button>
         <button type="button" id="billingPrintBtn" class="print-btn">Print / Save as PDF</button>
       </div>
     </div>
@@ -130,6 +132,54 @@
     </div>
 
     <div class="billing-filters" id="billingFilterPanel">
+      <div class="filter-group">
+        <label for="billingReportStartDate">Start Date:</label>
+        <input id="billingReportStartDate" type="date">
+      </div>
+      <div class="filter-group">
+        <label for="billingReportEndDate">End Date:</label>
+        <input id="billingReportEndDate" type="date">
+      </div>
+      <div class="filter-group">
+        <label for="billingReportClientSelect">Client:</label>
+        <select id="billingReportClientSelect">
+          <option value="">All Clients</option>
+        </select>
+      </div>
+      <div class="filter-group">
+        <label for="billingReportPropertySelect">Property:</label>
+        <select id="billingReportPropertySelect">
+          <option value="">All Properties</option>
+        </select>
+      </div>
+      <div class="filter-group">
+        <label class="billing-checkbox-label" for="billingReportIncludeNonBillableChemicals">
+          <input id="billingReportIncludeNonBillableChemicals" type="checkbox">
+          Include non-billable chemicals at $0.00
+        </label>
+      </div>
+      <div class="filter-group">
+        <label for="billingReportTaxEnabled">Tax</label>
+        <select id="billingReportTaxEnabled">
+          <option value="property">Use Property Setting</option>
+          <option value="yes">Always Taxable</option>
+          <option value="no">Tax Exempt</option>
+        </select>
+      </div>
+    </div>
+
+    <div id="billingInvoiceHandoffMessage" class="billing-handoff-message hidden"></div>
+
+    <div id="billingReportContainer" class="billing-report-paper"></div>
+  </section>
+
+  <section id="invoicesView" class="view-panel">
+    <div class="view-header">
+      <h2>Invoices</h2>
+      <p>Create, edit, print, and manage invoice history.</p>
+    </div>
+
+    <div class="billing-filters" id="invoiceFilterPanel">
       <div class="filter-group">
         <label for="billingStartDate">Start Date:</label>
         <input id="billingStartDate" type="date">
@@ -190,8 +240,6 @@
     </div>
 
     <div id="invoiceHistoryContainer" class="billing-report-paper"></div>
-
-    <div id="billingReportContainer" class="billing-report-paper"></div>
   </section>
 
   <section id="routeFragmentationView" class="view-panel">

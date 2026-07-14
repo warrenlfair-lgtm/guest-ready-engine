@@ -163,6 +163,14 @@ const debugTaskCount = document.getElementById("debugTaskCount");
 const propertyFilterSelect = document.getElementById("propertyFilterSelect");
 const monthFilterSelect = document.getElementById("monthFilterSelect");
 const weekViewDefaultCheckbox = document.getElementById("weekViewDefault");
+const billingReportStartDate = document.getElementById("billingReportStartDate");
+const billingReportEndDate = document.getElementById("billingReportEndDate");
+const billingReportClientSelect = document.getElementById("billingReportClientSelect");
+const billingReportPropertySelect = document.getElementById("billingReportPropertySelect");
+const billingReportIncludeNonBillableChemicals = document.getElementById("billingReportIncludeNonBillableChemicals");
+const billingReportTaxEnabled = document.getElementById("billingReportTaxEnabled");
+const billingCreateInvoiceBtn = document.getElementById("billingCreateInvoiceBtn");
+const billingInvoiceHandoffMessage = document.getElementById("billingInvoiceHandoffMessage");
 const billingStartDate = document.getElementById("billingStartDate");
 const billingEndDate = document.getElementById("billingEndDate");
 const billingClientSelect = document.getElementById("billingClientSelect");
@@ -331,15 +339,76 @@ if (billingPrintBtn) {
   billingPrintBtn.addEventListener("click", printBillingReport);
 }
 
+if (billingCreateInvoiceBtn) {
+  billingCreateInvoiceBtn.addEventListener("click", createInvoiceFromBillingReport);
+}
+
+if (billingReportStartDate) {
+  billingReportStartDate.addEventListener("change", () => {
+    hideBillingInvoiceHandoffMessage();
+    syncInvoiceFiltersFromBillingReport();
+    renderBillingReport();
+    refreshBillingCard();
+    clearCurrentInvoiceDraftState();
+  });
+}
+
+if (billingReportEndDate) {
+  billingReportEndDate.addEventListener("change", () => {
+    hideBillingInvoiceHandoffMessage();
+    syncInvoiceFiltersFromBillingReport();
+    renderBillingReport();
+    refreshBillingCard();
+    clearCurrentInvoiceDraftState();
+  });
+}
+
+if (billingReportClientSelect) {
+  billingReportClientSelect.addEventListener("change", () => {
+    hideBillingInvoiceHandoffMessage();
+    syncInvoiceFiltersFromBillingReport();
+    renderBillingReport();
+    refreshBillingCard();
+    clearCurrentInvoiceDraftState();
+    renderInvoiceHistory();
+  });
+}
+
+if (billingReportPropertySelect) {
+  billingReportPropertySelect.addEventListener("change", () => {
+    syncClientSelectToPropertySelection(billingReportClientSelect, billingReportPropertySelect);
+    hideBillingInvoiceHandoffMessage();
+    syncInvoiceFiltersFromBillingReport();
+    renderBillingReport();
+    refreshBillingCard();
+    clearCurrentInvoiceDraftState();
+    renderInvoiceHistory();
+  });
+}
+
+if (billingReportIncludeNonBillableChemicals) {
+  billingReportIncludeNonBillableChemicals.addEventListener("change", () => {
+    hideBillingInvoiceHandoffMessage();
+    syncInvoiceFiltersFromBillingReport();
+    clearCurrentInvoiceDraftState();
+  });
+}
+
+if (billingReportTaxEnabled) {
+  billingReportTaxEnabled.addEventListener("change", () => {
+    hideBillingInvoiceHandoffMessage();
+    syncInvoiceFiltersFromBillingReport();
+    clearCurrentInvoiceDraftState();
+  });
+}
+
 if (billingStartDate) {
   billingStartDate.addEventListener("change", renderBillingReport);
   billingStartDate.addEventListener("change", refreshBillingCard);
   billingStartDate.addEventListener("change", () => {
-    currentInvoiceDraft = null;
-    currentInvoiceBatchDrafts = [];
-    clearInvoiceEligibilitySummary();
-    renderInvoicePreview();
-    renderInvoiceBatchPreview();
+    hideBillingInvoiceHandoffMessage();
+    syncBillingReportFiltersFromInvoices();
+    clearCurrentInvoiceDraftState();
   });
 }
 
@@ -347,26 +416,19 @@ if (billingEndDate) {
   billingEndDate.addEventListener("change", renderBillingReport);
   billingEndDate.addEventListener("change", refreshBillingCard);
   billingEndDate.addEventListener("change", () => {
-    currentInvoiceDraft = null;
-    currentInvoiceBatchDrafts = [];
-    clearInvoiceEligibilitySummary();
-    renderInvoicePreview();
-    renderInvoiceBatchPreview();
+    hideBillingInvoiceHandoffMessage();
+    syncBillingReportFiltersFromInvoices();
+    clearCurrentInvoiceDraftState();
   });
 }
 
 if (billingClientSelect) {
   billingClientSelect.addEventListener("change", () => {
-    if (billingClientSelect.value && billingPropertySelect) {
-      billingPropertySelect.value = "";
-    }
+    hideBillingInvoiceHandoffMessage();
+    syncBillingReportFiltersFromInvoices();
     renderBillingReport();
     refreshBillingCard();
-    currentInvoiceDraft = null;
-    currentInvoiceBatchDrafts = [];
-    clearInvoiceEligibilitySummary();
-    renderInvoicePreview();
-    renderInvoiceBatchPreview();
+    clearCurrentInvoiceDraftState();
     renderInvoiceHistory();
   });
 }
@@ -378,14 +440,10 @@ if (billingPropertySelect) {
 
 if (billingPropertySelect) {
   billingPropertySelect.addEventListener("change", () => {
-    if (billingPropertySelect.value && billingClientSelect) {
-      billingClientSelect.value = "";
-    }
-    currentInvoiceDraft = null;
-    currentInvoiceBatchDrafts = [];
-    clearInvoiceEligibilitySummary();
-    renderInvoicePreview();
-    renderInvoiceBatchPreview();
+    syncClientSelectToPropertySelection(billingClientSelect, billingPropertySelect);
+    hideBillingInvoiceHandoffMessage();
+    syncBillingReportFiltersFromInvoices();
+    clearCurrentInvoiceDraftState();
     renderInvoiceHistory();
   });
 }
@@ -405,6 +463,8 @@ if (invoiceStatusFilter) {
 
 if (invoiceIncludeNonBillableChemicals) {
   invoiceIncludeNonBillableChemicals.addEventListener("change", () => {
+    hideBillingInvoiceHandoffMessage();
+    syncBillingReportFiltersFromInvoices();
     if (!currentInvoiceDraft && !currentInvoiceBatchDrafts.length) return;
     generateInvoicePreviewFromFilters();
   });
@@ -412,6 +472,8 @@ if (invoiceIncludeNonBillableChemicals) {
 
 if (invoiceTaxEnabled) {
   invoiceTaxEnabled.addEventListener("change", () => {
+    hideBillingInvoiceHandoffMessage();
+    syncBillingReportFiltersFromInvoices();
     if (!currentInvoiceDraft && !currentInvoiceBatchDrafts.length) return;
     generateInvoicePreviewFromFilters();
   });
@@ -523,6 +585,9 @@ function showView(viewName) {
 
   if (viewName === "billing") {
     renderBillingReport();
+  }
+
+  if (viewName === "invoices") {
     renderInvoicePreview();
     renderInvoiceBatchPreview();
     renderInvoiceHistory();
@@ -878,6 +943,7 @@ function initializeBillingReportFilters() {
 
   billingStartDate.value = formatDateValue(monthStart);
   billingEndDate.value = formatDateValue(monthEnd);
+  syncBillingReportFiltersFromInvoices();
 
   if (billingReconciledOnly) {
     billingReconciledOnly.checked = true;
@@ -890,6 +956,8 @@ function initializeBillingReportFilters() {
   if (invoiceTaxEnabled) {
     invoiceTaxEnabled.value = "property";
   }
+
+  syncBillingReportFiltersFromInvoices();
 }
 
 function initializeRouteFragmentationFilters() {
@@ -3899,14 +3967,14 @@ function renderBillingReportFooter() {
 }
 
 function getBillingReportRows() {
-  if (!billingStartDate || !billingEndDate) return [];
+  if (!billingReportStartDate || !billingReportEndDate) return [];
 
-  const startDate = billingStartDate.value;
-  const endDate = billingEndDate.value;
+  const startDate = billingReportStartDate.value;
+  const endDate = billingReportEndDate.value;
   if (!startDate || !endDate) return [];
 
-  const selectedPropertyId = billingPropertySelect?.value || "";
-  const selectedClientName = billingClientSelect?.value || "";
+  const selectedPropertyId = billingReportPropertySelect?.value || "";
+  const selectedClientName = billingReportClientSelect?.value || "";
   const reconciledOnly = billingReconciledOnly ? billingReconciledOnly.checked : true;
 
   const rows = getBillingReportRowsForFilters({
@@ -3925,13 +3993,13 @@ function isBillingRowReconciled(row) {
 }
 
 function getActiveBillingFilterState() {
-  const hasExplicitRange = Boolean(billingStartDate?.value && billingEndDate?.value);
+  const hasExplicitRange = Boolean(billingReportStartDate?.value && billingReportEndDate?.value);
   if (hasExplicitRange) {
     return {
-      startDate: billingStartDate.value,
-      endDate: billingEndDate.value,
-      selectedPropertyId: billingPropertySelect?.value || "",
-      selectedClientName: billingClientSelect?.value || "",
+      startDate: billingReportStartDate.value,
+      endDate: billingReportEndDate.value,
+      selectedPropertyId: billingReportPropertySelect?.value || "",
+      selectedClientName: billingReportClientSelect?.value || "",
     };
   }
 
@@ -3941,8 +4009,8 @@ function getActiveBillingFilterState() {
   return {
     startDate: formatDateValue(monthStart),
     endDate: formatDateValue(monthEnd),
-    selectedPropertyId: billingPropertySelect?.value || "",
-    selectedClientName: billingClientSelect?.value || "",
+    selectedPropertyId: billingReportPropertySelect?.value || "",
+    selectedClientName: billingReportClientSelect?.value || "",
   };
 }
 
@@ -3967,9 +4035,196 @@ function getCurrentMonthBillingSummaryFilterState() {
   return {
     startDate: formatDateValue(monthStart),
     endDate: formatDateValue(monthEnd),
-    selectedPropertyId: billingPropertySelect?.value || "",
-    selectedClientName: billingClientSelect?.value || "",
+    selectedPropertyId: billingReportPropertySelect?.value || "",
+    selectedClientName: billingReportClientSelect?.value || "",
   };
+}
+
+function clearCurrentInvoiceDraftState() {
+  currentInvoiceDraft = null;
+  currentInvoiceBatchDrafts = [];
+  clearInvoiceEligibilitySummary();
+  renderInvoicePreview();
+  renderInvoiceBatchPreview();
+}
+
+function showBillingInvoiceHandoffMessage(message) {
+  if (!billingInvoiceHandoffMessage) return;
+  billingInvoiceHandoffMessage.textContent = message;
+  billingInvoiceHandoffMessage.classList.remove("hidden");
+}
+
+function hideBillingInvoiceHandoffMessage() {
+  if (!billingInvoiceHandoffMessage) return;
+  billingInvoiceHandoffMessage.textContent = "";
+  billingInvoiceHandoffMessage.classList.add("hidden");
+}
+
+function setSelectMarkup(selectElement, markup) {
+  if (!selectElement || selectElement.innerHTML === markup) return;
+  const previousValue = selectElement.value;
+  selectElement.innerHTML = markup;
+  if (Array.from(selectElement.options).some((option) => option.value === previousValue)) {
+    selectElement.value = previousValue;
+  }
+}
+
+function syncClientSelectToPropertySelection(clientSelect, propertySelect) {
+  if (!clientSelect || !propertySelect || !propertySelect.value) return;
+  const selectedProperty = properties.find((property) => normalizePropertyId(property.id) === normalizePropertyId(propertySelect.value));
+  clientSelect.value = String(selectedProperty?.client_name || "").trim();
+}
+
+function getClientNameForPropertyId(propertyId) {
+  if (!propertyId) return "";
+  const selectedProperty = properties.find((property) => normalizePropertyId(property.id) === normalizePropertyId(propertyId));
+  return String(selectedProperty?.client_name || "").trim();
+}
+
+function getClientOptionsMarkup() {
+  return `<option value="">All Clients</option>${Array.from(new Set(
+    properties
+      .map((property) => String(property.client_name || "").trim())
+      .filter(Boolean)
+  ))
+    .sort((a, b) => a.localeCompare(b))
+    .map((clientName) => `<option value="${clientName}">${clientName}</option>`)
+    .join("")}`;
+}
+
+function getPropertyOptionsMarkup(selectedClientName = "") {
+  const normalizedClientName = String(selectedClientName || "").trim();
+  return `<option value="">All Properties</option>${properties
+    .filter((property) => !normalizedClientName || String(property.client_name || "").trim() === normalizedClientName)
+    .slice()
+    .sort((a, b) => (a.property_name || "").localeCompare(b.property_name || ""))
+    .map((property) => `<option value="${property.id}">${property.property_name}</option>`)
+    .join("")}`;
+}
+
+function populateBillingFilterSelects(clientSelect, propertySelect) {
+  if (clientSelect) {
+    setSelectMarkup(clientSelect, getClientOptionsMarkup());
+  }
+
+  if (propertySelect) {
+    const propertyMarkup = getPropertyOptionsMarkup(clientSelect?.value || "");
+    const previousValue = propertySelect.value;
+    setSelectMarkup(propertySelect, propertyMarkup);
+    if (previousValue && !Array.from(propertySelect.options).some((option) => option.value === previousValue)) {
+      propertySelect.value = "";
+    }
+  }
+}
+
+function syncBillingReportFiltersFromInvoices() {
+  if (billingReportStartDate && billingStartDate) {
+    billingReportStartDate.value = billingStartDate.value;
+  }
+  if (billingReportEndDate && billingEndDate) {
+    billingReportEndDate.value = billingEndDate.value;
+  }
+  if (billingReportClientSelect && billingClientSelect) {
+    billingReportClientSelect.value = billingClientSelect.value;
+  }
+  populateBillingFilterSelects(billingReportClientSelect, billingReportPropertySelect);
+  if (billingReportPropertySelect && billingPropertySelect) {
+    billingReportPropertySelect.value = billingPropertySelect.value;
+    if (!Array.from(billingReportPropertySelect.options).some((option) => option.value === billingReportPropertySelect.value)) {
+      billingReportPropertySelect.value = "";
+    }
+  }
+  if (billingReportIncludeNonBillableChemicals && invoiceIncludeNonBillableChemicals) {
+    billingReportIncludeNonBillableChemicals.checked = invoiceIncludeNonBillableChemicals.checked;
+  }
+  if (billingReportTaxEnabled && invoiceTaxEnabled) {
+    billingReportTaxEnabled.value = invoiceTaxEnabled.value;
+  }
+}
+
+function syncInvoiceFiltersFromBillingReport() {
+  if (billingStartDate && billingReportStartDate) {
+    billingStartDate.value = billingReportStartDate.value;
+  }
+  if (billingEndDate && billingReportEndDate) {
+    billingEndDate.value = billingReportEndDate.value;
+  }
+  if (billingClientSelect && billingReportClientSelect) {
+    billingClientSelect.value = billingReportClientSelect.value;
+  }
+  populateBillingFilterSelects(billingClientSelect, billingPropertySelect);
+  if (billingPropertySelect && billingReportPropertySelect) {
+    billingPropertySelect.value = billingReportPropertySelect.value;
+    if (!Array.from(billingPropertySelect.options).some((option) => option.value === billingPropertySelect.value)) {
+      billingPropertySelect.value = "";
+    }
+  }
+  if (invoiceIncludeNonBillableChemicals && billingReportIncludeNonBillableChemicals) {
+    invoiceIncludeNonBillableChemicals.checked = billingReportIncludeNonBillableChemicals.checked;
+  }
+  if (invoiceTaxEnabled && billingReportTaxEnabled) {
+    invoiceTaxEnabled.value = billingReportTaxEnabled.value;
+  }
+}
+
+function getCurrentBillingInvoiceHandoffFilters() {
+  const selectedPropertyId = billingReportPropertySelect?.value || "";
+  const selectedClientName = billingReportClientSelect?.value || getClientNameForPropertyId(selectedPropertyId);
+  return {
+    startDate: billingReportStartDate?.value || "",
+    endDate: billingReportEndDate?.value || "",
+    selectedClientName,
+    selectedPropertyId,
+    includeNonBillableChemicals: billingReportIncludeNonBillableChemicals?.checked === true,
+    taxOverride: billingReportTaxEnabled?.value || "property",
+  };
+}
+
+function hasInvoiceCandidatesForBillingFilters() {
+  const {
+    startDate,
+    endDate,
+    selectedClientName,
+    selectedPropertyId,
+    includeNonBillableChemicals,
+  } = getCurrentBillingInvoiceHandoffFilters();
+
+  const billingRows = getBillingReportRows();
+  if (billingRows.length > 0) {
+    return true;
+  }
+
+  const chemicalItems = getInvoiceChemicalCandidates({
+    startDate,
+    endDate,
+    selectedPropertyId,
+    selectedClientName,
+    includeNonBillableChemicals,
+  });
+
+  return chemicalItems.length > 0;
+}
+
+async function createInvoiceFromBillingReport() {
+  hideBillingInvoiceHandoffMessage();
+
+  syncClientSelectToPropertySelection(billingReportClientSelect, billingReportPropertySelect);
+
+  const { startDate, endDate } = getCurrentBillingInvoiceHandoffFilters();
+  if (!startDate || !endDate) {
+    showBillingInvoiceHandoffMessage("Select a start and end date before creating an invoice.");
+    return;
+  }
+
+  if (!hasInvoiceCandidatesForBillingFilters()) {
+    showBillingInvoiceHandoffMessage("No billable items found for the selected filters.");
+    return;
+  }
+
+  syncInvoiceFiltersFromBillingReport();
+  clearCurrentInvoiceDraftState();
+  renderInvoiceHistory();
+  await navigateToView("invoices");
 }
 
 function getBillingSummaryEligibleTasks({ startDate, endDate, selectedPropertyId = "", selectedClientName = "" } = {}) {
@@ -4016,37 +4271,12 @@ function logBillingSummaryEligibleTasks(tasks) {
 
 function renderBillingReport() {
   if (!billingReportContainer) return;
-
-  const clientOptions = `<option value="">All Clients</option>${Array.from(new Set(
-    properties
-      .map((property) => String(property.client_name || "").trim())
-      .filter(Boolean)
-  ))
-    .sort((a, b) => a.localeCompare(b))
-    .map((clientName) => `<option value="${clientName}">${clientName}</option>`)
-    .join("")}`;
-
-  if (billingClientSelect && billingClientSelect.innerHTML !== clientOptions) {
-    const previousClient = billingClientSelect.value;
-    billingClientSelect.innerHTML = clientOptions;
-    billingClientSelect.value = previousClient;
-  }
-
-  const propertyOptions = `<option value="">All Properties</option>${properties
-    .slice()
-    .sort((a, b) => (a.property_name || "").localeCompare(b.property_name || ""))
-    .map((p) => `<option value="${p.id}">${p.property_name}</option>`)
-    .join("")}`;
-
-  if (billingPropertySelect && billingPropertySelect.innerHTML !== propertyOptions) {
-    const previousValue = billingPropertySelect.value;
-    billingPropertySelect.innerHTML = propertyOptions;
-    billingPropertySelect.value = previousValue;
-  }
+  populateBillingFilterSelects(billingReportClientSelect, billingReportPropertySelect);
+  populateBillingFilterSelects(billingClientSelect, billingPropertySelect);
 
   const rows = getBillingReportRows();
-  const startDate = billingStartDate?.value || "";
-  const endDate = billingEndDate?.value || "";
+  const startDate = billingReportStartDate?.value || "";
+  const endDate = billingReportEndDate?.value || "";
   const generatedDate = new Date().toLocaleDateString();
 
   if (!startDate || !endDate) {
@@ -4800,6 +5030,12 @@ function renderInvoicePreview() {
         <div class="billing-report-subtotal">Subtotal: ${toMoney(invoice.subtotal)}</div>
         <div class="billing-report-subtotal">Tax (${Number(invoice.taxRate || 0).toFixed(2)}%): ${toMoney(invoice.tax)}</div>
         <div class="billing-report-grand-total">Total Due: ${toMoney(invoice.total)}</div>
+        <div class="invoice-preview-actions no-print">
+          <button type="button" onclick="addInvoiceManualItem()">Add Line Item</button>
+          <button type="button" onclick="addInvoiceDiscountItem()">Add Discount</button>
+          <button type="button" onclick="addInvoiceCreditItem()">Add Credit</button>
+          <button type="button" onclick="addInvoiceSurchargeItem()">Add Surcharge</button>
+        </div>
         <div class="billing-report-meta">Payment Instructions: Please remit payment to Fair Ventures LLC by due date.</div>
         ${renderBillingReportFooter()}
       </div>
