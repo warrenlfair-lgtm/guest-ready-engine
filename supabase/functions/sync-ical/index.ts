@@ -393,13 +393,24 @@ Deno.serve(async (req) => {
     const { data: existingGuestReadyTasks } = checkIns.length
       ? await supabase
           .from("cleaning_tasks")
-          .select("id, service_date, check_in_date, service_type, source_key, manually_modified")
+          .select("id, service_date, scheduled_date, suggested_date, check_in_date, service_type, source_key, manually_modified, status, completed_at")
           .eq("property_id", propertyId)
           .in("check_in_date", checkIns)
           .eq("service_type", "Guest Ready")
       : { data: [] };
 
-    type GuestReadyTaskRecord = { id: string; service_date: string; check_in_date: string; service_type: string; source_key: string | null; manually_modified: boolean | null };
+    type GuestReadyTaskRecord = {
+      id: string;
+      service_date: string;
+      scheduled_date: string | null;
+      suggested_date: string | null;
+      check_in_date: string;
+      service_type: string;
+      source_key: string | null;
+      manually_modified: boolean | null;
+      status: string | null;
+      completed_at: string | null;
+    };
     const existingGuestReadyMap = new Map<string, GuestReadyTaskRecord>();
     for (const task of (existingGuestReadyTasks || []) as GuestReadyTaskRecord[]) {
       const sk = task.source_key || `gr:${propertyId}:${task.check_in_date}`;
@@ -429,11 +440,17 @@ Deno.serve(async (req) => {
     console.log("[SYNC] existingWeeklyTaskMap size:", existingWeeklyTaskMap.size);
     console.log("[SYNC] existingGuestReadyMap size:", existingGuestReadyMap.size);
 
-    for (const reservation of activeReservations) {
+    const sortedActiveReservations = [...activeReservations].sort((a, b) => String(a.check_in || "").localeCompare(String(b.check_in || "")));
+
+    for (let index = 0; index < sortedActiveReservations.length; index += 1) {
+      const reservation = sortedActiveReservations[index];
       if (!reservation.check_in) continue;
 
+      const previousReservation = index > 0 ? sortedActiveReservations[index - 1] : null;
+      const sameDayTurnover = previousReservation?.check_out === reservation.check_in;
+
       const service_date = getServiceDateForWeek(reservation.check_in, standardDay);
-      const guestReadyServiceDate = getGuestReadyServiceDate(reservation);
+      const guestReadyServiceDate = reservation.check_in;
       const guestReadyWithinWindow = isDateWithinCoverageRule(service_date, guestReadyServiceDate, coverageRule);
       const isSameDayAsStandard = reservation.check_in === service_date;
       const source_key = `wk:${propertyId}:${service_date}`;
@@ -492,11 +509,41 @@ Deno.serve(async (req) => {
       console.log("[GUEST READY CHECK]", { reservation_check_in: reservation.check_in, source_key: guestReadySourceKey, foundExistingTask: !!existingGuestReady, existing_id: existingGuestReady?.id, within_window: guestReadyWithinWindow });
 
       if (existingGuestReady) {
-        // Task already exists for this check-in. Never create a duplicate.
-        // Don't overwrite manually_modified tasks.
-        console.log("[GUEST READY SKIPPING]", { source_key: guestReadySourceKey, propertyId, existing_service_date: existingGuestReady.service_date });
+        const existingStatus = String(existingGuestReady.status || "").toLowerCase();
+        const canMoveExistingTask = !existingGuestReady.manually_modified && existingStatus !== "completed" && !existingGuestReady.completed_at;
+
+        if (canMoveExistingTask && existingGuestReady.service_date !== guestReadyServiceDate) {
+          const { error: updateError } = await supabase
+            .from("cleaning_tasks")
+            .update({
+              service_date: guestReadyServiceDate,
+              scheduled_date: guestReadyServiceDate,
+              suggested_date: guestReadyServiceDate,
+              check_in_date: reservation.check_in,
+            })
+            .eq("id", existingGuestReady.id);
+
+          if (updateError) {
+            console.error("sync-ical fatal error", updateError?.message || updateError);
+            console.error("sync-ical fatal stack", updateError?.stack || "no stack");
+            return createSuccessResponse(reservationsCreated, tasksCreated, { reservationsParsed, activeReservations: activeReservationCount, oldIgnored, weeklyTasksCreated, guestReadyTasksCreated });
+          }
+
+          console.log("[GUEST READY UPDATED]", {
+            source_key: guestReadySourceKey,
+            propertyId,
+            existing_id: existingGuestReady.id,
+            previous_service_date: existingGuestReady.service_date,
+            updated_service_date: guestReadyServiceDate,
+            same_day_turnover: sameDayTurnover,
+          });
+        } else {
+          // Task already exists for this check-in. Never create a duplicate.
+          // Don't overwrite manually modified or completed tasks.
+          console.log("[GUEST READY SKIPPING]", { source_key: guestReadySourceKey, propertyId, existing_service_date: existingGuestReady.service_date });
+        }
       } else {
-        console.log("[GUEST READY ADD PENDING]", { source_key: guestReadySourceKey, propertyId, service_date: guestReadyServiceDate });
+        console.log("[GUEST READY ADD PENDING]", { source_key: guestReadySourceKey, propertyId, service_date: guestReadyServiceDate, same_day_turnover: sameDayTurnover });
         guestReadyTasksToCreate.push({
           property_id: propertyId,
           service_date: guestReadyServiceDate,
