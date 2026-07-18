@@ -19,6 +19,8 @@ const DEFAULT_COMPANY_PROFILE = {
 };
 
 let companyProfile = { ...DEFAULT_COMPANY_PROFILE };
+let currentSessionUserId = null;
+let dataLoadPromise = null;
 
 let editingPropertyId = null;
 let selectedCleaningPropertyId = null;
@@ -87,6 +89,16 @@ const DEFAULT_CHEMICAL_CATALOG = [
   { name: "Salt", default_unit: "bags", cost_per_unit: 0, billable_rate_per_unit: 0, is_billable: true },
   { name: "Other", default_unit: "", cost_per_unit: 0, billable_rate_per_unit: 0, is_billable: true },
 ];
+
+const authGate = document.getElementById("authGate");
+const appShell = document.getElementById("appShell");
+const loginForm = document.getElementById("loginForm");
+const loginEmail = document.getElementById("loginEmail");
+const loginPassword = document.getElementById("loginPassword");
+const signInBtn = document.getElementById("signInBtn");
+const forgotPasswordBtn = document.getElementById("forgotPasswordBtn");
+const authMessage = document.getElementById("authMessage");
+const signOutBtn = document.getElementById("signOutBtn");
 
 const addPropertyBtn = document.getElementById("addPropertyBtn");
 const propertyModal = document.getElementById("propertyModal");
@@ -587,6 +599,18 @@ if (uploadCompanyLogoBtn) {
   uploadCompanyLogoBtn.addEventListener("click", uploadCompanyLogo);
 }
 
+if (loginForm) {
+  loginForm.addEventListener("submit", handleLoginSubmit);
+}
+
+if (forgotPasswordBtn) {
+  forgotPasswordBtn.addEventListener("click", handleForgotPasswordClick);
+}
+
+if (signOutBtn) {
+  signOutBtn.addEventListener("click", handleSignOutClick);
+}
+
 initializeWeekViewMode();
 initializeBillingReportFilters();
 initializeRouteFragmentationFilters();
@@ -594,7 +618,168 @@ initializeChemicalReportFilters();
 initializeMessagesDefaults();
 initializeChemicalSettingsForm();
 initializeChemicalUsageOptions();
-loadData();
+initializeAuthGate();
+
+function setAuthLoading(isLoading) {
+  if (!signInBtn) return;
+  signInBtn.disabled = isLoading;
+  signInBtn.textContent = isLoading ? "Signing In..." : "Sign In";
+}
+
+function setAuthMessage(message, type = "error") {
+  if (!authMessage) return;
+  const normalized = String(message || "").trim();
+  if (!normalized) {
+    authMessage.textContent = "";
+    authMessage.classList.add("hidden");
+    authMessage.classList.remove("error", "success");
+    return;
+  }
+
+  authMessage.textContent = normalized;
+  authMessage.classList.remove("hidden", "error", "success");
+  authMessage.classList.add(type === "success" ? "success" : "error");
+}
+
+function showLoginScreen() {
+  if (authGate) authGate.classList.remove("hidden");
+  if (appShell) appShell.classList.add("hidden");
+  if (signOutBtn) signOutBtn.classList.add("hidden");
+}
+
+function showAppScreen() {
+  if (authGate) authGate.classList.add("hidden");
+  if (appShell) appShell.classList.remove("hidden");
+  if (signOutBtn) signOutBtn.classList.remove("hidden");
+}
+
+async function ensureDataLoadedForUser(userId) {
+  if (!userId) return;
+  if (currentSessionUserId === userId) return;
+  if (dataLoadPromise) return dataLoadPromise;
+
+  currentSessionUserId = userId;
+  dataLoadPromise = loadData()
+    .catch((error) => {
+      currentSessionUserId = null;
+      throw error;
+    })
+    .finally(() => {
+      dataLoadPromise = null;
+    });
+
+  return dataLoadPromise;
+}
+
+async function applySessionState(session) {
+  if (!session?.user?.id) {
+    currentSessionUserId = null;
+    showLoginScreen();
+    return;
+  }
+
+  showAppScreen();
+  await ensureDataLoadedForUser(session.user.id);
+}
+
+async function initializeAuthGate() {
+  showLoginScreen();
+  setAuthLoading(false);
+  setAuthMessage("");
+
+  supabaseClient.auth.onAuthStateChange((event, session) => {
+    if (event === "SIGNED_OUT") {
+      currentSessionUserId = null;
+      if (loginPassword) loginPassword.value = "";
+      setAuthLoading(false);
+      setAuthMessage("");
+      showLoginScreen();
+      return;
+    }
+
+    if (session?.user?.id) {
+      setAuthLoading(false);
+      setAuthMessage("");
+      applySessionState(session).catch((error) => {
+        setAuthMessage(error?.message || "Could not load application data.", "error");
+        showLoginScreen();
+      });
+    }
+  });
+
+  const { data, error } = await supabaseClient.auth.getSession();
+  if (error) {
+    setAuthMessage(error.message || "Could not restore your session.", "error");
+    showLoginScreen();
+    return;
+  }
+
+  try {
+    await applySessionState(data?.session || null);
+  } catch (applyError) {
+    setAuthMessage(applyError?.message || "Could not load application data.", "error");
+    showLoginScreen();
+  }
+}
+
+async function handleLoginSubmit(event) {
+  event.preventDefault();
+
+  const email = String(loginEmail?.value || "").trim();
+  const password = String(loginPassword?.value || "");
+
+  if (!email || !password) {
+    setAuthMessage("Enter both email and password.", "error");
+    return;
+  }
+
+  setAuthMessage("");
+  setAuthLoading(true);
+
+  const { error } = await supabaseClient.auth.signInWithPassword({
+    email,
+    password,
+  });
+
+  if (error) {
+    setAuthLoading(false);
+    setAuthMessage(error.message || "Sign in failed.", "error");
+    return;
+  }
+}
+
+async function handleForgotPasswordClick() {
+  const email = String(loginEmail?.value || "").trim();
+  if (!email) {
+    setAuthMessage("Enter your email first, then click Forgot Password.", "error");
+    return;
+  }
+
+  setAuthMessage("");
+
+  const redirectTo = `${window.location.origin}`;
+  const { error } = await supabaseClient.auth.resetPasswordForEmail(email, { redirectTo });
+
+  if (error) {
+    setAuthMessage(error.message || "Could not send reset email.", "error");
+    return;
+  }
+
+  setAuthMessage("Password reset email sent. Check your inbox.", "success");
+}
+
+async function handleSignOutClick() {
+  setAuthMessage("");
+  const { error } = await supabaseClient.auth.signOut();
+  if (error) {
+    setAuthMessage(error.message || "Sign out failed.", "error");
+    return;
+  }
+
+  currentSessionUserId = null;
+  if (loginPassword) loginPassword.value = "";
+  showLoginScreen();
+}
 
 function initializeWeekViewMode() {
   const savedMode = localStorage.getItem("guestReadyDefaultWeekView") || "calendar";

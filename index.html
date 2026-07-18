@@ -8,6 +8,29 @@
 </head>
 <body>
 
+<div id="authGate" class="auth-shell">
+  <div class="auth-card">
+    <div class="auth-branding">
+      <h1>Guest Engine</h1>
+      <p>Sign in to access your company workspace.</p>
+    </div>
+
+    <form id="loginForm" class="auth-form" novalidate>
+      <label for="loginEmail">Email</label>
+      <input id="loginEmail" type="email" autocomplete="email" required placeholder="name@company.com">
+
+      <label for="loginPassword">Password</label>
+      <input id="loginPassword" type="password" autocomplete="current-password" required placeholder="Enter your password">
+
+      <button id="signInBtn" type="submit">Sign In</button>
+
+      <button id="forgotPasswordBtn" type="button" class="auth-link-btn">Forgot Password?</button>
+      <div id="authMessage" class="auth-message hidden" role="status" aria-live="polite"></div>
+    </form>
+  </div>
+</div>
+
+<div id="appShell" class="hidden">
 <div class="container">
   <div class="header">
     <div class="company-header-branding">
@@ -18,7 +41,10 @@
       </div>
     </div>
 
-    <button id="addPropertyBtn">+ Add Property</button>
+    <div class="header-actions">
+      <button id="signOutBtn" type="button" class="secondary-btn hidden">Sign Out</button>
+      <button id="addPropertyBtn">+ Add Property</button>
+    </div>
   </div>
 
   <div class="summary">
@@ -737,6 +763,8 @@
 <script src="js/ical.js"></script>
 <script src="js/scheduler.js"></script>
 <script src="app.js"></script>
+
+</div>
 
 </body>
 </html>
