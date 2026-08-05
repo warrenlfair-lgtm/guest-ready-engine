@@ -411,6 +411,12 @@
       <label for="companyLogoUrlInput">Logo URL</label>
       <input id="companyLogoUrlInput" type="url" placeholder="https://example.com/logo.png">
 
+      <label for="guestReadyLogoUrlInput">Guest Ready Logo URL</label>
+      <input id="guestReadyLogoUrlInput" type="url" placeholder="https://example.com/guest-ready-logo.png">
+
+      <label for="weekendReadyLogoUrlInput">Weekend Ready Logo URL</label>
+      <input id="weekendReadyLogoUrlInput" type="url" placeholder="https://example.com/weekend-ready-logo.png">
+
       <div id="companyLogoUploadFeature" class="company-logo-upload-row">
         <label for="companyLogoFileInput">Or Upload Logo</label>
         <input id="companyLogoFileInput" type="file" accept="image/*">
@@ -587,6 +593,12 @@
 
       <label>Invoice Notes</label>
       <textarea id="propertyInvoiceNotes" rows="3" placeholder="Payment instructions or notes"></textarea>
+
+      <label>Company Branch</label>
+      <select id="propertyCompanyBranch">
+        <option value="Guest Ready" selected>Guest Ready</option>
+        <option value="Weekend Ready">Weekend Ready</option>
+      </select>
     </div>
 
     <div class="modal-actions property-modal-footer">

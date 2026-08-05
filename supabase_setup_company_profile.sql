@@ -7,12 +7,20 @@ CREATE TABLE IF NOT EXISTS company_profile (
   phone_number TEXT,
   email TEXT,
   logo_url TEXT,
+  guest_ready_logo_url TEXT,
+  weekend_ready_logo_url TEXT,
   admin_pin TEXT,
   updated_at TIMESTAMPTZ DEFAULT now()
 );
 
 ALTER TABLE company_profile
 ADD COLUMN IF NOT EXISTS admin_pin TEXT;
+
+ALTER TABLE company_profile
+ADD COLUMN IF NOT EXISTS guest_ready_logo_url TEXT;
+
+ALTER TABLE company_profile
+ADD COLUMN IF NOT EXISTS weekend_ready_logo_url TEXT;
 
 -- Ensure one default row exists
 INSERT INTO company_profile (id, company_name, tagline, admin_pin)

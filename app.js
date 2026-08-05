@@ -15,8 +15,14 @@ const DEFAULT_COMPANY_PROFILE = {
   phone_number: "",
   email: "",
   logo_url: "",
+  guest_ready_logo_url: "",
+  weekend_ready_logo_url: "",
   admin_pin: "1234",
 };
+
+const COMPANY_BRANCH_GUEST_READY = "Guest Ready";
+const COMPANY_BRANCH_WEEKEND_READY = "Weekend Ready";
+const COMPANY_BRANCH_OPTIONS = [COMPANY_BRANCH_GUEST_READY, COMPANY_BRANCH_WEEKEND_READY];
 
 let companyProfile = { ...DEFAULT_COMPANY_PROFILE };
 let currentSessionUserId = null;
@@ -131,6 +137,7 @@ const propertyTaxable = document.getElementById("propertyTaxable");
 const propertyTaxRate = document.getElementById("propertyTaxRate");
 const propertyPaymentTerms = document.getElementById("propertyPaymentTerms");
 const propertyInvoiceNotes = document.getElementById("propertyInvoiceNotes");
+const propertyCompanyBranch = document.getElementById("propertyCompanyBranch");
 
 const cleaningDate = document.getElementById("cleaningDate");
 const cleaningServiceType = document.getElementById("cleaningServiceType");
@@ -230,6 +237,8 @@ const companyTaglineInput = document.getElementById("companyTaglineInput");
 const companyPhoneInput = document.getElementById("companyPhoneInput");
 const companyEmailInput = document.getElementById("companyEmailInput");
 const companyLogoUrlInput = document.getElementById("companyLogoUrlInput");
+const guestReadyLogoUrlInput = document.getElementById("guestReadyLogoUrlInput");
+const weekendReadyLogoUrlInput = document.getElementById("weekendReadyLogoUrlInput");
 const companyLogoFileInput = document.getElementById("companyLogoFileInput");
 const uploadCompanyLogoBtn = document.getElementById("uploadCompanyLogoBtn");
 const companyLogoPreview = document.getElementById("companyLogoPreview");
@@ -1257,6 +1266,7 @@ function openEditModal(id) {
   if (propertyTaxRate) propertyTaxRate.value = Number(property.billing_tax_rate || 0);
   if (propertyPaymentTerms) propertyPaymentTerms.value = property.payment_terms || DEFAULT_INVOICE_TERMS;
   if (propertyInvoiceNotes) propertyInvoiceNotes.value = property.invoice_notes || "";
+  if (propertyCompanyBranch) propertyCompanyBranch.value = normalizeCompanyBranch(property.company_branch);
 
   propertyModal.classList.remove("hidden");
 }
@@ -2095,8 +2105,44 @@ function getNormalizedCompanyProfile(raw) {
     phone_number: String(raw?.phone_number || "").trim(),
     email: String(raw?.email || "").trim(),
     logo_url: String(raw?.logo_url || "").trim(),
+    guest_ready_logo_url: String(raw?.guest_ready_logo_url || "").trim(),
+    weekend_ready_logo_url: String(raw?.weekend_ready_logo_url || "").trim(),
     admin_pin: String(raw?.admin_pin || DEFAULT_COMPANY_PROFILE.admin_pin).trim() || DEFAULT_COMPANY_PROFILE.admin_pin,
   };
+}
+
+function normalizeCompanyBranch(value) {
+  const normalized = String(value || "").trim();
+  if (COMPANY_BRANCH_OPTIONS.includes(normalized)) {
+    return normalized;
+  }
+  return COMPANY_BRANCH_GUEST_READY;
+}
+
+function getPropertyById(propertyId) {
+  const normalizedId = normalizePropertyId(propertyId);
+  if (!normalizedId) return null;
+  return properties.find((property) => normalizePropertyId(property.id) === normalizedId) || null;
+}
+
+function getCompanyBrandingForBranch(branchInput) {
+  const branch = normalizeCompanyBranch(branchInput);
+  const guestLogoUrl = String(companyProfile.guest_ready_logo_url || companyProfile.logo_url || "").trim();
+  const weekendLogoUrl = String(companyProfile.weekend_ready_logo_url || companyProfile.logo_url || "").trim();
+
+  return {
+    branch,
+    companyName: branch === COMPANY_BRANCH_WEEKEND_READY ? COMPANY_BRANCH_WEEKEND_READY : (companyProfile.company_name || DEFAULT_COMPANY_PROFILE.company_name),
+    tagline: companyProfile.tagline || DEFAULT_COMPANY_PROFILE.tagline,
+    logoUrl: branch === COMPANY_BRANCH_WEEKEND_READY ? weekendLogoUrl : guestLogoUrl,
+    phoneNumber: companyProfile.phone_number || "",
+    email: companyProfile.email || "",
+  };
+}
+
+function getInvoiceCompanyBranch(invoice = {}) {
+  const property = getPropertyById(invoice.propertyId || invoice.property_id);
+  return normalizeCompanyBranch(invoice.companyBranch || property?.company_branch);
 }
 
 function getCurrentAdminPin() {
@@ -2105,13 +2151,14 @@ function getCurrentAdminPin() {
 }
 
 function applyCompanyProfileToApp() {
+  const guestBranding = getCompanyBrandingForBranch(COMPANY_BRANCH_GUEST_READY);
   if (companyHeaderName) {
     companyHeaderName.textContent = companyProfile.company_name;
   }
   if (companyHeaderTagline) {
     companyHeaderTagline.textContent = companyProfile.tagline;
   }
-  applyImageSource(companyHeaderLogo, companyProfile.logo_url);
+  applyImageSource(companyHeaderLogo, guestBranding.logoUrl);
   renderMessagesBranding();
   document.title = companyProfile.company_name || "Guest Ready™";
 }
@@ -2123,6 +2170,8 @@ function renderCompanyProfileSettings() {
   companyPhoneInput.value = companyProfile.phone_number || "";
   companyEmailInput.value = companyProfile.email || "";
   companyLogoUrlInput.value = companyProfile.logo_url || "";
+  if (guestReadyLogoUrlInput) guestReadyLogoUrlInput.value = companyProfile.guest_ready_logo_url || "";
+  if (weekendReadyLogoUrlInput) weekendReadyLogoUrlInput.value = companyProfile.weekend_ready_logo_url || "";
   renderCompanyLogoPreview(companyProfile.logo_url);
   if (adminPinInput) adminPinInput.value = "";
   if (confirmAdminPinInput) confirmAdminPinInput.value = "";
@@ -2176,8 +2225,9 @@ function renderCompanyLogoPreview(sourceUrl) {
 
 function renderMessagesBranding() {
   if (!messagesBranding) return;
-  const logoMarkup = companyProfile.logo_url
-    ? `<img src="${companyProfile.logo_url}" alt="${companyProfile.company_name} logo" class="company-logo messages-branding-logo" onerror="this.style.display='none'">`
+  const guestBranding = getCompanyBrandingForBranch(COMPANY_BRANCH_GUEST_READY);
+  const logoMarkup = guestBranding.logoUrl
+    ? `<img src="${guestBranding.logoUrl}" alt="${guestBranding.companyName} logo" class="company-logo messages-branding-logo" onerror="this.style.display='none'">`
     : "";
 
   messagesBranding.innerHTML = `
@@ -2284,9 +2334,7 @@ async function persistCompanyLogoUrl(logoUrl) {
     updated_at: new Date().toISOString(),
   };
 
-  const { error } = await supabaseClient
-    .from("company_profile")
-    .upsert(upsertPayload, { onConflict: "id" });
+  const { error } = await upsertCompanyProfileWithLegacyFallback(upsertPayload);
 
   if (error) {
     console.warn("Could not persist uploaded logo URL:", error.message);
@@ -2294,6 +2342,37 @@ async function persistCompanyLogoUrl(logoUrl) {
   }
 
   return true;
+}
+
+async function upsertCompanyProfileWithLegacyFallback(payload) {
+  let upsertPayload = { ...payload };
+  let result = await supabaseClient
+    .from("company_profile")
+    .upsert(upsertPayload, { onConflict: "id" });
+
+  const optionalCompanyProfileColumns = [
+    "guest_ready_logo_url",
+    "weekend_ready_logo_url",
+    "logo_url",
+    "phone_number",
+    "email",
+    "admin_pin",
+  ];
+
+  while (result.error) {
+    const message = String(result.error.message || "").toLowerCase();
+    const missingColumn = optionalCompanyProfileColumns.find((column) => message.includes(column));
+    if (!missingColumn || !(missingColumn in upsertPayload)) {
+      break;
+    }
+
+    delete upsertPayload[missingColumn];
+    result = await supabaseClient
+      .from("company_profile")
+      .upsert(upsertPayload, { onConflict: "id" });
+  }
+
+  return result;
 }
 
 async function initializeCompanyLogoUploadSupport() {
@@ -2379,6 +2458,8 @@ async function saveCompanyProfile() {
     phone_number: companyPhoneInput?.value,
     email: companyEmailInput?.value,
     logo_url: companyLogoUrlInput?.value,
+    guest_ready_logo_url: guestReadyLogoUrlInput?.value,
+    weekend_ready_logo_url: weekendReadyLogoUrlInput?.value,
     admin_pin: isPinUpdateRequested ? newPin : getCurrentAdminPin(),
   });
 
@@ -2397,9 +2478,7 @@ async function saveCompanyProfile() {
     updated_at: new Date().toISOString(),
   };
 
-  const { error } = await supabaseClient
-    .from("company_profile")
-    .upsert(upsertPayload, { onConflict: "id" });
+  const { error } = await upsertCompanyProfileWithLegacyFallback(upsertPayload);
 
   if (error) {
     if (settingsStatus) {
@@ -2782,6 +2861,7 @@ async function saveProperty() {
     billing_tax_rate: taxable ? Number(propertyTaxRate?.value || 0) : 0,
     payment_terms: String(propertyPaymentTerms?.value || "").trim() || DEFAULT_INVOICE_TERMS,
     invoice_notes: String(propertyInvoiceNotes?.value || "").trim() || null,
+    company_branch: normalizeCompanyBranch(propertyCompanyBranch?.value),
     active: true
   };
 
@@ -2814,6 +2894,7 @@ async function saveProperty() {
     "billing_tax_rate",
     "payment_terms",
     "invoice_notes",
+    "company_branch",
   ];
 
   let legacyPropertyData = { ...propertyData };
@@ -3283,6 +3364,7 @@ function clearPropertyForm() {
   if (propertyTaxRate) propertyTaxRate.value = 0;
   if (propertyPaymentTerms) propertyPaymentTerms.value = DEFAULT_INVOICE_TERMS;
   if (propertyInvoiceNotes) propertyInvoiceNotes.value = "";
+  if (propertyCompanyBranch) propertyCompanyBranch.value = COMPANY_BRANCH_GUEST_READY;
 }
 
 function toggleInvoiceMarker(taskId) {
@@ -4274,26 +4356,28 @@ async function shareChemicalUsageReport() {
   alert("Share is not available on this device/browser.");
 }
 
-function renderBillingReportHeader() {
-  const logoMarkup = companyProfile.logo_url
-    ? `<img src="${companyProfile.logo_url}" alt="${companyProfile.company_name} logo" class="company-logo billing-report-logo" onerror="this.style.display='none'">`
+function renderBillingReportHeader(branding = null) {
+  const profile = branding || getCompanyBrandingForBranch(COMPANY_BRANCH_GUEST_READY);
+  const logoMarkup = profile.logoUrl
+    ? `<img src="${profile.logoUrl}" alt="${profile.companyName} logo" class="company-logo billing-report-logo" onerror="this.style.display='none'">`
     : "";
 
   return `
     <div class="billing-report-header-block">
       ${logoMarkup}
       <div>
-        <div class="billing-report-brand">${companyProfile.company_name}</div>
-        <div class="billing-report-brand-subtitle">${companyProfile.tagline}</div>
+        <div class="billing-report-brand">${profile.companyName}</div>
+        <div class="billing-report-brand-subtitle">${profile.tagline}</div>
       </div>
     </div>
   `;
 }
 
-function renderBillingReportFooter() {
+function renderBillingReportFooter(branding = null) {
+  const profile = branding || getCompanyBrandingForBranch(COMPANY_BRANCH_GUEST_READY);
   const contactParts = [];
-  if (companyProfile.phone_number) contactParts.push(companyProfile.phone_number);
-  if (companyProfile.email) contactParts.push(companyProfile.email);
+  if (profile.phoneNumber) contactParts.push(profile.phoneNumber);
+  if (profile.email) contactParts.push(profile.email);
 
   if (!contactParts.length) return "";
 
@@ -5094,6 +5178,7 @@ function buildDraftInvoiceModel({ property, clientName = "", propertyIds = [], s
     invoiceNumber: "(pending)",
     propertyId: property?.id || "",
     propertyName: property?.property_name || (propertyIds.length === 1 ? (properties.find((p) => normalizePropertyId(p.id) === normalizePropertyId(propertyIds[0]))?.property_name || "") : "Multiple Properties"),
+    companyBranch: normalizeCompanyBranch(property?.company_branch),
     clientName: clientName || String(property?.client_name || "").trim() || String(property?.billing_company_name || "").trim() || property?.property_name || "Client",
     billingCompanyName: String(property?.billing_company_name || "").trim(),
     billingEmail: String(property?.billing_email || "").trim(),
@@ -5292,6 +5377,8 @@ function renderInvoicePreview() {
   const accountReference = String(invoice.accountReference || "").trim();
   const notes = String(invoice.notes || "").trim();
   const showTaxLine = invoice.taxable && Number(invoice.taxRate || 0) > 0;
+  const invoiceBranch = getInvoiceCompanyBranch(invoice);
+  const invoiceBranding = getCompanyBrandingForBranch(invoiceBranch);
 
   invoicePreviewContainer.innerHTML = `
     <div class="invoice-preview-actions no-print">
@@ -5322,8 +5409,8 @@ function renderInvoicePreview() {
 
     <div class="invoice-document billing-report-sheet invoice-report-sheet">
       <div class="invoice-edit-view">
-        ${renderBillingReportHeader()}
-        <div class="billing-report-meta"><strong>Fair Ventures LLC</strong></div>
+        ${renderBillingReportHeader(invoiceBranding)}
+        <div class="billing-report-meta"><strong>${escapeHtml(invoiceBranding.companyName)}</strong></div>
         <div class="billing-report-meta"><strong>Client:</strong> <input type="text" value="${escapeHtml(invoice.clientName || "")}" onchange="updateInvoiceDraftField('clientName', this.value)"></div>
         <div class="billing-report-meta"><strong>Billing Company:</strong> <input type="text" value="${escapeHtml(billingName || "")}" onchange="updateInvoiceDraftField('billingCompanyName', this.value)"></div>
         <div class="billing-report-meta"><strong>Billing Email:</strong> <input type="email" value="${escapeHtml(invoice.billingEmail || "")}" onchange="updateInvoiceDraftField('billingEmail', this.value)"></div>
@@ -5370,17 +5457,17 @@ function renderInvoicePreview() {
           <button type="button" onclick="addInvoiceCreditItem()">Add Credit</button>
           <button type="button" onclick="addInvoiceSurchargeItem()">Add Surcharge</button>
         </div>
-        <div class="billing-report-meta">Payment Instructions: Please remit payment to Fair Ventures LLC by due date.</div>
-        ${renderBillingReportFooter()}
+        <div class="billing-report-meta">Payment Instructions: Please remit payment to ${escapeHtml(invoiceBranding.companyName)} by due date.</div>
+        ${renderBillingReportFooter(invoiceBranding)}
       </div>
 
       <div class="invoice-print-view">
         <div class="invoice-print-header">
           <div>
             <div class="invoice-brand-row">
-              ${renderBillingReportHeader()}
+              ${renderBillingReportHeader(invoiceBranding)}
             </div>
-            <div class="invoice-print-text"><strong>Fair Ventures LLC</strong></div>
+            <div class="invoice-print-text"><strong>${escapeHtml(invoiceBranding.companyName)}</strong></div>
             <div class="invoice-bill-to">
               <div class="invoice-bill-to-title">BILL TO</div>
               <div class="invoice-print-text">${escapeHtml(invoice.clientName || "")}</div>
@@ -5426,8 +5513,8 @@ function renderInvoicePreview() {
         ${showTaxLine ? `<div class="billing-report-subtotal">Tax (${Number(invoice.taxRate || 0).toFixed(2)}%): ${toMoney(invoice.tax)}</div>` : ""}
         <div class="billing-report-grand-total">Total Due: ${toMoney(invoice.total)}</div>
         ${notes ? `<div class="billing-report-meta"><strong>Notes:</strong> ${escapeHtml(notes)}</div>` : ""}
-        <div class="billing-report-meta">Payment Instructions: Please remit payment to Fair Ventures LLC by due date.</div>
-        ${renderBillingReportFooter()}
+        <div class="billing-report-meta">Payment Instructions: Please remit payment to ${escapeHtml(invoiceBranding.companyName)} by due date.</div>
+        ${renderBillingReportFooter(invoiceBranding)}
       </div>
     </div>
   `;
@@ -6115,6 +6202,7 @@ async function openInvoiceDraft(invoiceId) {
     invoiceNumber: invoice.invoice_number,
     propertyId: invoice.property_id,
     propertyName: property?.property_name || "",
+    companyBranch: normalizeCompanyBranch(property?.company_branch),
     clientName: invoice.client_name || "",
     billingCompanyName: property?.billing_company_name || "",
     billingEmail: invoice.billing_email || property?.billing_email || "",
@@ -6436,8 +6524,9 @@ async function shareInvoicePreview() {
   }
 
   const invoice = currentInvoiceDraft;
+  const invoiceBranding = getCompanyBrandingForBranch(getInvoiceCompanyBranch(invoice));
   const lines = [
-    `${companyProfile.company_name} Invoice ${invoice.invoiceNumber || "(pending)"}`,
+    `${invoiceBranding.companyName} Invoice ${invoice.invoiceNumber || "(pending)"}`,
     `Client: ${invoice.clientName || ""}`,
     `Period: ${invoice.periodStart} to ${invoice.periodEnd}`,
     `Total Due: ${toMoney(invoice.total)}`,
@@ -7467,6 +7556,7 @@ function renderProperties() {
         </div>
 
         <div class="property-meta">
+          <div><strong>Company Branch:</strong> ${normalizeCompanyBranch(property.company_branch)}</div>
           <div><strong>Client Name:</strong> ${property.client_name || ""}</div>
           <div><strong>Billing Company:</strong> ${property.billing_company_name || "Not entered"}</div>
           <div><strong>Billing Email:</strong> ${property.billing_email || "Not entered"}</div>
