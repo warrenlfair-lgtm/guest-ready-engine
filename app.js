@@ -4,6 +4,7 @@ let reservations = [];
 let operationsReminders = [];
 let chemicalUsageEntries = [];
 let chemicals = [];
+let technicians = [];
 let invoices = [];
 let invoicePropertyLabelById = new Map();
 let currentInvoiceDraft = null;
@@ -35,6 +36,9 @@ let editingReminderPropertyId = null;
 let editingReminderId = null;
 let editingChemicalUsageId = null;
 let editingChemicalSettingId = null;
+let editingTechnicianId = null;
+let taskTechnicianSelections = new Map();
+let taskWeeklyServiceLevelSelections = new Map();
 let cleaningModalInitialState = null;
 let deleteCleaningResolver = null;
 let isChemicalNameChangeListenerAttached = false;
@@ -132,18 +136,28 @@ const standardDay = document.getElementById("standardDay");
 const coverageDays = document.getElementById("coverageDays");
 const coverageRule = document.getElementById("coverageRule");
 const offCycleCharge = document.getElementById("offCycleCharge");
+const propertyWeeklyLaborRate = document.getElementById("propertyWeeklyLaborRate");
+const propertyGuestReadyLaborRate = document.getElementById("propertyGuestReadyLaborRate");
+const propertyAdditionalLaborRate = document.getElementById("propertyAdditionalLaborRate");
 const propertyDefaultCleaningRate = document.getElementById("propertyDefaultCleaningRate");
 const propertyTaxable = document.getElementById("propertyTaxable");
 const propertyTaxRate = document.getElementById("propertyTaxRate");
 const propertyPaymentTerms = document.getElementById("propertyPaymentTerms");
 const propertyInvoiceNotes = document.getElementById("propertyInvoiceNotes");
 const propertyCompanyBranch = document.getElementById("propertyCompanyBranch");
+const propertyServiceFrequency = document.getElementById("propertyServiceFrequency");
+const propertyBiweeklyAnchorDateRow = document.getElementById("propertyBiweeklyAnchorDateRow");
+const propertyBiweeklyAnchorDate = document.getElementById("propertyBiweeklyAnchorDate");
+const propertyFrequencyWarning = document.getElementById("propertyFrequencyWarning");
 
 const cleaningDate = document.getElementById("cleaningDate");
 const cleaningServiceType = document.getElementById("cleaningServiceType");
 const cleaningStatus = document.getElementById("cleaningStatus");
 const cleaningTechnician = document.getElementById("cleaningTechnician");
 const cleaningCharge = document.getElementById("cleaningCharge");
+const cleaningLaborAmount = document.getElementById("cleaningLaborAmount");
+const cleaningWeeklyServiceLevelRow = document.getElementById("cleaningWeeklyServiceLevelRow");
+const cleaningWeeklyServiceLevel = document.getElementById("cleaningWeeklyServiceLevel");
 const cleaningNotes = document.getElementById("cleaningNotes");
 const addChemicalBtn = document.getElementById("addChemicalBtn");
 const chemicalUsageTaskHint = document.getElementById("chemicalUsageTaskHint");
@@ -217,6 +231,14 @@ const routeFragEndDate = document.getElementById("routeFragEndDate");
 const routeFragClientSelect = document.getElementById("routeFragClientSelect");
 const routeFragRunBtn = document.getElementById("routeFragRunBtn");
 const routeFragContainer = document.getElementById("routeFragContainer");
+const laborReportStartDate = document.getElementById("laborReportStartDate");
+const laborReportEndDate = document.getElementById("laborReportEndDate");
+const laborReportTechnicianSelect = document.getElementById("laborReportTechnicianSelect");
+const laborReportPaymentStatus = document.getElementById("laborReportPaymentStatus");
+const laborReportRunBtn = document.getElementById("laborReportRunBtn");
+const laborReportPrintBtn = document.getElementById("laborReportPrintBtn");
+const laborBackfillBtn = document.getElementById("laborBackfillBtn");
+const laborReportContainer = document.getElementById("laborReportContainer");
 const chemicalReportStartDate = document.getElementById("chemicalReportStartDate");
 const chemicalReportEndDate = document.getElementById("chemicalReportEndDate");
 const chemicalReportPropertySelect = document.getElementById("chemicalReportPropertySelect");
@@ -258,6 +280,12 @@ const saveChemicalSettingBtn = document.getElementById("saveChemicalSettingBtn")
 const cancelChemicalSettingEditBtn = document.getElementById("cancelChemicalSettingEditBtn");
 const chemicalSettingsList = document.getElementById("chemicalSettingsList");
 const chemicalSettingsStatus = document.getElementById("chemicalSettingsStatus");
+const technicianNameInput = document.getElementById("technicianNameInput");
+const technicianActiveCheckbox = document.getElementById("technicianActiveCheckbox");
+const saveTechnicianBtn = document.getElementById("saveTechnicianBtn");
+const cancelTechnicianEditBtn = document.getElementById("cancelTechnicianEditBtn");
+const technicianSettingsList = document.getElementById("technicianSettingsList");
+const technicianSettingsStatus = document.getElementById("technicianSettingsStatus");
 
 const COMPANY_LOGO_BUCKET = "company-logos";
 
@@ -333,6 +361,22 @@ if (openSafetyCultureChecklistBtn) {
 
 if (cleaningStatus) {
   cleaningStatus.addEventListener("change", renderChemicalUsageForCurrentTask);
+}
+
+if (cleaningServiceType) {
+  cleaningServiceType.addEventListener("change", syncCleaningServiceTypeDependentFields);
+}
+
+if (propertyServiceFrequency) {
+  propertyServiceFrequency.addEventListener("change", syncPropertyServiceFrequencyDependentFields);
+}
+
+if (standardDay) {
+  standardDay.addEventListener("change", syncPropertyServiceFrequencyDependentFields);
+}
+
+if (propertyBiweeklyAnchorDate) {
+  propertyBiweeklyAnchorDate.addEventListener("change", syncPropertyServiceFrequencyDependentFields);
 }
 
 cancelReminderBtn.onclick = closeReminderModal;
@@ -550,6 +594,34 @@ if (routeFragClientSelect) {
   routeFragClientSelect.addEventListener("change", renderRouteFragmentationAnalytics);
 }
 
+if (laborReportRunBtn) {
+  laborReportRunBtn.addEventListener("click", renderLaborReport);
+}
+
+if (laborReportStartDate) {
+  laborReportStartDate.addEventListener("change", renderLaborReport);
+}
+
+if (laborReportEndDate) {
+  laborReportEndDate.addEventListener("change", renderLaborReport);
+}
+
+if (laborReportTechnicianSelect) {
+  laborReportTechnicianSelect.addEventListener("change", renderLaborReport);
+}
+
+if (laborReportPaymentStatus) {
+  laborReportPaymentStatus.addEventListener("change", renderLaborReport);
+}
+
+if (laborReportPrintBtn) {
+  laborReportPrintBtn.addEventListener("click", printLaborReport);
+}
+
+if (laborBackfillBtn) {
+  laborBackfillBtn.addEventListener("click", runHistoricalLaborBackfill);
+}
+
 if (chemicalReportStartDate) {
   chemicalReportStartDate.addEventListener("change", renderChemicalUsageReport);
 }
@@ -598,6 +670,14 @@ if (cancelChemicalSettingEditBtn) {
   cancelChemicalSettingEditBtn.addEventListener("click", resetChemicalSettingsForm);
 }
 
+if (saveTechnicianBtn) {
+  saveTechnicianBtn.addEventListener("click", saveTechnician);
+}
+
+if (cancelTechnicianEditBtn) {
+  cancelTechnicianEditBtn.addEventListener("click", resetTechnicianSettingsForm);
+}
+
 if (companyLogoUrlInput) {
   companyLogoUrlInput.addEventListener("input", () => {
     renderCompanyLogoPreview(companyLogoUrlInput.value);
@@ -623,6 +703,7 @@ if (signOutBtn) {
 initializeWeekViewMode();
 initializeBillingReportFilters();
 initializeRouteFragmentationFilters();
+initializeLaborReportFilters();
 initializeChemicalReportFilters();
 initializeMessagesDefaults();
 initializeChemicalSettingsForm();
@@ -823,6 +904,11 @@ function showView(viewName) {
 
   if (viewName === "routeFragmentation") {
     renderRouteFragmentationAnalytics();
+  }
+
+  if (viewName === "laborReport") {
+    populateLaborReportTechnicianOptions();
+    renderLaborReport();
   }
 
   if (viewName === "reports") {
@@ -1199,6 +1285,24 @@ function initializeRouteFragmentationFilters() {
   routeFragEndDate.value = formatDateValue(monthEnd);
 }
 
+function initializeLaborReportFilters() {
+  if (!laborReportStartDate || !laborReportEndDate) return;
+
+  const today = new Date();
+  const day = today.getDay();
+  const mondayOffset = (day + 6) % 7;
+  const weekStart = new Date(today);
+  weekStart.setDate(today.getDate() - mondayOffset);
+  const weekEnd = new Date(weekStart);
+  weekEnd.setDate(weekStart.getDate() + 6);
+
+  laborReportStartDate.value = formatDateValue(weekStart);
+  laborReportEndDate.value = formatDateValue(weekEnd);
+  if (laborReportPaymentStatus && !laborReportPaymentStatus.value) {
+    laborReportPaymentStatus.value = "unpaid";
+  }
+}
+
 function initializeChemicalReportFilters() {
   if (!chemicalReportStartDate || !chemicalReportEndDate) return;
 
@@ -1212,11 +1316,11 @@ function initializeChemicalReportFilters() {
 
 function runPrintForView(viewClassName) {
   const body = document.body;
-  body.classList.remove("print-view-billing", "print-view-chemical", "print-view-invoice");
+  body.classList.remove("print-view-billing", "print-view-chemical", "print-view-invoice", "print-view-labor");
   body.classList.add(viewClassName);
   window.print();
   setTimeout(() => {
-    body.classList.remove("print-view-billing", "print-view-chemical", "print-view-invoice");
+    body.classList.remove("print-view-billing", "print-view-chemical", "print-view-invoice", "print-view-labor");
   }, 250);
 }
 
@@ -1226,6 +1330,119 @@ function printBillingReport() {
 
 function printChemicalUsageReport() {
   runPrintForView("print-view-chemical");
+}
+
+function printLaborReport() {
+  runPrintForView("print-view-labor");
+}
+
+async function runHistoricalLaborBackfill() {
+  const candidates = cleaningTasks.filter((task) => {
+    if (String(task?.status || "").trim().toLowerCase() !== "completed") return false;
+    const serviceType = String(task?.service_type || "").trim();
+    const isEligibleType = serviceType === "Weekly Standard" || isTaskGuestReady(task);
+    if (!isEligibleType) return false;
+
+    const laborRaw = task?.labor_amount;
+    if (laborRaw === null || laborRaw === undefined || String(laborRaw).trim() === "") return true;
+    const laborNumber = Number(laborRaw);
+    return Number.isFinite(laborNumber) && laborNumber <= 0;
+  });
+
+  if (!candidates.length) {
+    alert("No completed Weekly Standard or Guest Ready tasks need historical labor backfill.");
+    return;
+  }
+
+  const confirmed = window.confirm(
+    `Backfill labor for ${candidates.length} completed task(s) with labor 0/null?\n\nThis updates only labor_amount and labor_calculated_at for Weekly Standard and Guest Ready tasks.`
+  );
+  if (!confirmed) return;
+
+  if (laborBackfillBtn) {
+    laborBackfillBtn.disabled = true;
+    laborBackfillBtn.textContent = "Backfilling...";
+  }
+
+  let updatedCount = 0;
+  let skippedCount = 0;
+  let failedCount = 0;
+
+  for (const task of candidates) {
+    const property = getPropertyById(task.property_id);
+    if (!property) {
+      skippedCount += 1;
+      continue;
+    }
+
+    const isWeeklyTask = String(task?.service_type || "").trim() === "Weekly Standard";
+    const weeklyServiceLevel = isWeeklyTask
+      ? normalizeWeeklyServiceLevel(task?.weekly_service_level)
+      : null;
+
+    const calculatedLabor = getLaborAmountForTask({
+      ...task,
+      weekly_service_level: weeklyServiceLevel,
+    }, property);
+    if (!Number.isFinite(calculatedLabor)) {
+      skippedCount += 1;
+      continue;
+    }
+
+    const payload = {
+      labor_amount: Number(calculatedLabor || 0),
+      labor_calculated_at: new Date().toISOString(),
+    };
+    if (isWeeklyTask) {
+      payload.weekly_service_level = weeklyServiceLevel;
+    }
+
+    let result = await supabaseClient
+      .from("cleaning_tasks")
+      .update(payload)
+      .eq("id", task.id);
+
+    if (result.error) {
+      const message = String(result.error.message || "").toLowerCase();
+      if (message.includes("weekly_service_level")) {
+        delete payload.weekly_service_level;
+        result = await supabaseClient
+          .from("cleaning_tasks")
+          .update(payload)
+          .eq("id", task.id);
+      }
+    }
+
+    if (result.error) {
+      const message = String(result.error.message || "").toLowerCase();
+      if (message.includes("labor_calculated_at")) {
+        const fallbackPayload = {
+          labor_amount: Number(calculatedLabor || 0),
+        };
+        if (isWeeklyTask && payload.weekly_service_level) {
+          fallbackPayload.weekly_service_level = payload.weekly_service_level;
+        }
+        result = await supabaseClient
+          .from("cleaning_tasks")
+          .update(fallbackPayload)
+          .eq("id", task.id);
+      }
+    }
+
+    if (result.error) {
+      failedCount += 1;
+    } else {
+      updatedCount += 1;
+    }
+  }
+
+  if (laborBackfillBtn) {
+    laborBackfillBtn.disabled = false;
+    laborBackfillBtn.textContent = "Backfill Historical Labor";
+  }
+
+  await loadData();
+  alert(`Historical labor backfill finished. Updated: ${updatedCount}, Skipped: ${skippedCount}, Failed: ${failedCount}.`);
 }
 
 function downloadChemicalUsagePdf() {
@@ -1261,18 +1478,233 @@ function openEditModal(id) {
     coverageRule.value = getCoverageRuleForProperty(property);
   }
   offCycleCharge.value = property.default_off_cycle_charge || 65;
+  if (propertyWeeklyLaborRate) propertyWeeklyLaborRate.value = Number(property.weekly_service_labor || 0);
+  if (propertyGuestReadyLaborRate) propertyGuestReadyLaborRate.value = Number(property.guest_ready_service_labor || 0);
+  if (propertyAdditionalLaborRate) propertyAdditionalLaborRate.value = Number(property.additional_cleaning_labor || 0);
   if (propertyDefaultCleaningRate) propertyDefaultCleaningRate.value = Number(property.default_cleaning_rate || 0);
   if (propertyTaxable) propertyTaxable.value = property.billing_taxable === false ? "no" : "yes";
   if (propertyTaxRate) propertyTaxRate.value = Number(property.billing_tax_rate || 0);
   if (propertyPaymentTerms) propertyPaymentTerms.value = property.payment_terms || DEFAULT_INVOICE_TERMS;
   if (propertyInvoiceNotes) propertyInvoiceNotes.value = property.invoice_notes || "";
   if (propertyCompanyBranch) propertyCompanyBranch.value = normalizeCompanyBranch(property.company_branch);
+  if (propertyServiceFrequency) propertyServiceFrequency.value = getPropertyFrequencyForScheduling(property);
+  if (propertyBiweeklyAnchorDate) {
+    propertyBiweeklyAnchorDate.value = getBiweeklyAnchorDateForScheduling(property);
+  }
+  syncPropertyServiceFrequencyDependentFields();
 
   propertyModal.classList.remove("hidden");
 }
 
 function closePropertyModal() {
   propertyModal.classList.add("hidden");
+}
+
+const SERVICE_FREQUENCY_WEEKLY = "weekly";
+const SERVICE_FREQUENCY_BIWEEKLY = "bi_weekly";
+
+function normalizeServiceFrequency(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === SERVICE_FREQUENCY_BIWEEKLY || normalized === "bi-weekly") {
+    return SERVICE_FREQUENCY_BIWEEKLY;
+  }
+  return SERVICE_FREQUENCY_WEEKLY;
+}
+
+function getServiceFrequencyLabel(value) {
+  return normalizeServiceFrequency(value) === SERVICE_FREQUENCY_BIWEEKLY
+    ? "Bi-Weekly"
+    : "Weekly";
+}
+
+function formatIsoDateUtc(date) {
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(date.getUTCDate()).padStart(2, "0")}`;
+}
+
+function normalizeBiweeklyAnchorDate(value) {
+  const normalized = normalizeDateKey(value);
+  return normalized || "";
+}
+
+function getPropertyFrequencyForScheduling(property) {
+  return normalizeServiceFrequency(property?.service_frequency);
+}
+
+function getBiweeklyAnchorDateForScheduling(property) {
+  return normalizeBiweeklyAnchorDate(property?.biweekly_anchor_date);
+}
+
+function isBiweeklyAnchorAlignedWithStandardDay(anchorDate, standardDayName) {
+  const normalizedAnchor = normalizeBiweeklyAnchorDate(anchorDate);
+  if (!normalizedAnchor) return true;
+  const selectedDay = String(standardDayName || "").trim();
+  if (!selectedDay) return true;
+  return getDayNameFromDateString(normalizedAnchor) === selectedDay;
+}
+
+function syncPropertyServiceFrequencyDependentFields() {
+  const frequency = normalizeServiceFrequency(propertyServiceFrequency?.value);
+  const isBiweekly = frequency === SERVICE_FREQUENCY_BIWEEKLY;
+
+  if (propertyBiweeklyAnchorDateRow) {
+    propertyBiweeklyAnchorDateRow.classList.toggle("hidden", !isBiweekly);
+  }
+
+  if (propertyBiweeklyAnchorDate) {
+    propertyBiweeklyAnchorDate.required = isBiweekly;
+  }
+
+  if (propertyFrequencyWarning) {
+    let warning = "";
+    const anchorDate = normalizeBiweeklyAnchorDate(propertyBiweeklyAnchorDate?.value);
+    if (isBiweekly && anchorDate && !isBiweeklyAnchorAlignedWithStandardDay(anchorDate, standardDay?.value)) {
+      warning = "The selected first cleaning date does not match this property's standard service day.";
+    }
+    propertyFrequencyWarning.textContent = warning;
+    propertyFrequencyWarning.classList.toggle("hidden", !warning);
+  }
+}
+
+syncPropertyServiceFrequencyDependentFields();
+
+function isDateOnBiweeklyCycle(taskDate, anchorDate) {
+  const normalizedTaskDate = normalizeDateKey(taskDate);
+  const normalizedAnchor = normalizeBiweeklyAnchorDate(anchorDate);
+  if (!normalizedTaskDate || !normalizedAnchor) return false;
+
+  const task = parseDateString(normalizedTaskDate);
+  const anchor = parseDateString(normalizedAnchor);
+  const diffDays = Math.round((task.getTime() - anchor.getTime()) / (1000 * 60 * 60 * 24));
+  const mod = ((diffDays % 14) + 14) % 14;
+  return mod === 0;
+}
+
+function getServiceDatesForMonthByBiweeklyAnchor(anchorDate, monthType) {
+  const normalizedAnchor = normalizeBiweeklyAnchorDate(anchorDate);
+  if (!normalizedAnchor) return [];
+
+  const now = new Date();
+  const monthOffset = getDateOffsetsForMonth(monthType);
+  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + monthOffset, 1));
+  const monthEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + monthOffset + 1, 0));
+
+  const anchor = parseDateString(normalizedAnchor);
+  const cursor = new Date(anchor);
+  const dayMs = 1000 * 60 * 60 * 24;
+
+  if (cursor < monthStart) {
+    const daysBetween = Math.floor((monthStart.getTime() - cursor.getTime()) / dayMs);
+    const intervals = Math.floor(daysBetween / 14);
+    cursor.setUTCDate(cursor.getUTCDate() + (intervals * 14));
+    while (cursor < monthStart) {
+      cursor.setUTCDate(cursor.getUTCDate() + 14);
+    }
+  }
+
+  const serviceDates = [];
+  while (cursor <= monthEnd) {
+    serviceDates.push(formatIsoDateUtc(cursor));
+    cursor.setUTCDate(cursor.getUTCDate() + 14);
+  }
+
+  return serviceDates;
+}
+
+function getWeeklyGenerationServiceDatesForProperty(property, monthType) {
+  const frequency = getPropertyFrequencyForScheduling(property);
+  const standardDayName = property?.standard_service_day || "Wednesday";
+  if (frequency === SERVICE_FREQUENCY_BIWEEKLY) {
+    const anchorDate = getBiweeklyAnchorDateForScheduling(property);
+    return getServiceDatesForMonthByBiweeklyAnchor(anchorDate, monthType);
+  }
+  return getServiceDatesForMonthByDay(standardDayName, monthType);
+}
+
+function isTaskDateAlignedWithPropertySchedule(taskDate, propertyLike) {
+  const normalizedTaskDate = normalizeDateKey(taskDate);
+  if (!normalizedTaskDate) return false;
+
+  const frequency = getPropertyFrequencyForScheduling(propertyLike);
+  if (frequency === SERVICE_FREQUENCY_BIWEEKLY) {
+    const anchorDate = getBiweeklyAnchorDateForScheduling(propertyLike);
+    return isDateOnBiweeklyCycle(normalizedTaskDate, anchorDate);
+  }
+
+  const standardDayName = String(propertyLike?.standard_service_day || "Wednesday").trim() || "Wednesday";
+  return getDayNameFromDateString(normalizedTaskDate) === standardDayName;
+}
+
+function isAutoGeneratedFutureWeeklyTaskCandidate(task, propertyId, fromDate) {
+  if (!task || task.property_id !== propertyId) return false;
+  if (task.service_type !== "Weekly Standard") return false;
+  if (task.completed_at || task.invoiced) return false;
+  if (task.manually_modified) return false;
+
+  const status = String(task.status || "").trim().toLowerCase();
+  if (status && status !== "scheduled") return false;
+
+  const sourceType = String(task.source_type || "").trim().toLowerCase();
+  const sourceKey = String(task.source_key || "").trim().toLowerCase();
+  const notes = String(task.notes || "").trim().toLowerCase();
+  const isAutoGenerated = sourceType === "weekly_standard"
+    && sourceKey.startsWith("wk:")
+    && notes.includes("auto-created weekly standard");
+  if (!isAutoGenerated) return false;
+
+  const taskDate = normalizeDateKey(task.service_date || task.scheduled_date);
+  if (!taskDate || taskDate < fromDate) return false;
+
+  return true;
+}
+
+function getFutureAutoWeeklyTasksOutsideSchedule(propertyId, nextSchedule, fromDate) {
+  return cleaningTasks.filter((task) => {
+    if (!isAutoGeneratedFutureWeeklyTaskCandidate(task, propertyId, fromDate)) {
+      return false;
+    }
+
+    const taskDate = task.service_date || task.scheduled_date;
+    return !isTaskDateAlignedWithPropertySchedule(taskDate, nextSchedule);
+  });
+}
+
+const WEEKLY_SERVICE_LEVEL_FULL = "full_service";
+const WEEKLY_SERVICE_LEVEL_HEALTH = "health_check";
+
+function normalizeWeeklyServiceLevel(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === WEEKLY_SERVICE_LEVEL_HEALTH) return WEEKLY_SERVICE_LEVEL_HEALTH;
+  return WEEKLY_SERVICE_LEVEL_FULL;
+}
+
+function getWeeklyServiceLevelLabel(level) {
+  return normalizeWeeklyServiceLevel(level) === WEEKLY_SERVICE_LEVEL_HEALTH
+    ? "Health Check"
+    : "Full Service";
+}
+
+function getWeeklyServiceLevelForTask(task) {
+  if (String(task?.service_type || "").trim() !== "Weekly Standard") return "";
+
+  const selectedLevel = String(taskWeeklyServiceLevelSelections.get(task.id) || "").trim();
+  if (selectedLevel) return normalizeWeeklyServiceLevel(selectedLevel);
+  return normalizeWeeklyServiceLevel(task?.weekly_service_level);
+}
+
+function syncCleaningServiceTypeDependentFields() {
+  const isWeeklyTask = String(cleaningServiceType?.value || "").trim() === "Weekly Standard";
+
+  if (cleaningWeeklyServiceLevelRow) {
+    cleaningWeeklyServiceLevelRow.classList.toggle("hidden", !isWeeklyTask);
+  }
+
+  if (cleaningWeeklyServiceLevel) {
+    if (isWeeklyTask) {
+      cleaningWeeklyServiceLevel.value = normalizeWeeklyServiceLevel(cleaningWeeklyServiceLevel.value || WEEKLY_SERVICE_LEVEL_FULL);
+    } else {
+      cleaningWeeklyServiceLevel.value = WEEKLY_SERVICE_LEVEL_FULL;
+    }
+  }
 }
 
 function openCleaningModal(propertyId) {
@@ -1287,10 +1719,13 @@ function openCleaningModal(propertyId) {
 
   cleaningDate.value = new Date().toISOString().split("T")[0];
   cleaningServiceType.value = "Manual";
+  if (cleaningWeeklyServiceLevel) cleaningWeeklyServiceLevel.value = WEEKLY_SERVICE_LEVEL_FULL;
   cleaningStatus.value = "Scheduled";
   cleaningTechnician.value = "";
   cleaningCharge.value = 0;
+  if (cleaningLaborAmount) cleaningLaborAmount.value = "";
   cleaningNotes.value = "";
+  syncCleaningServiceTypeDependentFields();
   renderCleaningSafetyCultureAccess();
   clearChemicalUsageForm();
   renderChemicalUsageForCurrentTask();
@@ -1311,10 +1746,18 @@ function openEditCleaning(taskId) {
 
   cleaningDate.value = task.scheduled_date || task.service_date || "";
   cleaningServiceType.value = task.service_type || "Manual";
+  if (cleaningWeeklyServiceLevel) {
+    cleaningWeeklyServiceLevel.value = normalizeWeeklyServiceLevel(task.weekly_service_level);
+  }
   cleaningStatus.value = task.status || "Scheduled";
   cleaningTechnician.value = task.technician || "";
   cleaningCharge.value = task.charge || 0;
+  if (cleaningLaborAmount) {
+    const hasStoredLabor = task?.labor_amount !== null && task?.labor_amount !== undefined && String(task.labor_amount).trim() !== "";
+    cleaningLaborAmount.value = hasStoredLabor ? Number(task.labor_amount || 0) : "";
+  }
   cleaningNotes.value = stripManualBillingOverrideTag(task.notes || "");
+  syncCleaningServiceTypeDependentFields();
   renderCleaningSafetyCultureAccess();
   clearChemicalUsageForm();
   renderChemicalUsageForCurrentTask();
@@ -1329,9 +1772,11 @@ function getCleaningModalStateSnapshot() {
     editingTaskId: editingCleaningId || "",
     serviceDate: String(cleaningDate?.value || ""),
     serviceType: String(cleaningServiceType?.value || ""),
+    weeklyServiceLevel: String(cleaningWeeklyServiceLevel?.value || ""),
     status: String(cleaningStatus?.value || ""),
     technician: String(cleaningTechnician?.value || "").trim(),
     charge: String(cleaningCharge?.value || ""),
+    laborAmount: String(cleaningLaborAmount?.value || ""),
     notes: String(cleaningNotes?.value || "").trim(),
   };
 }
@@ -1584,9 +2029,11 @@ async function loadData() {
   await loadReservations();
   await loadOperationsReminders();
   await loadChemicals();
+  await loadTechnicians();
   await loadChemicalUsageEntries();
   await loadInvoices();
   renderChemicalSettingsSection();
+  renderTechnicianSettingsSection();
   initializeChemicalUsageOptions();
   const monthForAutoGeneration = ["current", "next", "previous"].includes(selectedMonthFilter)
     ? selectedMonthFilter
@@ -1600,6 +2047,8 @@ async function loadData() {
   renderTaskViews();
   renderProperties();
   renderOperationsRemindersWidget();
+  populateLaborReportTechnicianOptions();
+  renderLaborReport();
   renderBillingReport();
   renderInvoicePreview();
   renderInvoiceBatchPreview();
@@ -2028,7 +2477,12 @@ async function ensureWeeklyStandardTasksForMonth(monthType) {
   if (!["current", "next", "previous"].includes(monthType)) return 0;
 
   const propertiesForGeneration = properties.filter((property) => {
-    return property.active !== false && Boolean(property.standard_service_day);
+    if (property.active === false) return false;
+    const frequency = getPropertyFrequencyForScheduling(property);
+    if (frequency === SERVICE_FREQUENCY_BIWEEKLY) {
+      return Boolean(getBiweeklyAnchorDateForScheduling(property));
+    }
+    return Boolean(property.standard_service_day);
   });
 
   if (!propertiesForGeneration.length) return 0;
@@ -2037,8 +2491,10 @@ async function ensureWeeklyStandardTasksForMonth(monthType) {
 
   for (const property of propertiesForGeneration) {
     const standardDayName = property.standard_service_day || "Wednesday";
+    const frequency = getPropertyFrequencyForScheduling(property);
+    const frequencyLabel = getServiceFrequencyLabel(frequency);
     const propertyCoverageRule = getCoverageRuleForProperty(property);
-    const serviceDates = getServiceDatesForMonthByDay(standardDayName, monthType);
+    const serviceDates = getWeeklyGenerationServiceDatesForProperty(property, monthType);
 
     for (const serviceDate of serviceDates) {
       if (hasExistingWeeklyTask(property.id, serviceDate)) {
@@ -2056,11 +2512,12 @@ async function ensureWeeklyStandardTasksForMonth(monthType) {
         suggested_date: serviceDate,
         check_in_date: null,
         service_type: "Weekly Standard",
+        weekly_service_level: WEEKLY_SERVICE_LEVEL_FULL,
         status: "Scheduled",
         off_cycle: false,
         guest_ready: false,
         charge: 0,
-        notes: `Auto-created Weekly Standard for ${standardDayName} in ${monthType} month view.`,
+        notes: `Auto-created Weekly Standard (${frequencyLabel}) for ${standardDayName} in ${monthType} month view.`,
         source_type: "weekly_standard",
         source_key: `wk:${property.id}:${serviceDate}`,
         manually_modified: false,
@@ -2754,6 +3211,203 @@ async function deleteChemicalSetting(chemicalId) {
   setChemicalSettingsStatus("Chemical deleted.");
 }
 
+function setTechnicianSettingsStatus(message, isError = false) {
+  if (!technicianSettingsStatus) return;
+  technicianSettingsStatus.textContent = message || "";
+  technicianSettingsStatus.style.color = isError ? "#dc2626" : "#059669";
+  if (!message) return;
+  setTimeout(() => {
+    if (technicianSettingsStatus.textContent === message) {
+      technicianSettingsStatus.textContent = "";
+    }
+  }, 2800);
+}
+
+function resetTechnicianSettingsForm() {
+  editingTechnicianId = null;
+  if (technicianNameInput) technicianNameInput.value = "";
+  if (technicianActiveCheckbox) technicianActiveCheckbox.checked = true;
+  if (saveTechnicianBtn) saveTechnicianBtn.textContent = "Add Technician";
+  if (cancelTechnicianEditBtn) cancelTechnicianEditBtn.classList.add("hidden");
+}
+
+function getSortedTechnicians() {
+  return technicians
+    .slice()
+    .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
+}
+
+function getActiveTechnicians() {
+  return getSortedTechnicians().filter((technician) => technician.active !== false);
+}
+
+function findTechnicianById(technicianId) {
+  const normalizedId = String(technicianId || "").trim();
+  if (!normalizedId) return null;
+  return technicians.find((technician) => String(technician.id || "").trim() === normalizedId) || null;
+}
+
+function findActiveTechnicianByName(name) {
+  const normalized = String(name || "").trim().toLowerCase();
+  if (!normalized) return null;
+  return getActiveTechnicians().find((technician) => String(technician.name || "").trim().toLowerCase() === normalized) || null;
+}
+
+function renderTechnicianSettingsSection() {
+  if (!technicianSettingsList) return;
+
+  const rows = getSortedTechnicians();
+  if (!rows.length) {
+    technicianSettingsList.innerHTML = '<tr><td colspan="4">No technicians configured yet.</td></tr>';
+    return;
+  }
+
+  technicianSettingsList.innerHTML = rows.map((technician) => {
+    const createdDate = technician.created_at
+      ? new Date(technician.created_at).toLocaleDateString()
+      : "-";
+
+    return `
+      <tr>
+        <td>${escapeHtml(technician.name || "")}</td>
+        <td>${technician.active === false ? "Inactive" : "Active"}</td>
+        <td>${createdDate}</td>
+        <td>
+          <div class="chemical-settings-row-actions">
+            <button type="button" onclick="openEditTechnician('${technician.id}')">Edit</button>
+            <button type="button" onclick="toggleTechnicianActive('${technician.id}')">${technician.active === false ? "Activate" : "Deactivate"}</button>
+          </div>
+        </td>
+      </tr>
+    `;
+  }).join("");
+}
+
+function openEditTechnician(technicianId) {
+  const technician = findTechnicianById(technicianId);
+  if (!technician) return;
+
+  editingTechnicianId = technician.id;
+  if (technicianNameInput) technicianNameInput.value = technician.name || "";
+  if (technicianActiveCheckbox) technicianActiveCheckbox.checked = technician.active !== false;
+  if (saveTechnicianBtn) saveTechnicianBtn.textContent = "Update Technician";
+  if (cancelTechnicianEditBtn) cancelTechnicianEditBtn.classList.remove("hidden");
+}
+
+async function saveTechnician() {
+  if (!technicianNameInput || !technicianActiveCheckbox) return;
+
+  const name = String(technicianNameInput.value || "").trim();
+  const active = Boolean(technicianActiveCheckbox.checked);
+  if (!name) {
+    alert("Technician name is required.");
+    return;
+  }
+
+  const duplicate = technicians.find((technician) => {
+    const sameName = String(technician.name || "").trim().toLowerCase() === name.toLowerCase();
+    if (!sameName) return false;
+    if (!editingTechnicianId) return true;
+    return String(technician.id) !== String(editingTechnicianId);
+  });
+  if (duplicate) {
+    alert("A technician with this name already exists.");
+    return;
+  }
+
+  const payload = {
+    name,
+    active,
+  };
+
+  let response;
+  if (editingTechnicianId) {
+    response = await supabaseClient
+      .from("technicians")
+      .update(payload)
+      .eq("id", editingTechnicianId);
+  } else {
+    response = await supabaseClient
+      .from("technicians")
+      .insert([payload]);
+  }
+
+  if (response.error) {
+    const missingActiveColumn = /active/i.test(String(response.error.message || ""));
+    if (missingActiveColumn) {
+      const legacyPayload = { name };
+      if (editingTechnicianId) {
+        response = await supabaseClient
+          .from("technicians")
+          .update(legacyPayload)
+          .eq("id", editingTechnicianId);
+      } else {
+        response = await supabaseClient
+          .from("technicians")
+          .insert([legacyPayload]);
+      }
+    }
+  }
+
+  if (response.error) {
+    alert("Error saving technician: " + response.error.message);
+    return;
+  }
+
+  await loadTechnicians();
+  resetTechnicianSettingsForm();
+  renderTechnicianSettingsSection();
+  renderProperties();
+  setTechnicianSettingsStatus("Technician saved.");
+}
+
+async function toggleTechnicianActive(technicianId) {
+  const technician = findTechnicianById(technicianId);
+  if (!technician) return;
+
+  const nextActive = technician.active === false;
+  const { error } = await supabaseClient
+    .from("technicians")
+    .update({ active: nextActive })
+    .eq("id", technicianId);
+
+  if (error) {
+    alert("Error updating technician status: " + error.message);
+    return;
+  }
+
+  await loadTechnicians();
+  renderTechnicianSettingsSection();
+  renderProperties();
+  setTechnicianSettingsStatus(nextActive ? "Technician activated." : "Technician deactivated.");
+}
+
+async function loadTechnicians() {
+  const { data, error } = await supabaseClient
+    .from("technicians")
+    .select("*")
+    .order("name", { ascending: true });
+
+  if (error) {
+    const missingTable = String(error.message || "").toLowerCase().includes("technicians");
+    if (!missingTable) {
+      console.warn("Could not load technicians:", error.message);
+    }
+    technicians = [];
+    taskTechnicianSelections = new Map();
+    return;
+  }
+
+  technicians = data || [];
+  taskTechnicianSelections = new Map(
+    Array.from(taskTechnicianSelections.entries()).filter(([taskId, technicianId]) => {
+      if (!taskId || !technicianId) return false;
+      const technician = findTechnicianById(technicianId);
+      return technician?.active !== false;
+    })
+  );
+}
+
 async function loadProperties() {
   const { data, error } = await supabaseClient
     .from("properties")
@@ -2841,7 +3495,48 @@ async function loadOperationsReminders() {
 
 async function saveProperty() {
   const selectedCoverageRule = coverageRule ? coverageRule.value : "both";
+  const selectedServiceFrequency = normalizeServiceFrequency(propertyServiceFrequency?.value);
+  const selectedBiweeklyAnchorDate = selectedServiceFrequency === SERVICE_FREQUENCY_BIWEEKLY
+    ? normalizeBiweeklyAnchorDate(propertyBiweeklyAnchorDate?.value)
+    : null;
   const taxable = String(propertyTaxable?.value || "yes") === "yes";
+
+  if (selectedServiceFrequency === SERVICE_FREQUENCY_BIWEEKLY && !selectedBiweeklyAnchorDate) {
+    alert("First / Next Cleaning Date is required when Service Frequency is Bi-Weekly.");
+    return;
+  }
+
+  const existingProperty = editingPropertyId ? properties.find((property) => property.id === editingPropertyId) : null;
+  const todayDate = new Date();
+  todayDate.setHours(0, 0, 0, 0);
+  const todayKey = formatDateValue(todayDate);
+  const nextSchedule = {
+    service_frequency: selectedServiceFrequency,
+    biweekly_anchor_date: selectedBiweeklyAnchorDate,
+    standard_service_day: standardDay.value,
+  };
+
+  const existingFrequency = getPropertyFrequencyForScheduling(existingProperty);
+  const existingAnchorDate = getBiweeklyAnchorDateForScheduling(existingProperty);
+  const existingStandardDay = String(existingProperty?.standard_service_day || "Wednesday").trim() || "Wednesday";
+  const scheduleChanged = Boolean(existingProperty)
+    && (
+      existingFrequency !== selectedServiceFrequency
+      || existingAnchorDate !== (selectedBiweeklyAnchorDate || "")
+      || existingStandardDay !== (String(standardDay.value || "").trim() || "Wednesday")
+    );
+
+  const staleFutureAutoWeeklyTasks = scheduleChanged
+    ? getFutureAutoWeeklyTasksOutsideSchedule(editingPropertyId, nextSchedule, todayKey)
+    : [];
+
+  if (staleFutureAutoWeeklyTasks.length > 0) {
+    const confirmMessage = `This schedule change will remove ${staleFutureAutoWeeklyTasks.length} future auto-generated Weekly Standard task(s) that no longer match the new frequency.\n\nCompleted tasks, manual tasks, and Guest Ready tasks will not be deleted.\n\nContinue?`;
+    if (!window.confirm(confirmMessage)) {
+      return;
+    }
+  }
+
   const propertyData = {
     property_name: propertyName.value.trim(),
     client_name: String(propertyClientName?.value || "").trim() || null,
@@ -2856,12 +3551,17 @@ async function saveProperty() {
     coverage_days: selectedCoverageRule === "none" ? 0 : 1,
     coverage_rule: selectedCoverageRule,
     default_off_cycle_charge: Number(offCycleCharge.value),
+    weekly_service_labor: Math.max(0, Number(propertyWeeklyLaborRate?.value || 0)),
+    guest_ready_service_labor: Math.max(0, Number(propertyGuestReadyLaborRate?.value || 0)),
+    additional_cleaning_labor: Math.max(0, Number(propertyAdditionalLaborRate?.value || 0)),
     default_cleaning_rate: Number(propertyDefaultCleaningRate?.value || 0),
     billing_taxable: taxable,
     billing_tax_rate: taxable ? Number(propertyTaxRate?.value || 0) : 0,
     payment_terms: String(propertyPaymentTerms?.value || "").trim() || DEFAULT_INVOICE_TERMS,
     invoice_notes: String(propertyInvoiceNotes?.value || "").trim() || null,
     company_branch: normalizeCompanyBranch(propertyCompanyBranch?.value),
+    service_frequency: selectedServiceFrequency,
+    biweekly_anchor_date: selectedBiweeklyAnchorDate,
     active: true
   };
 
@@ -2890,11 +3590,16 @@ async function saveProperty() {
     "billing_address",
     "billing_account_reference",
     "default_cleaning_rate",
+    "weekly_service_labor",
+    "guest_ready_service_labor",
+    "additional_cleaning_labor",
     "billing_taxable",
     "billing_tax_rate",
     "payment_terms",
     "invoice_notes",
     "company_branch",
+    "service_frequency",
+    "biweekly_anchor_date",
   ];
 
   let legacyPropertyData = { ...propertyData };
@@ -2924,9 +3629,23 @@ async function saveProperty() {
     return;
   }
 
+  if (staleFutureAutoWeeklyTasks.length > 0) {
+    const staleTaskIds = staleFutureAutoWeeklyTasks.map((task) => task.id).filter(Boolean);
+    if (staleTaskIds.length > 0) {
+      const { error: cleanupError } = await supabaseClient
+        .from("cleaning_tasks")
+        .delete()
+        .in("id", staleTaskIds);
+
+      if (cleanupError) {
+        alert("Property saved, but some old auto-generated Weekly Standard tasks could not be removed: " + cleanupError.message);
+      }
+    }
+  }
+
   clearPropertyForm();
   closePropertyModal();
-  loadData();
+  await loadData();
 }
 
 async function deleteProperty(id) {
@@ -3139,8 +3858,20 @@ async function saveCleaningTask() {
 
   const serviceDate = cleaningDate.value;
   const serviceType = cleaningServiceType.value;
+  const weeklyServiceLevel = serviceType === "Weekly Standard"
+    ? normalizeWeeklyServiceLevel(cleaningWeeklyServiceLevel?.value)
+    : null;
   const taskStatus = cleaningStatus.value || "Scheduled";
   const charge = Number(cleaningCharge.value || 0);
+  const manualLaborRaw = String(cleaningLaborAmount?.value || "").trim();
+  const hasManualLaborInput = manualLaborRaw !== "";
+  const parsedManualLabor = hasManualLaborInput ? Number(manualLaborRaw) : null;
+  const manualLaborAmount = hasManualLaborInput ? Math.max(0, parsedManualLabor) : null;
+
+  if (hasManualLaborInput && !Number.isFinite(parsedManualLabor)) {
+    alert("Manual labor amount must be a valid number.");
+    return;
+  }
 
   if (!serviceDate) {
     alert("Service date is required.");
@@ -3149,6 +3880,7 @@ async function saveCleaningTask() {
 
   const existingTask = editingCleaningId ? cleaningTasks.find((task) => task.id === editingCleaningId) : null;
   const existingCharge = Number(existingTask?.charge || 0);
+  const wasCompleted = String(existingTask?.status || "") === "Completed";
   const completedAt = taskStatus === "Completed"
     ? existingTask?.completed_at || new Date().toISOString()
     : null;
@@ -3163,16 +3895,87 @@ async function saveCleaningTask() {
   const isManuallyMoving = editingCleaningId && existingTask?.service_date !== serviceDate;
   const shouldApplyManualBillingOverride = Boolean(editingCleaningId && charge > 0);
   const notesWithOverride = applyManualBillingOverrideTag(cleaningNotes.value.trim(), shouldApplyManualBillingOverride);
+  const selectedModalTechnician = findActiveTechnicianByName(cleaningTechnician.value.trim());
+  const isMarkingCompleteNow = taskStatus === "Completed" && !wasCompleted;
+  const isManualServiceTask = isManualTask({ service_type: serviceType });
+
+  const persistedCompletedById = String(existingTask?.completed_by_technician_id || existingTask?.technician_id || "").trim();
+  const persistedCompletedByTechnician = findTechnicianById(persistedCompletedById);
+  const completedByTechnician = selectedModalTechnician
+    || (taskStatus === "Completed" ? persistedCompletedByTechnician : null);
+  const hasCompletedTechnician = Boolean(completedByTechnician?.id || completedByTechnician?.name);
+
+  if (existingTask && wasCompleted && isLaborTaskMarkedPaid(existingTask)) {
+    const previousTechnicianId = String(existingTask.completed_by_technician_id || existingTask.technician_id || "").trim();
+    const previousTechnicianName = String(existingTask.completed_by_technician_name || existingTask.technician_name || existingTask.technician || "").trim();
+    const nextTechnicianId = String(completedByTechnician?.id || "").trim();
+    const nextTechnicianName = String(completedByTechnician?.name || "").trim();
+    const technicianChanged = previousTechnicianId !== nextTechnicianId || previousTechnicianName !== nextTechnicianName;
+
+    if (technicianChanged) {
+      const warning = "This labor has already been marked paid. Changing the technician will change who this payment is attributed to. Continue?";
+      if (!window.confirm(warning)) {
+        return;
+      }
+    }
+  }
+
+  const existingLaborRaw = existingTask?.labor_amount;
+  const hasExistingLaborSnapshot = existingLaborRaw !== null && existingLaborRaw !== undefined && String(existingLaborRaw).trim() !== "";
+  const wasMissingTechnicianAtCompletion = Boolean(existingTask && wasCompleted && !hasTechnicianSnapshot(existingTask));
+  const shouldBackfillLaborNow = taskStatus === "Completed" && hasCompletedTechnician && wasMissingTechnicianAtCompletion && !isManualServiceTask;
+
+  const laborCalculatedAt = taskStatus === "Completed"
+    ? (hasCompletedTechnician
+      ? (isMarkingCompleteNow || shouldBackfillLaborNow
+        ? new Date().toISOString()
+        : (existingTask?.labor_calculated_at || existingTask?.completed_at || new Date().toISOString()))
+      : null)
+    : null;
+
+  const laborAmount = taskStatus === "Completed"
+    ? (hasCompletedTechnician
+      ? (isManualServiceTask
+        ? (hasManualLaborInput
+          ? manualLaborAmount
+          : (wasCompleted && hasExistingLaborSnapshot && Number(existingTask?.labor_amount || 0) > 0
+            ? Number(existingTask?.labor_amount || 0)
+            : null))
+        : (wasCompleted && hasExistingLaborSnapshot && !shouldBackfillLaborNow
+          ? Number(existingTask?.labor_amount || 0)
+          : getLaborAmountForTask(
+              {
+                service_type: serviceType,
+                weekly_service_level: weeklyServiceLevel,
+                property_id: selectedCleaningPropertyId,
+                service_date: serviceDate,
+                scheduled_date: serviceDate,
+                charge,
+                off_cycle: charge > 0 || serviceType === "Off-Cycle",
+                guest_ready: serviceType === "Guest Ready",
+                notes: notesWithOverride,
+              },
+              property
+            )))
+      : null)
+    : (hasManualLaborInput ? manualLaborAmount : Number(existingTask?.labor_amount || 0));
 
   const task = {
     property_id: selectedCleaningPropertyId,
     service_date: serviceDate,
     scheduled_date: serviceDate,
     service_type: serviceType,
-    technician: cleaningTechnician.value.trim(),
+    weekly_service_level: weeklyServiceLevel,
+    technician: completedByTechnician ? completedByTechnician.name : cleaningTechnician.value.trim(),
+    technician_id: completedByTechnician?.id || null,
+    technician_name: completedByTechnician?.name || null,
+    completed_by_technician_id: taskStatus === "Completed" ? (completedByTechnician?.id || null) : null,
+    completed_by_technician_name: taskStatus === "Completed" ? (completedByTechnician?.name || null) : null,
     status: taskStatus,
     off_cycle: charge > 0 || serviceType === "Off-Cycle",
     charge: charge,
+    labor_amount: laborAmount === null ? null : Number(laborAmount || 0),
+    labor_calculated_at: laborCalculatedAt,
     notes: notesWithOverride,
     guest_ready: serviceType === "Guest Ready",
     completed_at: completedAt,
@@ -3190,6 +3993,61 @@ async function saveCleaningTask() {
     result = await supabaseClient
       .from("cleaning_tasks")
       .insert([task]);
+  }
+
+  const optionalCleaningTaskColumns = [
+    "technician_id",
+    "technician_name",
+    "completed_by_technician_id",
+    "completed_by_technician_name",
+    "weekly_service_level",
+    "labor_amount",
+    "labor_calculated_at",
+  ];
+
+  let legacyTaskPayload = { ...task };
+  while (result.error) {
+    const message = String(result.error.message || "").toLowerCase();
+    const missingColumn = optionalCleaningTaskColumns.find((column) => message.includes(column));
+    if (!missingColumn || !(missingColumn in legacyTaskPayload)) {
+      break;
+    }
+
+    delete legacyTaskPayload[missingColumn];
+
+    if (editingCleaningId) {
+      result = await supabaseClient
+        .from("cleaning_tasks")
+        .update(legacyTaskPayload)
+        .eq("id", editingCleaningId);
+    } else {
+      result = await supabaseClient
+        .from("cleaning_tasks")
+        .insert([legacyTaskPayload]);
+    }
+  }
+
+  if (result.error && taskStatus === "Completed" && laborAmount === null) {
+    const errorMessage = String(result.error.message || "").toLowerCase();
+    const laborNullViolation = errorMessage.includes("labor_amount") && (errorMessage.includes("null") || errorMessage.includes("not-null") || errorMessage.includes("not null"));
+    if (laborNullViolation) {
+      const fallbackCompletedPayload = {
+        ...legacyTaskPayload,
+        labor_amount: 0,
+        labor_calculated_at: null,
+      };
+
+      if (editingCleaningId) {
+        result = await supabaseClient
+          .from("cleaning_tasks")
+          .update(fallbackCompletedPayload)
+          .eq("id", editingCleaningId);
+      } else {
+        result = await supabaseClient
+          .from("cleaning_tasks")
+          .insert([fallbackCompletedPayload]);
+      }
+    }
   }
 
   if (result.error) {
@@ -3323,19 +4181,99 @@ async function startCleaningTask(id) {
 }
 
 async function markCleaningComplete(id) {
-  const { error } = await supabaseClient
-    .from("cleaning_tasks")
-    .update({
-      status: "Completed",
-      completed_at: new Date().toISOString()
-    })
-    .eq("id", id);
-
-  if (error) {
-    alert("Error completing cleaning: " + error.message);
+  const task = cleaningTasks.find((item) => item.id === id);
+  if (!task) {
+    alert("Task not found.");
     return;
   }
 
+  const selectedTechnician = getSelectedTechnicianForTask(task);
+
+  const property = getPropertyById(task.property_id);
+  const weeklyServiceLevel = String(task?.service_type || "") === "Weekly Standard"
+    ? getWeeklyServiceLevelForTask(task)
+    : null;
+  const hasCompletedTechnician = Boolean(selectedTechnician?.id || selectedTechnician?.name);
+  const isManualServiceTask = isManualTask(task);
+  const existingManualLabor = Number(task?.labor_amount);
+  const hasExistingManualLabor = Number.isFinite(existingManualLabor) && existingManualLabor > 0;
+  const laborTaskContext = {
+    ...task,
+    weekly_service_level: weeklyServiceLevel,
+  };
+  const laborAmount = hasCompletedTechnician
+    ? (isManualServiceTask
+      ? (hasExistingManualLabor ? existingManualLabor : null)
+      : getLaborAmountForTask(laborTaskContext, property))
+    : null;
+  const completionTimestamp = new Date().toISOString();
+  const completionPayload = {
+    status: "Completed",
+    completed_at: completionTimestamp,
+    weekly_service_level: weeklyServiceLevel,
+    technician: selectedTechnician?.name || null,
+    technician_id: selectedTechnician?.id || null,
+    technician_name: selectedTechnician?.name || null,
+    completed_by_technician_id: selectedTechnician?.id || null,
+    completed_by_technician_name: selectedTechnician?.name || null,
+    labor_amount: hasCompletedTechnician ? Number(laborAmount || 0) : null,
+    labor_calculated_at: hasCompletedTechnician && laborAmount !== null ? completionTimestamp : null,
+  };
+
+  let result = await supabaseClient
+    .from("cleaning_tasks")
+    .update(completionPayload)
+    .eq("id", id);
+
+  const optionalCleaningTaskColumns = [
+    "technician_id",
+    "technician_name",
+    "completed_by_technician_id",
+    "completed_by_technician_name",
+    "weekly_service_level",
+    "labor_amount",
+    "labor_calculated_at",
+  ];
+
+  let legacyPayload = { ...completionPayload };
+  while (result.error) {
+    const message = String(result.error.message || "").toLowerCase();
+    const missingColumn = optionalCleaningTaskColumns.find((column) => message.includes(column));
+    if (!missingColumn || !(missingColumn in legacyPayload)) {
+      break;
+    }
+
+    delete legacyPayload[missingColumn];
+    result = await supabaseClient
+      .from("cleaning_tasks")
+      .update(legacyPayload)
+      .eq("id", id);
+  }
+
+  if (result.error && !hasCompletedTechnician) {
+    const errorMessage = String(result.error.message || "").toLowerCase();
+    const laborNullViolation = errorMessage.includes("labor_amount") && (errorMessage.includes("null") || errorMessage.includes("not-null") || errorMessage.includes("not null"));
+    if (laborNullViolation) {
+      const fallbackCompletionPayload = {
+        ...legacyPayload,
+        labor_amount: 0,
+        labor_calculated_at: null,
+      };
+
+      result = await supabaseClient
+        .from("cleaning_tasks")
+        .update(fallbackCompletionPayload)
+        .eq("id", id);
+    }
+  }
+
+  if (result.error) {
+    alert("Error completing cleaning: " + result.error.message);
+    return;
+  }
+
+  taskTechnicianSelections.delete(id);
+  taskWeeklyServiceLevelSelections.delete(id);
   loadData();
 }
 
@@ -3359,12 +4297,18 @@ function clearPropertyForm() {
     coverageRule.value = "both";
   }
   offCycleCharge.value = 65;
+  if (propertyWeeklyLaborRate) propertyWeeklyLaborRate.value = 0;
+  if (propertyGuestReadyLaborRate) propertyGuestReadyLaborRate.value = 0;
+  if (propertyAdditionalLaborRate) propertyAdditionalLaborRate.value = 0;
   if (propertyDefaultCleaningRate) propertyDefaultCleaningRate.value = 0;
   if (propertyTaxable) propertyTaxable.value = "yes";
   if (propertyTaxRate) propertyTaxRate.value = 0;
   if (propertyPaymentTerms) propertyPaymentTerms.value = DEFAULT_INVOICE_TERMS;
   if (propertyInvoiceNotes) propertyInvoiceNotes.value = "";
   if (propertyCompanyBranch) propertyCompanyBranch.value = COMPANY_BRANCH_GUEST_READY;
+  if (propertyServiceFrequency) propertyServiceFrequency.value = SERVICE_FREQUENCY_WEEKLY;
+  if (propertyBiweeklyAnchorDate) propertyBiweeklyAnchorDate.value = "";
+  syncPropertyServiceFrequencyDependentFields();
 }
 
 function toggleInvoiceMarker(taskId) {
@@ -3952,6 +4896,453 @@ function getTaskBillingAmount(task) {
   return getTaskBillingContext(task).billableAmount;
 }
 
+function getPropertyLaborRules(property) {
+  return {
+    weeklyServiceLabor: Math.max(0, Number(property?.weekly_service_labor || 0)),
+    guestReadyServiceLabor: Math.max(0, Number(property?.guest_ready_service_labor || 0)),
+    additionalCleaningLabor: Math.max(0, Number(property?.additional_cleaning_labor || 0)),
+  };
+}
+
+function isManualTask(task) {
+  return String(task?.service_type || "").trim().toLowerCase() === "manual";
+}
+
+function getLaborAmountForTask(task, property) {
+  const rules = getPropertyLaborRules(property);
+  const serviceType = String(task?.service_type || "").trim();
+
+  if (serviceType === "Weekly Standard") {
+    const weeklyLevel = normalizeWeeklyServiceLevel(task?.weekly_service_level);
+    const multiplier = weeklyLevel === WEEKLY_SERVICE_LEVEL_HEALTH ? 0.5 : 1;
+    return Number((rules.weeklyServiceLabor * multiplier).toFixed(2));
+  }
+
+  if (isTaskGuestReady(task)) {
+    return rules.guestReadyServiceLabor;
+  }
+
+  if (isManualTask(task)) {
+    return null;
+  }
+
+  return rules.additionalCleaningLabor;
+}
+
+function getSelectedTechnicianForTask(task) {
+  if (!task) return null;
+
+  const selectedTechnicianId = String(taskTechnicianSelections.get(task.id) || "").trim();
+  if (selectedTechnicianId) {
+    const byId = findTechnicianById(selectedTechnicianId);
+    if (byId?.active !== false) {
+      return byId;
+    }
+  }
+
+  const completedByTechnicianId = String(task.completed_by_technician_id || "").trim();
+  if (completedByTechnicianId) {
+    const byCompletedId = findTechnicianById(completedByTechnicianId);
+    if (byCompletedId?.active !== false) {
+      return byCompletedId;
+    }
+  }
+
+  const taskTechnicianId = String(task.technician_id || "").trim();
+  if (taskTechnicianId) {
+    const byTaskId = findTechnicianById(taskTechnicianId);
+    if (byTaskId?.active !== false) {
+      return byTaskId;
+    }
+  }
+
+  const fallbackName = String(task.completed_by_technician_name || task.technician_name || task.technician || "").trim();
+  return findActiveTechnicianByName(fallbackName);
+}
+
+function getTaskCardTechnicianSelection(task) {
+  const selected = getSelectedTechnicianForTask(task);
+  return String(selected?.id || "").trim();
+}
+
+function buildTaskTechnicianOptionsMarkup(selectedTechnicianId = "") {
+  const selectedId = String(selectedTechnicianId || "").trim();
+  const activeRows = getActiveTechnicians();
+  const options = activeRows.map((technician) => {
+    const optionId = String(technician.id || "").trim();
+    const selectedAttr = optionId && optionId === selectedId ? " selected" : "";
+    return `<option value="${escapeHtml(optionId)}"${selectedAttr}>${escapeHtml(technician.name || "")}</option>`;
+  });
+  options.unshift(`<option value="">Select technician...</option>`);
+  return options.join("");
+}
+
+function setTaskCardTechnician(taskId, technicianId) {
+  const normalizedTaskId = String(taskId || "").trim();
+  const normalizedTechnicianId = String(technicianId || "").trim();
+  if (!normalizedTaskId) return;
+
+  if (!normalizedTechnicianId) {
+    taskTechnicianSelections.delete(normalizedTaskId);
+    return;
+  }
+
+  const technician = findTechnicianById(normalizedTechnicianId);
+  if (!technician || technician.active === false) {
+    taskTechnicianSelections.delete(normalizedTaskId);
+    return;
+  }
+
+  taskTechnicianSelections.set(normalizedTaskId, normalizedTechnicianId);
+}
+
+function setTaskCardWeeklyServiceLevel(taskId, serviceLevel) {
+  const normalizedTaskId = String(taskId || "").trim();
+  if (!normalizedTaskId) return;
+  taskWeeklyServiceLevelSelections.set(normalizedTaskId, normalizeWeeklyServiceLevel(serviceLevel));
+}
+
+function renderTaskWeeklyServiceLevelSelector(task, options = {}) {
+  if (String(task?.service_type || "") !== "Weekly Standard") return "";
+
+  const compact = options.compact === true;
+  const isCompleted = String(task?.status || "") === "Completed";
+  const selectedLevel = getWeeklyServiceLevelForTask(task);
+  const selectClass = compact ? "task-tech-select task-tech-select-compact" : "task-tech-select";
+
+  const selectMarkup = `
+    <select class="${selectClass}" onchange="setTaskCardWeeklyServiceLevel('${task.id}', this.value)">
+      <option value="${WEEKLY_SERVICE_LEVEL_FULL}" ${selectedLevel === WEEKLY_SERVICE_LEVEL_FULL ? "selected" : ""}>Full Service</option>
+      <option value="${WEEKLY_SERVICE_LEVEL_HEALTH}" ${selectedLevel === WEEKLY_SERVICE_LEVEL_HEALTH ? "selected" : ""}>Health Check</option>
+    </select>
+  `;
+
+  if (!isCompleted) {
+    return `
+      <div class="task-line task-tech-select-row">
+        <small>Service Level:</small>
+        ${selectMarkup}
+      </div>
+    `;
+  }
+
+  return `
+    <div class="task-line"><small>Service Level: ${getWeeklyServiceLevelLabel(selectedLevel)}</small></div>
+    <div class="task-line task-tech-select-row">
+      <small>Correct Service Level:</small>
+      ${selectMarkup}
+      <button type="button" class="task-tech-save-btn" onclick="saveCompletedTaskWeeklyServiceLevel('${task.id}')">Save</button>
+    </div>
+  `;
+}
+
+async function saveCompletedTaskWeeklyServiceLevel(taskId, serviceLevel = "") {
+  const normalizedTaskId = String(taskId || "").trim();
+  if (!normalizedTaskId) return;
+
+  const task = cleaningTasks.find((item) => String(item?.id || "") === normalizedTaskId);
+  if (!task) {
+    alert("Task not found.");
+    return;
+  }
+
+  if (String(task.status || "") !== "Completed") {
+    alert("Only completed tasks can be corrected here.");
+    return;
+  }
+
+  if (String(task.service_type || "") !== "Weekly Standard") {
+    alert("Service level corrections only apply to Weekly Standard tasks.");
+    return;
+  }
+
+  const nextLevel = normalizeWeeklyServiceLevel(serviceLevel || taskWeeklyServiceLevelSelections.get(normalizedTaskId) || task.weekly_service_level);
+  const currentLevel = normalizeWeeklyServiceLevel(task.weekly_service_level);
+  if (nextLevel === currentLevel) {
+    taskWeeklyServiceLevelSelections.delete(normalizedTaskId);
+    return;
+  }
+
+  if (isLaborTaskMarkedPaid(task)) {
+    const warning = "This labor has already been marked paid. Changing the service level will change the recorded labor amount. Continue?";
+    if (!window.confirm(warning)) {
+      return;
+    }
+  }
+
+  const property = getPropertyById(task.property_id);
+  if (!property) {
+    alert("Property not found for this task.");
+    return;
+  }
+
+  const recalculatedLabor = Number(getLaborAmountForTask({ ...task, weekly_service_level: nextLevel }, property) || 0);
+  const updatePayload = {
+    weekly_service_level: nextLevel,
+    labor_amount: recalculatedLabor,
+    labor_calculated_at: new Date().toISOString(),
+  };
+
+  let result = await supabaseClient
+    .from("cleaning_tasks")
+    .update(updatePayload)
+    .eq("id", normalizedTaskId);
+
+  if (result.error) {
+    const message = String(result.error.message || "").toLowerCase();
+    if (message.includes("weekly_service_level")) {
+      result = await supabaseClient
+        .from("cleaning_tasks")
+        .update({
+          labor_amount: recalculatedLabor,
+          labor_calculated_at: updatePayload.labor_calculated_at,
+        })
+        .eq("id", normalizedTaskId);
+    }
+  }
+
+  if (result.error) {
+    alert(`Could not save weekly service level: ${result.error.message}`);
+    return;
+  }
+
+  taskWeeklyServiceLevelSelections.delete(normalizedTaskId);
+  await loadData();
+}
+
+window.saveCompletedTaskWeeklyServiceLevel = saveCompletedTaskWeeklyServiceLevel;
+
+function hasTechnicianSnapshot(task) {
+  const completedId = String(task?.completed_by_technician_id || task?.technician_id || "").trim();
+  const completedName = String(task?.completed_by_technician_name || task?.technician_name || task?.technician || "").trim();
+  return Boolean(completedId || completedName);
+}
+
+function isLaborSnapshotMissing(task) {
+  if (String(task?.status || "") !== "Completed") return false;
+  const hasKnownLabor = task?.labor_amount !== null && task?.labor_amount !== undefined && String(task?.labor_amount).trim() !== "";
+  const hasCalculatedAt = Boolean(String(task?.labor_calculated_at || "").trim());
+  return !hasKnownLabor || !hasCalculatedAt;
+}
+
+function getManualLaborInputValue(rawValue) {
+  const raw = String(rawValue ?? "").trim();
+  if (!raw) return null;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) return NaN;
+  return Math.max(0, parsed);
+}
+
+async function saveCompletedTaskTechnician(taskId, technicianId = "") {
+  const normalizedTaskId = String(taskId || "").trim();
+  if (!normalizedTaskId) return;
+
+  const task = cleaningTasks.find((item) => String(item?.id || "") === normalizedTaskId);
+  if (!task) {
+    alert("Task not found.");
+    return;
+  }
+
+  if (String(task.status || "") !== "Completed") {
+    alert("Only completed tasks can be corrected here.");
+    return;
+  }
+
+  const selectedTechnicianId = String(technicianId || taskTechnicianSelections.get(normalizedTaskId) || "").trim();
+  if (!selectedTechnicianId) {
+    alert("Select a technician first.");
+    return;
+  }
+
+  const selectedTechnician = findTechnicianById(selectedTechnicianId);
+  if (!selectedTechnician) {
+    alert("Selected technician could not be found.");
+    return;
+  }
+
+  const previousTechnicianId = String(task.completed_by_technician_id || task.technician_id || "").trim();
+  const previousTechnicianName = String(task.completed_by_technician_name || task.technician_name || task.technician || "").trim();
+  const technicianChanged = previousTechnicianId !== selectedTechnicianId || previousTechnicianName !== selectedTechnician.name;
+
+  if (technicianChanged && isLaborTaskMarkedPaid(task)) {
+    const warning = "This labor has already been marked paid. Changing the technician will change who this payment is attributed to. Continue?";
+    if (!window.confirm(warning)) {
+      return;
+    }
+  }
+
+  const property = getPropertyById(task.property_id);
+  const shouldCalculateLaborNow = !isManualTask(task) && !hasTechnicianSnapshot(task) && isLaborSnapshotMissing(task);
+  const correctionPayload = {
+    technician: selectedTechnician.name,
+    technician_id: selectedTechnician.id,
+    technician_name: selectedTechnician.name,
+    completed_by_technician_id: selectedTechnician.id,
+    completed_by_technician_name: selectedTechnician.name,
+  };
+
+  if (shouldCalculateLaborNow) {
+    correctionPayload.labor_amount = Number(getLaborAmountForTask(task, property) || 0);
+    correctionPayload.labor_calculated_at = new Date().toISOString();
+  }
+
+  let result = await supabaseClient
+    .from("cleaning_tasks")
+    .update(correctionPayload)
+    .eq("id", normalizedTaskId);
+
+  const optionalCleaningTaskColumns = [
+    "technician_id",
+    "technician_name",
+    "completed_by_technician_id",
+    "completed_by_technician_name",
+    "labor_amount",
+    "labor_calculated_at",
+  ];
+
+  let fallbackPayload = { ...correctionPayload };
+  while (result.error) {
+    const message = String(result.error.message || "").toLowerCase();
+    const missingColumn = optionalCleaningTaskColumns.find((column) => message.includes(column));
+    if (!missingColumn || !(missingColumn in fallbackPayload)) {
+      break;
+    }
+
+    delete fallbackPayload[missingColumn];
+    result = await supabaseClient
+      .from("cleaning_tasks")
+      .update(fallbackPayload)
+      .eq("id", normalizedTaskId);
+  }
+
+  if (result.error) {
+    alert(`Could not save technician correction: ${result.error.message}`);
+    return;
+  }
+
+  taskTechnicianSelections.delete(normalizedTaskId);
+  await loadData();
+}
+
+window.saveCompletedTaskTechnician = saveCompletedTaskTechnician;
+
+async function saveCompletedTaskManualLabor(taskId, laborAmountInput = null) {
+  const normalizedTaskId = String(taskId || "").trim();
+  if (!normalizedTaskId) return;
+
+  const task = cleaningTasks.find((item) => String(item?.id || "") === normalizedTaskId);
+  if (!task) {
+    alert("Task not found.");
+    return;
+  }
+
+  if (String(task.status || "") !== "Completed") {
+    alert("Only completed tasks can be updated here.");
+    return;
+  }
+
+  if (!isManualTask(task)) {
+    alert("Manual labor edits are only for Manual tasks.");
+    return;
+  }
+
+  const inputValue = laborAmountInput !== null
+    ? String(laborAmountInput)
+    : String(document.getElementById(`manualLaborInput-${normalizedTaskId}`)?.value || "");
+  const manualLaborAmount = getManualLaborInputValue(inputValue);
+  if (manualLaborAmount === null || Number.isNaN(manualLaborAmount) || manualLaborAmount <= 0) {
+    alert("Enter a valid labor amount greater than 0.");
+    return;
+  }
+
+  const payload = {
+    labor_amount: Number(manualLaborAmount),
+    labor_calculated_at: new Date().toISOString(),
+  };
+
+  const { error } = await supabaseClient
+    .from("cleaning_tasks")
+    .update(payload)
+    .eq("id", normalizedTaskId);
+
+  if (error) {
+    alert(`Could not save manual labor amount: ${error.message}`);
+    return;
+  }
+
+  await loadData();
+}
+
+window.saveCompletedTaskManualLabor = saveCompletedTaskManualLabor;
+
+function getTaskTechnicianDisplayName(task) {
+  return String(task?.completed_by_technician_name || task?.technician_name || task?.technician || "").trim();
+}
+
+function renderTaskTechnicianSelector(task, options = {}) {
+  const compact = options.compact === true;
+  const status = String(task?.status || "");
+  const isCompleted = status === "Completed";
+  const technicianName = getTaskTechnicianDisplayName(task);
+  if (isCompleted) {
+    const selectedTechnicianId = String(taskTechnicianSelections.get(task.id) || task.completed_by_technician_id || task.technician_id || "").trim();
+    const completedLabel = technicianName
+      ? `Completed By: ${escapeHtml(technicianName)}`
+      : "Technician Missing";
+    return `
+      <div class="task-line"><small>${completedLabel}</small></div>
+      <div class="task-line task-tech-select-row">
+        <small>Assign Technician:</small>
+        <select class="task-tech-select${compact ? " task-tech-select-compact" : ""}" onchange="setTaskCardTechnician('${task.id}', this.value)">
+          ${buildTaskTechnicianOptionsMarkup(selectedTechnicianId)}
+        </select>
+        <button type="button" class="task-tech-save-btn" onclick="saveCompletedTaskTechnician('${task.id}')">Save</button>
+      </div>
+    `;
+  }
+
+  const selectedTechnicianId = getTaskCardTechnicianSelection(task);
+  const selectClass = compact ? "task-tech-select task-tech-select-compact" : "task-tech-select";
+  return `
+    <div class="task-line task-tech-select-row">
+      <small>Technician:</small>
+      <select class="${selectClass}" onchange="setTaskCardTechnician('${task.id}', this.value)">
+        ${buildTaskTechnicianOptionsMarkup(selectedTechnicianId)}
+      </select>
+    </div>
+  `;
+}
+
+function renderTaskLaborSnapshot(task) {
+  if (String(task?.status || "") !== "Completed") return "";
+  const hasTech = hasTechnicianSnapshot(task);
+  const hasKnownLabor = task?.labor_amount !== null && task?.labor_amount !== undefined && String(task?.labor_amount).trim() !== "";
+  const isManual = isManualTask(task);
+  const laborValue = Number(task?.labor_amount);
+  const manualLaborMissing = isManual && (!Number.isFinite(laborValue) || laborValue <= 0);
+
+  if (!hasTech) {
+    return `<div class="task-line"><small>Labor Pending - Assign Technician</small></div>`;
+  }
+
+  if (manualLaborMissing) {
+    return `
+      <div class="task-line"><small>Labor Amount Missing</small></div>
+      <div class="task-line task-tech-select-row">
+        <small>Labor Amount:</small>
+        <input id="manualLaborInput-${task.id}" class="manual-labor-input" type="number" min="0" step="0.01" placeholder="0.00">
+        <button type="button" class="task-tech-save-btn" onclick="saveCompletedTaskManualLabor('${task.id}')">Save Labor</button>
+      </div>
+    `;
+  }
+
+  if (!hasKnownLabor) {
+    return `<div class="task-line"><small>Labor Pending</small></div>`;
+  }
+
+  return `<div class="task-line"><small>Labor: ${toMoney(Number(task?.labor_amount || 0))}</small></div>`;
+}
+
 function hasManualBillingOverride(task) {
   return String(task?.notes || "").includes(MANUAL_BILLING_OVERRIDE_TAG);
 }
@@ -4382,6 +5773,556 @@ function renderBillingReportFooter(branding = null) {
   if (!contactParts.length) return "";
 
   return `<div class="billing-report-footer">${contactParts.join(" | ")}</div>`;
+}
+
+function populateLaborReportTechnicianOptions() {
+  if (!laborReportTechnicianSelect) return;
+
+  const previousValue = laborReportTechnicianSelect.value;
+  const options = ['<option value="">All Technicians</option>'];
+
+  getSortedTechnicians().forEach((technician) => {
+    const technicianId = String(technician.id || "").trim();
+    if (!technicianId) return;
+    const labelSuffix = technician.active === false ? " (Inactive)" : "";
+    options.push(`<option value="${escapeHtml(technicianId)}">${escapeHtml(technician.name || "Unnamed Technician")}${labelSuffix}</option>`);
+  });
+
+  laborReportTechnicianSelect.innerHTML = options.join("");
+
+  const hasPrevious = Array.from(laborReportTechnicianSelect.options).some((option) => option.value === previousValue);
+  laborReportTechnicianSelect.value = hasPrevious ? previousValue : "";
+}
+
+function getLaborCompletionDateKey(task) {
+  const completedDate = normalizeDateKey(task?.completed_at || task?.completedAt || "");
+  if (completedDate) return completedDate;
+  return normalizeDateKey(task?.service_date || task?.scheduled_date || "");
+}
+
+function getLaborTaskTechnicianSnapshot(task) {
+  const technicianId = String(task?.completed_by_technician_id || task?.technician_id || "").trim();
+  const byId = technicianId ? findTechnicianById(technicianId) : null;
+  const rawTechnicianName = String(
+    task?.completed_by_technician_name
+    || task?.technician_name
+    || task?.technician
+    || byId?.name
+    || ""
+  ).trim();
+  const technicianName = rawTechnicianName || "Unassigned";
+
+  return {
+    technicianId,
+    technicianName,
+    hasTechnician: Boolean(technicianId || rawTechnicianName),
+  };
+}
+
+function getLaborServiceCategory(task) {
+  const serviceType = String(task?.service_type || "").trim().toLowerCase();
+  if (serviceType === "weekly standard") {
+    return "weekly";
+  }
+
+  if (isManualTask(task)) {
+    return "manual";
+  }
+
+  if (isTaskGuestReady(task)) {
+    const hasAdditionalIndicators = Boolean(
+      task?.off_cycle
+      || Number(task?.charge || 0) > 0
+      || hasManualBillingOverride(task)
+      || serviceType.includes("off-cycle")
+      || serviceType.includes("off cycle")
+      || serviceType.includes("additional")
+      || serviceType.includes("billable")
+    );
+    return hasAdditionalIndicators ? "additional" : "guestReady";
+  }
+
+  return "additional";
+}
+
+function getLaborServiceTypeDisplay(task) {
+  const serviceType = String(task?.service_type || "Manual").trim() || "Manual";
+  if (serviceType !== "Weekly Standard") return serviceType;
+  return `Weekly Standard - ${getWeeklyServiceLevelLabel(task?.weekly_service_level)}`;
+}
+
+function getLaborServiceCategoryLabel(category) {
+  if (category === "weekly") return "Weekly Standard";
+  if (category === "guestReady") return "Guest Ready";
+  if (category === "manual") return "Manual";
+  return "Additional / Billable";
+}
+
+function isLaborTaskMarkedPaid(task) {
+  return task?.labor_paid === true || String(task?.labor_paid || "").toLowerCase() === "true";
+}
+
+function formatLaborPaidAt(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return raw;
+  return parsed.toLocaleString();
+}
+
+function getLaborReportRows({ startDate, endDate, selectedTechnicianId = "" } = {}) {
+  const selectedId = String(selectedTechnicianId || "").trim();
+  const selectedTechnician = selectedId ? findTechnicianById(selectedId) : null;
+
+  return cleaningTasks
+    .filter((task) => String(task?.status || "").trim().toLowerCase() === "completed")
+    .map((task) => {
+      const isManual = isManualTask(task);
+      const laborAmount = Number(task?.labor_amount);
+      const completionDateKey = getLaborCompletionDateKey(task);
+      if (!completionDateKey) return null;
+      if (!Number.isFinite(laborAmount)) return null;
+      if (isManual && laborAmount <= 0) return null;
+
+      const { technicianId, technicianName, hasTechnician } = getLaborTaskTechnicianSnapshot(task);
+      if (!hasTechnician) return null;
+      const technicianNameNormalized = technicianName.toLowerCase();
+      const selectedTechNameNormalized = String(selectedTechnician?.name || "").trim().toLowerCase();
+
+      if (selectedId) {
+        const idMatch = technicianId && technicianId === selectedId;
+        const nameMatch = !technicianId && selectedTechNameNormalized && technicianNameNormalized === selectedTechNameNormalized;
+        if (!idMatch && !nameMatch) return null;
+      }
+
+      if (startDate && completionDateKey < startDate) return null;
+      if (endDate && completionDateKey > endDate) return null;
+
+      const propertyName = getPropertyName(task.property_id);
+      const serviceType = getLaborServiceTypeDisplay(task);
+      const category = getLaborServiceCategory(task);
+      const isPaid = isLaborTaskMarkedPaid(task);
+      const paidAt = task?.labor_paid_at || null;
+
+      return {
+        taskId: String(task?.id || "").trim(),
+        task,
+        completionDateKey,
+        completionDateLabel: formatInvoicePrintDateValue(completionDateKey),
+        technicianId,
+        technicianName,
+        propertyName,
+        serviceType,
+        category,
+        isManual,
+        laborAmount,
+        isPaid,
+        paidAt,
+        paidAtLabel: formatLaborPaidAt(paidAt),
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => {
+      if (a.completionDateKey !== b.completionDateKey) return a.completionDateKey.localeCompare(b.completionDateKey);
+      if (a.technicianName !== b.technicianName) return a.technicianName.localeCompare(b.technicianName);
+      if (a.propertyName !== b.propertyName) return a.propertyName.localeCompare(b.propertyName);
+      return a.serviceType.localeCompare(b.serviceType);
+    });
+}
+
+function getLaborExceptionRows({ startDate, endDate, selectedTechnicianId = "" } = {}) {
+  const selectedId = String(selectedTechnicianId || "").trim();
+  const selectedTechnician = selectedId ? findTechnicianById(selectedId) : null;
+  const selectedTechNameNormalized = String(selectedTechnician?.name || "").trim().toLowerCase();
+
+  return cleaningTasks
+    .filter((task) => String(task?.status || "").trim().toLowerCase() === "completed")
+    .map((task) => {
+      const completionDateKey = getLaborCompletionDateKey(task);
+      if (!completionDateKey) return null;
+      if (startDate && completionDateKey < startDate) return null;
+      if (endDate && completionDateKey > endDate) return null;
+
+      const snapshot = getLaborTaskTechnicianSnapshot(task);
+      const isManual = isManualTask(task);
+      const laborRaw = task?.labor_amount;
+      const laborNumber = Number(laborRaw);
+      const hasKnownLabor = laborRaw !== null && laborRaw !== undefined && String(laborRaw).trim() !== "" && Number.isFinite(laborNumber);
+      const manualLaborMissing = isManual && (!Number.isFinite(laborNumber) || laborNumber <= 0);
+      const missingTechnician = !snapshot.hasTechnician;
+
+      if (!missingTechnician && !manualLaborMissing) return null;
+
+      if (selectedId) {
+        if (missingTechnician) return null;
+        const idMatch = snapshot.technicianId && snapshot.technicianId === selectedId;
+        const nameMatch = !snapshot.technicianId && selectedTechNameNormalized && snapshot.technicianName.toLowerCase() === selectedTechNameNormalized;
+        if (!idMatch && !nameMatch) return null;
+      }
+
+      const serviceType = getLaborServiceTypeDisplay(task);
+
+      let reason = "missing_technician";
+      let reasonLabel = "Technician Missing";
+      if (!missingTechnician && manualLaborMissing) {
+        reason = "manual_labor_missing";
+        reasonLabel = "Labor Amount Missing";
+      }
+
+      return {
+        taskId: String(task?.id || "").trim(),
+        completionDateKey,
+        completionDateLabel: formatInvoicePrintDateValue(completionDateKey),
+        propertyName: getPropertyName(task.property_id),
+        technicianName: snapshot.technicianName,
+        technicianId: snapshot.technicianId,
+        serviceType,
+        reason,
+        reasonLabel,
+        laborAmount: hasKnownLabor ? Number(laborRaw || 0) : null,
+        laborLabel: hasKnownLabor ? toMoney(Number(laborRaw || 0)) : "Labor Pending",
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => {
+      if (a.completionDateKey !== b.completionDateKey) return a.completionDateKey.localeCompare(b.completionDateKey);
+      if (a.propertyName !== b.propertyName) return a.propertyName.localeCompare(b.propertyName);
+      return a.serviceType.localeCompare(b.serviceType);
+    });
+}
+
+async function setLaborTaskPaymentStatus(taskId, markAsPaid) {
+  const normalizedTaskId = String(taskId || "").trim();
+  if (!normalizedTaskId) return;
+
+  const task = cleaningTasks.find((item) => String(item?.id || "") === normalizedTaskId);
+  if (!task) {
+    alert("Labor task not found.");
+    return;
+  }
+
+  const technicianSnapshot = String(task?.completed_by_technician_name || task?.technician_name || task?.technician || "Unassigned").trim() || "Unassigned";
+  const propertyName = getPropertyName(task.property_id);
+  const laborAmountLabel = toMoney(Number(task?.labor_amount || 0));
+
+  const confirmationMessage = markAsPaid
+    ? `Mark ${laborAmountLabel} labor for ${propertyName} completed by ${technicianSnapshot} as paid?`
+    : `Reverse paid status for ${laborAmountLabel} labor for ${propertyName} completed by ${technicianSnapshot}?`;
+
+  const confirmed = window.confirm(confirmationMessage);
+  if (!confirmed) return;
+
+  const paymentPayload = {
+    labor_paid: Boolean(markAsPaid),
+    labor_paid_at: markAsPaid ? new Date().toISOString() : null,
+  };
+
+  const { data, error } = await supabaseClient
+    .from("cleaning_tasks")
+    .update(paymentPayload)
+    .eq("id", normalizedTaskId)
+    .select("id, labor_paid, labor_paid_at")
+    .single();
+
+  if (error) {
+    const message = String(error.message || "");
+    const lowerMessage = message.toLowerCase();
+    if (lowerMessage.includes("labor_paid") || lowerMessage.includes("labor_paid_at")) {
+      alert("Labor payment columns are missing in your database. Run the labor payment migration, then try again.");
+      return;
+    }
+    alert(`Could not update labor payment status: ${message}`);
+    return;
+  }
+
+  const rowIndex = cleaningTasks.findIndex((item) => String(item?.id || "") === normalizedTaskId);
+  if (rowIndex >= 0) {
+    cleaningTasks[rowIndex] = {
+      ...cleaningTasks[rowIndex],
+      labor_paid: data?.labor_paid === true,
+      labor_paid_at: data?.labor_paid_at || null,
+    };
+  }
+
+  renderLaborReport();
+}
+
+window.setLaborTaskPaymentStatus = setLaborTaskPaymentStatus;
+
+function groupLaborRowsByTechnician(rows) {
+  const groups = new Map();
+
+  rows.forEach((row) => {
+    const key = row.technicianId ? `id:${row.technicianId}` : `name:${String(row.technicianName || "").toLowerCase()}`;
+    if (!groups.has(key)) {
+      groups.set(key, {
+        technicianId: row.technicianId,
+        technicianName: row.technicianName || "Unassigned",
+        servicesCompleted: 0,
+        laborDue: 0,
+        breakdown: {
+          weekly: { count: 0, labor: 0 },
+          guestReady: { count: 0, labor: 0 },
+          manual: { count: 0, labor: 0 },
+          additional: { count: 0, labor: 0 },
+        },
+      });
+    }
+
+    const group = groups.get(key);
+    group.servicesCompleted += 1;
+    group.laborDue += Number(row.laborAmount || 0);
+
+    const category = row.category || "additional";
+    if (!group.breakdown[category]) {
+      group.breakdown[category] = { count: 0, labor: 0 };
+    }
+    group.breakdown[category].count += 1;
+    group.breakdown[category].labor += Number(row.laborAmount || 0);
+  });
+
+  return Array.from(groups.values()).sort((a, b) => a.technicianName.localeCompare(b.technicianName));
+}
+
+function formatLaborReportHeadline(startDate, endDate) {
+  if (!startDate || !endDate) return "Labor Report";
+  if (startDate !== endDate) return "Labor Report";
+
+  const parsed = parseDateString(startDate);
+  const label = parsed.toLocaleDateString("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+  return `Labor Report - ${label}`;
+}
+
+function renderLaborReport() {
+  if (!laborReportContainer) return;
+  populateLaborReportTechnicianOptions();
+
+  const startDate = laborReportStartDate?.value || "";
+  const endDate = laborReportEndDate?.value || "";
+  const selectedTechnicianId = laborReportTechnicianSelect?.value || "";
+  const selectedPaymentStatus = laborReportPaymentStatus?.value || "unpaid";
+  const selectedTechnician = selectedTechnicianId ? findTechnicianById(selectedTechnicianId) : null;
+
+  if (!startDate || !endDate) {
+    laborReportContainer.innerHTML = `<div class="billing-report-sheet"><div class="empty">Select a start and end date to run the labor report.</div></div>`;
+    return;
+  }
+
+  if (startDate > endDate) {
+    laborReportContainer.innerHTML = `<div class="billing-report-sheet"><div class="empty">Start date must be on or before end date.</div></div>`;
+    return;
+  }
+
+  const allRows = getLaborReportRows({ startDate, endDate, selectedTechnicianId });
+  const exceptionRows = getLaborExceptionRows({ startDate, endDate, selectedTechnicianId });
+  const rows = allRows.filter((row) => {
+    if (selectedPaymentStatus === "paid") return row.isPaid;
+    if (selectedPaymentStatus === "unpaid") return !row.isPaid;
+    return true;
+  });
+
+  const technicianGroups = groupLaborRowsByTechnician(rows);
+  const displayedServices = rows.length;
+  const totalLabor = allRows.reduce((sum, row) => sum + Number(row.laborAmount || 0), 0);
+  const paidLabor = allRows
+    .filter((row) => row.isPaid)
+    .reduce((sum, row) => sum + Number(row.laborAmount || 0), 0);
+  const unpaidLabor = totalLabor - paidLabor;
+  const techniciansWorked = new Set(allRows.map((row) => row.technicianId || String(row.technicianName || "").toLowerCase())).size;
+  const isSingleDay = startDate === endDate;
+
+  const summaryCards = `
+    <div class="labor-summary-grid">
+      <div class="labor-summary-card">
+        <div class="labor-summary-label">Total Labor</div>
+        <div class="labor-summary-value">${toMoney(totalLabor)}</div>
+      </div>
+      <div class="labor-summary-card">
+        <div class="labor-summary-label">Paid Labor</div>
+        <div class="labor-summary-value">${toMoney(paidLabor)}</div>
+      </div>
+      <div class="labor-summary-card">
+        <div class="labor-summary-label">Unpaid Labor</div>
+        <div class="labor-summary-value">${toMoney(unpaidLabor)}</div>
+      </div>
+      <div class="labor-summary-card">
+        <div class="labor-summary-label">Displayed Services</div>
+        <div class="labor-summary-value">${displayedServices}</div>
+      </div>
+      <div class="labor-summary-card">
+        <div class="labor-summary-label">Technicians Worked</div>
+        <div class="labor-summary-value">${techniciansWorked}</div>
+      </div>
+      <div class="labor-summary-card labor-summary-card-warning">
+        <div class="labor-summary-label">Labor Exceptions</div>
+        <div class="labor-summary-value">${exceptionRows.length}</div>
+      </div>
+    </div>
+  `;
+
+  const selectedTechnicianSummary = selectedTechnician
+    ? `
+      <div class="labor-selected-tech-card">
+        <h3>${escapeHtml(selectedTechnician.name || "Technician")}</h3>
+        <div>${allRows.length} Completed Service${allRows.length === 1 ? "" : "s"} (before payment filter)</div>
+        <div><strong>${toMoney(totalLabor)} Total Labor</strong></div>
+      </div>
+    `
+    : "";
+
+  const tableRows = rows.length
+    ? rows.map((row) => `
+        <tr>
+          <td>${escapeHtml(row.completionDateLabel)}</td>
+          <td>${escapeHtml(row.technicianName)}</td>
+          <td>${escapeHtml(row.propertyName)}</td>
+          <td>${escapeHtml(row.serviceType)}</td>
+          <td class="route-frag-money">${toMoney(row.laborAmount)}</td>
+          <td>
+            <div class="labor-payment-state ${row.isPaid ? "is-paid" : "is-unpaid"}">${row.isPaid ? "Paid" : "Unpaid"}</div>
+            ${row.isPaid && row.paidAtLabel ? `<div class="labor-paid-at">${escapeHtml(row.paidAtLabel)}</div>` : ""}
+          </td>
+          <td class="labor-action-col">
+            ${row.taskId ? `
+              <button
+                type="button"
+                class="labor-payment-action"
+                onclick="setLaborTaskPaymentStatus('${escapeHtml(row.taskId)}', ${row.isPaid ? "false" : "true"})"
+              >${row.isPaid ? "Reverse Paid" : "Mark Paid"}</button>
+            ` : ""}
+          </td>
+        </tr>
+      `).join("")
+    : `<tr><td colspan="7">No completed labor tasks found for the selected filters.</td></tr>`;
+
+  const exceptionTableRows = exceptionRows.length
+    ? exceptionRows.map((row) => {
+      const selectedTechnicianIdForTask = String(taskTechnicianSelections.get(row.taskId) || "").trim();
+      const existingLaborValue = row.laborAmount !== null && row.laborAmount !== undefined ? Number(row.laborAmount || 0) : "";
+      return `
+        <tr>
+          <td>${escapeHtml(row.completionDateLabel)}</td>
+          <td>${escapeHtml(row.propertyName)}</td>
+          <td>${escapeHtml(row.serviceType)}</td>
+          <td>${escapeHtml(row.reasonLabel)}</td>
+          <td class="route-frag-money">${escapeHtml(row.laborLabel)}</td>
+          <td>
+            <div class="labor-exception-actions">
+              ${row.reason === "missing_technician" ? `
+                <select class="task-tech-select" onchange="setTaskCardTechnician('${row.taskId}', this.value)">
+                  ${buildTaskTechnicianOptionsMarkup(selectedTechnicianIdForTask)}
+                </select>
+                <button type="button" class="task-tech-save-btn" onclick="saveCompletedTaskTechnician('${row.taskId}')">Assign Technician</button>
+              ` : `
+                <input id="manualLaborInput-${row.taskId}" class="manual-labor-input" type="number" min="0" step="0.01" value="${existingLaborValue}">
+                <button type="button" class="task-tech-save-btn" onclick="saveCompletedTaskManualLabor('${row.taskId}')">Save Labor</button>
+              `}
+            </div>
+          </td>
+        </tr>
+      `;
+    }).join("")
+    : `<tr><td colspan="6">No labor exceptions for the selected date range.</td></tr>`;
+
+  const technicianTotalsSection = technicianGroups.length
+    ? `
+      <section class="labor-tech-totals-section">
+        <h3>Technician Totals</h3>
+        <div class="labor-tech-totals-grid">
+          ${technicianGroups.map((group) => `
+            <article class="labor-tech-total-card">
+              <h4>${escapeHtml(group.technicianName)}</h4>
+              <div>Services Completed: ${group.servicesCompleted}</div>
+              <div>Labor Due: <strong>${toMoney(group.laborDue)}</strong></div>
+              <div class="labor-breakdown-list">
+                <div class="labor-breakdown-item">
+                  <div>${getLaborServiceCategoryLabel("weekly")}</div>
+                  <div>${group.breakdown.weekly.count} service${group.breakdown.weekly.count === 1 ? "" : "s"}</div>
+                  <div>${toMoney(group.breakdown.weekly.labor)}</div>
+                </div>
+                <div class="labor-breakdown-item">
+                  <div>${getLaborServiceCategoryLabel("guestReady")}</div>
+                  <div>${group.breakdown.guestReady.count} service${group.breakdown.guestReady.count === 1 ? "" : "s"}</div>
+                  <div>${toMoney(group.breakdown.guestReady.labor)}</div>
+                </div>
+                <div class="labor-breakdown-item">
+                  <div>${getLaborServiceCategoryLabel("manual")}</div>
+                  <div>${group.breakdown.manual.count} service${group.breakdown.manual.count === 1 ? "" : "s"}</div>
+                  <div>${toMoney(group.breakdown.manual.labor)}</div>
+                </div>
+                <div class="labor-breakdown-item">
+                  <div>${getLaborServiceCategoryLabel("additional")}</div>
+                  <div>${group.breakdown.additional.count} service${group.breakdown.additional.count === 1 ? "" : "s"}</div>
+                  <div>${toMoney(group.breakdown.additional.labor)}</div>
+                </div>
+              </div>
+            </article>
+          `).join("")}
+        </div>
+        <div class="billing-report-grand-total">Displayed Labor Due${isSingleDay ? " Today" : ""}: ${toMoney(rows.reduce((sum, row) => sum + Number(row.laborAmount || 0), 0))}</div>
+      </section>
+    `
+    : "";
+
+  laborReportContainer.innerHTML = `
+    <div class="billing-report-sheet labor-report-sheet">
+      ${renderBillingReportHeader()}
+      <h2 class="billing-report-title">${escapeHtml(formatLaborReportHeadline(startDate, endDate))}</h2>
+      <div class="billing-report-meta">Date Range: ${escapeHtml(startDate)} to ${escapeHtml(endDate)}</div>
+      <div class="billing-report-meta">Technician Filter: ${escapeHtml(selectedTechnician?.name || "All Technicians")}</div>
+      <div class="billing-report-meta">Payment Filter: ${escapeHtml(selectedPaymentStatus === "all" ? "All" : (selectedPaymentStatus === "paid" ? "Paid" : "Unpaid"))}</div>
+      <div class="billing-report-meta">Missing Technician: ${exceptionRows.length}</div>
+      ${summaryCards}
+      ${selectedTechnicianSummary}
+
+      <section class="billing-report-group labor-exceptions-group">
+        <h3>Missing Technician Exceptions</h3>
+        <table class="route-frag-table labor-exception-table">
+          <thead>
+            <tr>
+              <th>Completion Date</th>
+              <th>Property</th>
+              <th>Service Type</th>
+              <th>Exception</th>
+              <th>Labor</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${exceptionTableRows}
+          </tbody>
+        </table>
+      </section>
+
+      <section class="billing-report-group">
+        <h3>Completed Service Detail</h3>
+        <table class="route-frag-table labor-report-table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Technician</th>
+              <th>Property</th>
+              <th>Service Type</th>
+              <th>Labor</th>
+              <th>Paid</th>
+              <th class="labor-action-col">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${tableRows}
+          </tbody>
+        </table>
+      </section>
+
+      ${technicianTotalsSection}
+      ${renderBillingReportFooter()}
+    </div>
+  `;
 }
 
 function getBillingReportRows() {
@@ -6965,6 +8906,9 @@ function renderTaskCard(task) {
   const invoiceMarkerClass = task.invoiced ? "invoice-marker-checked" : "invoice-marker-unchecked";
   const taskBillingAmount = getTaskBillingAmount(task);
   const weeklyReconcileLine = getWeeklyReconciliationBillingLine(task, taskBillingAmount);
+  const weeklyServiceLevelMarkup = renderTaskWeeklyServiceLevelSelector(task);
+  const technicianMarkup = renderTaskTechnicianSelector(task);
+  const laborSnapshotLine = renderTaskLaborSnapshot(task);
 
   return `
     <div class="${cardClass}">
@@ -6984,6 +8928,9 @@ function renderTaskCard(task) {
         <div><strong>Guest Ready:</strong> ${isTaskGuestReady(task) ? "Yes" : "No"}</div>
         ${taskBillingAmount > 0 ? `<div><strong>Charge:</strong> $${taskBillingAmount}</div>` : ""}
         ${weeklyReconcileLine}
+        ${weeklyServiceLevelMarkup}
+        ${technicianMarkup}
+        ${laborSnapshotLine}
         ${task.check_in_date ? `<div><strong>Check-In:</strong> ${task.check_in_date}</div>` : ""}
         <div><strong>Status:</strong> <span class="status-badge ${badgeClass}">${status}</span></div>
       </div>
@@ -7223,6 +9170,9 @@ function renderWeekViewListTaskCard(task) {
   const sameDayBadge = isSameDayCheckInGuestReadyTask(task)
     ? `<span class="task-alert-badge badge-alert-red">🚨 Same-Day Check-In</span>`
     : "";
+  const weeklyServiceLevelMarkup = renderTaskWeeklyServiceLevelSelector(task);
+  const technicianMarkup = renderTaskTechnicianSelector(task);
+  const laborSnapshotLine = renderTaskLaborSnapshot(task);
 
   return `
     <div class="${taskClass}">
@@ -7242,6 +9192,9 @@ function renderWeekViewListTaskCard(task) {
       ${taskBillingAmount > 0 ? `<div class="task-line">$${taskBillingAmount}</div>` : ""}
       ${billingLine}
       ${weeklyReconcileLine}
+      ${weeklyServiceLevelMarkup}
+      ${technicianMarkup}
+      ${laborSnapshotLine}
       ${task.check_in_date ? `<div class="task-line"><small>Prior to check-in: ${task.check_in_date}</small></div>` : ""}
       <div class="task-line"><small>Status: ${status}</small></div>
       ${task.notes ? `<div class="task-line"><small>Notes: ${stripManualBillingOverrideTag(task.notes)}</small></div>` : ""}
@@ -7306,6 +9259,9 @@ function renderWeekViewCalendar(weekTasks) {
                     const alertBadge = getAlertBadgeForTask(task);
                     const showReconcile = shouldShowReconcileForTask(task);
                     const invoiceMarkerClass = task.invoiced ? "invoice-marker-checked" : "invoice-marker-unchecked";
+                    const weeklyServiceLevelMarkup = renderTaskWeeklyServiceLevelSelector(task, { compact: true });
+                    const technicianMarkup = renderTaskTechnicianSelector(task, { compact: true });
+                    const laborSnapshotLine = renderTaskLaborSnapshot(task);
                     
                     return `
                       <div class="calendar-task-card">
@@ -7322,6 +9278,9 @@ function renderWeekViewCalendar(weekTasks) {
                         ${badgesToShow}
                         ${alertBadge}
                         <div class="calendar-task-status">${task.status || 'Scheduled'}</div>
+                        ${weeklyServiceLevelMarkup}
+                        ${technicianMarkup}
+                        ${laborSnapshotLine}
                         <div class="calendar-task-edit-section">
                           <button class="calendar-task-btn edit-btn" onclick="openEditCleaning('${task.id}')">Edit</button>
                         </div>
@@ -7468,6 +9427,8 @@ function renderProperties() {
     let tasks = cleaningTasks.filter((task) => task.property_id === property.id);
     tasks = tasks.filter((task) => !shouldSuppressWeeklyStandardTaskDisplay(task));
     tasks = tasks.filter((task) => taskMatchesDateFilter(task, selectedMonthFilter));
+    const serviceFrequency = getPropertyFrequencyForScheduling(property);
+    const anchorCleaningDate = getBiweeklyAnchorDateForScheduling(property);
 
     const hasSameDayGuestReady = tasks.some((task) => isSameDayCheckInGuestReadyTask(task));
     const isCollapsed = collapsedPropertyCards.has(property.id);
@@ -7510,6 +9471,9 @@ function renderProperties() {
               ? `<div class="task-line"><small>Billing: Manual Charge</small></div>`
               : "";
           const weeklyReconcileLine = getWeeklyReconciliationBillingLine(task, taskBillingAmount);
+          const weeklyServiceLevelMarkup = renderTaskWeeklyServiceLevelSelector(task);
+          const technicianMarkup = renderTaskTechnicianSelector(task);
+          const laborSnapshotLine = renderTaskLaborSnapshot(task);
 
           const sameDayBadge = isSameDayCheckInGuestReadyTask(task)
             ? `<span class="task-alert-badge badge-alert-red">🚨 Same-Day Check-In</span>`
@@ -7531,6 +9495,9 @@ function renderProperties() {
               ${taskBillingAmount > 0 ? `<div class="task-line">$${taskBillingAmount}</div>` : ""}
               ${billingLine}
               ${weeklyReconcileLine}
+              ${weeklyServiceLevelMarkup}
+              ${technicianMarkup}
+              ${laborSnapshotLine}
               <div class="task-line"><small>Status: ${task.status}</small></div>
               ${task.completed_at ? `<div class="task-line"><small>Completed: ${new Date(task.completed_at).toLocaleString()}</small></div>` : ""}
               ${task.check_in_date ? `<div class="task-line"><small>Prior to check-in: ${task.check_in_date}</small></div>` : ""}
@@ -7564,8 +9531,15 @@ function renderProperties() {
           <div><strong>Address:</strong> ${property.address || "Not entered"}</div>
           <div><strong>SafetyCulture Checklist:</strong> ${property.safetyculture_checklist_url ? "Saved" : "Not entered"}</div>
           <div><strong>Standard Service Day:</strong> ${property.standard_service_day || "Wednesday"}</div>
+          <div><strong>Service Frequency:</strong> ${getServiceFrequencyLabel(serviceFrequency)}</div>
+          ${serviceFrequency === SERVICE_FREQUENCY_BIWEEKLY
+            ? `<div><strong>Next/Anchor Cleaning:</strong> ${anchorCleaningDate ? formatInvoicePrintDateValue(anchorCleaningDate) : "Not set"}</div>`
+            : ""}
           <div><strong>Guest Ready Coverage Rule:</strong> ${getCoverageRuleLabel(getCoverageRuleForProperty(property))}</div>
           <div><strong>Billable Guest Ready Charge:</strong> $${Number(property.default_off_cycle_charge ?? 65).toFixed(2)}</div>
+          <div><strong>Standard Weekly Service Labor:</strong> $${Number(property.weekly_service_labor || 0).toFixed(2)}</div>
+          <div><strong>Guest Ready Service Labor:</strong> $${Number(property.guest_ready_service_labor || 0).toFixed(2)}</div>
+          <div><strong>Additional / Billable Cleaning Labor:</strong> $${Number(property.additional_cleaning_labor || 0).toFixed(2)}</div>
           <div><strong>Default Cleaning Rate:</strong> $${Number(property.default_cleaning_rate ?? 0).toFixed(2)}</div>
           <div><strong>Taxable:</strong> ${property.billing_taxable === false ? "No" : "Yes"}</div>
           <div><strong>Tax Rate:</strong> ${Number(property.billing_tax_rate || 0).toFixed(2)}%</div>
@@ -7740,6 +9714,11 @@ async function openReportFromDashboard(reportKey) {
 
   if (reportKey === "routeFragmentation") {
     await navigateToView("routeFragmentation");
+    return;
+  }
+
+  if (reportKey === "labor") {
+    await navigateToView("laborReport");
     return;
   }
 

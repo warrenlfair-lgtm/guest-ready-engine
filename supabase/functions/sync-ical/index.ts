@@ -86,6 +86,35 @@ function addDays(dateString: string, daysToAdd: number) {
   return formatDate(date);
 }
 
+const SERVICE_FREQUENCY_WEEKLY = "weekly";
+const SERVICE_FREQUENCY_BIWEEKLY = "bi_weekly";
+
+function normalizeServiceFrequency(value: string | null | undefined) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === SERVICE_FREQUENCY_BIWEEKLY || normalized === "bi-weekly") {
+    return SERVICE_FREQUENCY_BIWEEKLY;
+  }
+  return SERVICE_FREQUENCY_WEEKLY;
+}
+
+function normalizeDateKey(value: string | null | undefined) {
+  const normalized = String(value || "").trim();
+  const match = normalized.match(/^(\d{4}-\d{2}-\d{2})/);
+  return match ? match[1] : "";
+}
+
+function isDateOnBiweeklyCycle(serviceDate: string, anchorDate: string) {
+  const normalizedServiceDate = normalizeDateKey(serviceDate);
+  const normalizedAnchorDate = normalizeDateKey(anchorDate);
+  if (!normalizedServiceDate || !normalizedAnchorDate) return false;
+
+  const service = parseDateString(normalizedServiceDate);
+  const anchor = parseDateString(normalizedAnchorDate);
+  const diffDays = Math.round((service.getTime() - anchor.getTime()) / (1000 * 60 * 60 * 24));
+  const mod = ((diffDays % 14) + 14) % 14;
+  return mod === 0;
+}
+
 function getDayNumber(dayName: string) {
   const days: Record<string, number> = {
     Sunday: 0,
@@ -173,7 +202,7 @@ function isSafeAutoWeeklyTaskToSuppress(task: { manually_modified: boolean | nul
   return !task.manually_modified && status === "Scheduled" && !task.completed_at && !task.invoiced;
 }
 
-Deno.serve(async (req) => {
+Deno.serve(async (req: Request) => {
   let reservationsCreated = 0;
   let tasksCreated = 0;
   let reservationsParsed = 0;
@@ -216,7 +245,16 @@ Deno.serve(async (req) => {
       return createSuccessResponse(reservationsCreated, tasksCreated);
     }
 
-    const property = properties as { id: string; ical_url: string | null; default_off_cycle_charge: number | null; standard_service_day: string | null; coverage_days: number | null; coverage_rule: string | null };
+    const property = properties as {
+      id: string;
+      ical_url: string | null;
+      default_off_cycle_charge: number | null;
+      standard_service_day: string | null;
+      coverage_days: number | null;
+      coverage_rule: string | null;
+      service_frequency: string | null;
+      biweekly_anchor_date: string | null;
+    };
     console.log("STEP 1 property loaded");
     if (!property.ical_url) {
       return createSuccessResponse(reservationsCreated, tasksCreated);
@@ -318,6 +356,9 @@ Deno.serve(async (req) => {
     }
 
     const standardDay = property.standard_service_day || "Wednesday";
+    const serviceFrequency = normalizeServiceFrequency(property.service_frequency);
+    const biweeklyAnchorDate = normalizeDateKey(property.biweekly_anchor_date);
+    const useBiweekly = serviceFrequency === SERVICE_FREQUENCY_BIWEEKLY && !!biweeklyAnchorDate;
     const coverageRule = normalizeCoverageRule(property.coverage_rule, property.coverage_days);
     const coverageOffsets = getCoverageOffsetsForRule(coverageRule);
     const minOffset = Math.min(...coverageOffsets);
@@ -330,6 +371,9 @@ Deno.serve(async (req) => {
     for (const reservation of activeReservations) {
       if (!reservation.check_in) continue;
       const service_date = getServiceDateForWeek(reservation.check_in, standardDay);
+      if (useBiweekly && !isDateOnBiweeklyCycle(service_date, biweeklyAnchorDate)) {
+        continue;
+      }
       const source_key = `wk:${propertyId}:${service_date}`;
       weeklySourceKeyToDate.set(source_key, service_date);
     }
@@ -455,49 +499,52 @@ Deno.serve(async (req) => {
       const isSameDayAsStandard = reservation.check_in === service_date;
       const source_key = `wk:${propertyId}:${service_date}`;
       const weeklyTask = existingWeeklyTaskMap.get(source_key);
+      const shouldUseWeeklyForReservation = !useBiweekly || isDateOnBiweeklyCycle(service_date, biweeklyAnchorDate);
 
-      if (guestReadyWithinWindow) {
+      if (shouldUseWeeklyForReservation && guestReadyWithinWindow) {
         suppressedWeeklySourceKeys.add(source_key);
       }
 
-      console.log("[WEEKLY CHECK]", { reservation_check_in: reservation.check_in, source_key, foundExistingTask: !!weeklyTask, weeklyTask_id: weeklyTask?.id });
+      if (shouldUseWeeklyForReservation) {
+        console.log("[WEEKLY CHECK]", { reservation_check_in: reservation.check_in, source_key, foundExistingTask: !!weeklyTask, weeklyTask_id: weeklyTask?.id, biweekly: useBiweekly });
 
-      if (weeklyTask) {
-        if (guestReadyWithinWindow) {
-          if (isSafeAutoWeeklyTaskToSuppress(weeklyTask) && !weeklyTaskIdsToSuppress.includes(weeklyTask.id)) {
-            console.log("[WEEKLY SUPPRESS QUEUED]", { weekly_task_id: weeklyTask.id, source_key, reservation_check_in: reservation.check_in });
-            weeklyTaskIdsToSuppress.push(weeklyTask.id);
-          }
-        } else {
-          // Task already exists for this week — never create a duplicate.
-          // Only update guest_ready if the task has NOT been manually modified.
-          if (!weeklyTask.manually_modified && isSameDayAsStandard && (!weeklyTask.guest_ready || weeklyTask.check_in_date !== reservation.check_in)) {
-            weeklyTaskUpdates.push({
-              id: weeklyTask.id,
-              guest_ready: true,
-              check_in_date: reservation.check_in,
-            });
-            weeklyTask.guest_ready = true;
-            weeklyTask.check_in_date = reservation.check_in;
-          }
-        }
-      } else {
-        if (guestReadyWithinWindow) {
-          pendingWeeklyTasks.delete(service_date);
-          console.log("[WEEKLY SUPPRESS PENDING]", { source_key, service_date, reservation_check_in: reservation.check_in });
-        } else {
-          const pending = pendingWeeklyTasks.get(service_date);
-          if (pending) {
-            if (isSameDayAsStandard) {
-              pending.guest_ready = true;
-              pending.check_in_date = reservation.check_in;
+        if (weeklyTask) {
+          if (guestReadyWithinWindow) {
+            if (isSafeAutoWeeklyTaskToSuppress(weeklyTask) && !weeklyTaskIdsToSuppress.includes(weeklyTask.id)) {
+              console.log("[WEEKLY SUPPRESS QUEUED]", { weekly_task_id: weeklyTask.id, source_key, reservation_check_in: reservation.check_in });
+              weeklyTaskIdsToSuppress.push(weeklyTask.id);
             }
           } else {
-            console.log("[WEEKLY ADD PENDING]", { source_key, service_date, propertyId, is_same_day: isSameDayAsStandard });
-            pendingWeeklyTasks.set(service_date, {
-              check_in_date: isSameDayAsStandard ? reservation.check_in : null,
-              guest_ready: isSameDayAsStandard,
-            });
+            // Task already exists for this week — never create a duplicate.
+            // Only update guest_ready if the task has NOT been manually modified.
+            if (!weeklyTask.manually_modified && isSameDayAsStandard && (!weeklyTask.guest_ready || weeklyTask.check_in_date !== reservation.check_in)) {
+              weeklyTaskUpdates.push({
+                id: weeklyTask.id,
+                guest_ready: true,
+                check_in_date: reservation.check_in,
+              });
+              weeklyTask.guest_ready = true;
+              weeklyTask.check_in_date = reservation.check_in;
+            }
+          }
+        } else {
+          if (guestReadyWithinWindow) {
+            pendingWeeklyTasks.delete(service_date);
+            console.log("[WEEKLY SUPPRESS PENDING]", { source_key, service_date, reservation_check_in: reservation.check_in });
+          } else {
+            const pending = pendingWeeklyTasks.get(service_date);
+            if (pending) {
+              if (isSameDayAsStandard) {
+                pending.guest_ready = true;
+                pending.check_in_date = reservation.check_in;
+              }
+            } else {
+              console.log("[WEEKLY ADD PENDING]", { source_key, service_date, propertyId, is_same_day: isSameDayAsStandard, biweekly: useBiweekly });
+              pendingWeeklyTasks.set(service_date, {
+                check_in_date: isSameDayAsStandard ? reservation.check_in : null,
+                guest_ready: isSameDayAsStandard,
+              });
+            }
           }
         }
       }
@@ -608,8 +655,8 @@ Deno.serve(async (req) => {
         .in("source_key", sourceKeysToInsert);
 
       if (existingDuplicates && existingDuplicates.length > 0) {
-        console.log("[WEEKLY DUPLICATE GUARD] Found existing tasks, filtering out duplicates:", existingDuplicates.map(d => d.source_key));
-        const existingSourceKeys = new Set(existingDuplicates.map(d => d.source_key));
+        console.log("[WEEKLY DUPLICATE GUARD] Found existing tasks, filtering out duplicates:", existingDuplicates.map((d: { source_key: string }) => d.source_key));
+        const existingSourceKeys = new Set(existingDuplicates.map((d: { source_key: string }) => d.source_key));
         const filteredWeeklyTasks = weeklyTasksToCreate.filter(t => !existingSourceKeys.has(t.source_key));
         
         if (filteredWeeklyTasks.length === 0) {
@@ -667,8 +714,8 @@ Deno.serve(async (req) => {
         .in("source_key", sourceKeysToInsert);
 
       if (existingDuplicates && existingDuplicates.length > 0) {
-        console.log("[GUEST READY DUPLICATE GUARD] Found existing tasks, filtering out duplicates:", existingDuplicates.map(d => d.source_key));
-        const existingSourceKeys = new Set(existingDuplicates.map(d => d.source_key));
+        console.log("[GUEST READY DUPLICATE GUARD] Found existing tasks, filtering out duplicates:", existingDuplicates.map((d: { source_key: string }) => d.source_key));
+        const existingSourceKeys = new Set(existingDuplicates.map((d: { source_key: string }) => d.source_key));
         const filteredGuestReadyTasks = guestReadyTasksToCreate.filter(t => !existingSourceKeys.has(t.source_key));
         
         if (filteredGuestReadyTasks.length === 0) {
@@ -701,9 +748,11 @@ Deno.serve(async (req) => {
 
     console.log("STEP 6 returning success");
     return createSuccessResponse(reservationsCreated, tasksCreated, { reservationsParsed, activeReservations: activeReservationCount, oldIgnored, weeklyTasksCreated, guestReadyTasksCreated });
-  } catch (error) {
-    console.error("sync-ical fatal error", error?.message || error);
-    console.error("sync-ical fatal stack", error?.stack || "no stack");
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorStack = error instanceof Error ? error.stack || "no stack" : "no stack";
+    console.error("sync-ical fatal error", errorMessage);
+    console.error("sync-ical fatal stack", errorStack);
     return createSuccessResponse(reservationsCreated, tasksCreated, { reservationsParsed, activeReservations: activeReservationCount, oldIgnored, weeklyTasksCreated, guestReadyTasksCreated });
   }
 });

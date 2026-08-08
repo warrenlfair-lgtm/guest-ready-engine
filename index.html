@@ -65,6 +65,7 @@
     <button type="button" class="view-btn" data-view="week">Week View</button>
     <button type="button" class="view-btn" data-view="properties">Properties</button>
     <button type="button" class="view-btn" data-view="reports">Reports</button>
+    <button type="button" class="view-btn" data-view="laborReport">Labor Report</button>
     <button type="button" class="view-btn" data-view="invoices">Invoices</button>
     <button type="button" class="view-btn" data-view="settings">Settings</button>
   </div>
@@ -296,6 +297,50 @@
     <div id="routeFragContainer"></div>
   </section>
 
+  <section id="laborReportView" class="view-panel">
+    <div class="view-header labor-report-header-row">
+      <div>
+        <h2>Labor Report</h2>
+        <p>Internal technician labor payout report using completed-task snapshots.</p>
+      </div>
+      <div class="labor-report-actions" id="laborReportActions">
+        <button type="button" onclick="navigateToView('reports')">Back to Reports</button>
+        <button type="button" id="laborBackfillBtn">Backfill Historical Labor</button>
+        <button type="button" id="laborReportPrintBtn" class="print-btn">Print Labor Report</button>
+      </div>
+    </div>
+
+    <div class="billing-filters" id="laborReportFilterPanel">
+      <div class="filter-group">
+        <label for="laborReportStartDate">Start Date:</label>
+        <input id="laborReportStartDate" type="date">
+      </div>
+      <div class="filter-group">
+        <label for="laborReportEndDate">End Date:</label>
+        <input id="laborReportEndDate" type="date">
+      </div>
+      <div class="filter-group">
+        <label for="laborReportTechnicianSelect">Technician:</label>
+        <select id="laborReportTechnicianSelect">
+          <option value="">All Technicians</option>
+        </select>
+      </div>
+      <div class="filter-group">
+        <label for="laborReportPaymentStatus">Payment Status:</label>
+        <select id="laborReportPaymentStatus">
+          <option value="unpaid" selected>Unpaid</option>
+          <option value="paid">Paid</option>
+          <option value="all">All</option>
+        </select>
+      </div>
+      <div class="filter-group">
+        <button type="button" id="laborReportRunBtn">Run Report</button>
+      </div>
+    </div>
+
+    <div id="laborReportContainer" class="billing-report-paper"></div>
+  </section>
+
   <section id="reportsView" class="view-panel">
     <div class="view-header">
       <div>
@@ -315,6 +360,12 @@
         <h3>Route Fragmentation Report</h3>
         <p>Analyze scheduling inefficiencies and identify unnecessary technician travel.</p>
         <button type="button" onclick="openReportFromDashboard('routeFragmentation')">Open Report</button>
+      </article>
+
+      <article class="report-dashboard-card">
+        <h3>Labor Report</h3>
+        <p>Review completed services, labor due, and technician payout totals by date range.</p>
+        <button type="button" onclick="openReportFromDashboard('labor')">Open Report</button>
       </article>
 
       <article class="report-dashboard-card">
@@ -506,6 +557,47 @@
         </table>
       </div>
     </div>
+
+    <div class="view-header settings-subsection-header">
+      <h2>Technicians</h2>
+      <p>Manage active technicians available for task completion assignment.</p>
+    </div>
+
+    <div class="settings-card chemical-settings-card">
+      <div class="chemical-settings-form-grid">
+        <div>
+          <label for="technicianNameInput">Technician Name</label>
+          <input id="technicianNameInput" type="text" maxlength="120" placeholder="e.g., Alex">
+        </div>
+      </div>
+
+      <div class="chemical-settings-checkbox-row">
+        <label class="chemical-settings-active-toggle" for="technicianActiveCheckbox">
+          <input id="technicianActiveCheckbox" type="checkbox" checked>
+          Active (available on task cards)
+        </label>
+      </div>
+
+      <div class="settings-actions chemical-settings-actions">
+        <button type="button" id="saveTechnicianBtn">Add Technician</button>
+        <button type="button" id="cancelTechnicianEditBtn" class="hidden">Cancel Edit</button>
+        <span id="technicianSettingsStatus" class="settings-status"></span>
+      </div>
+
+      <div class="chemical-settings-table-wrap">
+        <table class="chemical-settings-table">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Status</th>
+              <th>Created</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="technicianSettingsList"></tbody>
+        </table>
+      </div>
+    </div>
   </section>
 
   <footer class="app-brand-footer" aria-label="Application branding footer">
@@ -564,6 +656,19 @@
         <option>Sunday</option>
       </select>
 
+      <label>Service Frequency</label>
+      <select id="propertyServiceFrequency">
+        <option value="weekly" selected>Weekly</option>
+        <option value="bi_weekly">Bi-Weekly</option>
+      </select>
+
+      <div id="propertyBiweeklyAnchorDateRow" class="hidden">
+        <label>First / Next Cleaning Date</label>
+        <input id="propertyBiweeklyAnchorDate" type="date">
+      </div>
+
+      <div id="propertyFrequencyWarning" class="field-hint property-frequency-warning hidden"></div>
+
         <label>Guest Ready Coverage Rule</label>
         <select id="coverageRule">
           <option value="none">none = No Flex / service day only</option>
@@ -575,6 +680,15 @@
 
       <label>Billable Guest Ready Charge</label>
       <input id="offCycleCharge" type="number" value="65">
+
+      <label>Standard Weekly Service Labor</label>
+      <input id="propertyWeeklyLaborRate" type="number" min="0" step="0.01" value="0">
+
+      <label>Guest Ready Service Labor</label>
+      <input id="propertyGuestReadyLaborRate" type="number" min="0" step="0.01" value="0">
+
+      <label>Additional / Billable Cleaning Labor</label>
+      <input id="propertyAdditionalLaborRate" type="number" min="0" step="0.01" value="0">
 
       <label>Default Cleaning Rate</label>
       <input id="propertyDefaultCleaningRate" type="number" min="0" step="0.01" value="0">
@@ -627,6 +741,14 @@
         <option value="Off-Cycle">Off-Cycle</option>
       </select>
 
+      <div id="cleaningWeeklyServiceLevelRow" class="hidden">
+        <label>Service Level</label>
+        <select id="cleaningWeeklyServiceLevel">
+          <option value="full_service">Full Service</option>
+          <option value="health_check">Health Check</option>
+        </select>
+      </div>
+
       <label>Status</label>
       <select id="cleaningStatus">
         <option value="Scheduled">Scheduled</option>
@@ -640,6 +762,10 @@
 
       <label>Charge</label>
       <input id="cleaningCharge" type="number" value="0">
+
+      <label>Labor Amount</label>
+      <input id="cleaningLaborAmount" type="number" min="0" step="0.01" placeholder="Manual tasks only">
+      <div class="field-hint">Manual tasks: enter labor amount to snapshot on completion. Weekly Standard and Guest Ready use property labor rules.</div>
 
       <label>Notes</label>
       <textarea id="cleaningNotes" rows="3"></textarea>

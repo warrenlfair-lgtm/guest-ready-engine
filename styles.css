@@ -565,6 +565,48 @@ button:hover {
     color:#374151;
 }
 
+.task-tech-select-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.task-tech-select {
+    width: min(260px, 100%);
+    margin: 0;
+    padding: 6px 8px;
+    font-size: 13px;
+}
+
+.manual-labor-input {
+    width: 120px;
+    margin: 0;
+    padding: 6px 8px;
+    font-size: 13px;
+}
+
+.task-tech-select-compact {
+    width: 100%;
+}
+
+.task-tech-save-btn {
+    padding: 6px 10px;
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+.field-hint {
+    margin: -2px 0 8px;
+    color: #475569;
+    font-size: 12px;
+}
+
+.property-frequency-warning {
+    margin-top: -4px;
+    color: #b45309;
+}
+
 .task-buttons{
     display:flex;
     gap:10px;
@@ -1831,6 +1873,145 @@ textarea{
     flex-wrap: wrap;
 }
 
+.labor-report-header-row {
+    align-items: center;
+}
+
+.labor-report-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.labor-report-sheet {
+    background: #ffffff;
+}
+
+.labor-summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.labor-summary-card {
+    border: 1px solid #dbe2ea;
+    border-radius: 10px;
+    padding: 12px;
+    background: #f8fafc;
+}
+
+.labor-summary-card-warning {
+    background: #fff7ed;
+    border-color: #fed7aa;
+}
+
+.labor-summary-label {
+    color: #475569;
+    font-size: 12px;
+    margin-bottom: 4px;
+}
+
+.labor-summary-value {
+    font-size: 22px;
+    font-weight: 700;
+    color: #0f172a;
+}
+
+.labor-selected-tech-card {
+    border: 1px solid #dbe2ea;
+    border-radius: 10px;
+    padding: 12px;
+    margin-bottom: 16px;
+    background: #f0fdfa;
+}
+
+.labor-selected-tech-card h3 {
+    margin: 0 0 6px;
+}
+
+.labor-tech-totals-section {
+    margin-top: 18px;
+}
+
+.labor-tech-totals-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 12px;
+}
+
+.labor-tech-total-card {
+    border: 1px solid #dbe2ea;
+    border-radius: 10px;
+    padding: 12px;
+    background: #ffffff;
+}
+
+.labor-tech-total-card h4 {
+    margin: 0 0 8px;
+}
+
+.labor-breakdown-list {
+    margin-top: 10px;
+    display: grid;
+    gap: 6px;
+}
+
+.labor-breakdown-item {
+    display: grid;
+    grid-template-columns: 1.2fr auto auto;
+    gap: 8px;
+    align-items: baseline;
+    font-size: 13px;
+    color: #334155;
+}
+
+.labor-payment-state {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.labor-payment-state.is-paid {
+    background: #dcfce7;
+    color: #166534;
+}
+
+.labor-payment-state.is-unpaid {
+    background: #fee2e2;
+    color: #991b1b;
+}
+
+.labor-paid-at {
+    margin-top: 4px;
+    font-size: 12px;
+    color: #475569;
+}
+
+.labor-payment-action {
+    white-space: nowrap;
+}
+
+.labor-exceptions-group {
+    border: 1px solid #fed7aa;
+    border-radius: 12px;
+    padding: 14px;
+    background: #fffdf8;
+}
+
+.labor-exception-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.labor-exception-actions .manual-labor-input {
+    width: 110px;
+}
+
 .chemical-report-sheet {
     background: #ffffff;
 }
@@ -2578,6 +2759,8 @@ textarea{
     #generateInvoiceBtn,
     #chemicalReportFilterPanel,
     #chemicalReportActions,
+    #laborReportFilterPanel,
+    #laborReportActions,
     #reportsDashboardCards,
     #invoiceHistoryFilterPanel,
     #invoiceHistoryContainer,
@@ -2589,6 +2772,7 @@ textarea{
 
     body.print-view-chemical #reportsView,
     body.print-view-billing #billingView,
+    body.print-view-labor #laborReportView,
     body.print-view-invoice #billingView {
         display: block !important;
     }
@@ -2597,6 +2781,18 @@ textarea{
         max-width: none;
         margin: 0;
         padding: 0;
+    }
+
+    body.print-view-labor .labor-action-col,
+    body.print-view-labor .labor-payment-action {
+        display: none !important;
+    }
+
+    body.print-view-labor .labor-exception-actions select,
+    body.print-view-labor .labor-exception-actions input,
+    body.print-view-labor .labor-exception-actions button,
+    body.print-view-labor .task-tech-save-btn {
+        display: none !important;
     }
 
     #billingView {
