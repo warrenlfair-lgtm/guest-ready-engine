@@ -145,6 +145,7 @@ const propertyTaxRate = document.getElementById("propertyTaxRate");
 const propertyPaymentTerms = document.getElementById("propertyPaymentTerms");
 const propertyInvoiceNotes = document.getElementById("propertyInvoiceNotes");
 const propertyCompanyBranch = document.getElementById("propertyCompanyBranch");
+const propertyStatus = document.getElementById("propertyStatus");
 const propertyServiceFrequency = document.getElementById("propertyServiceFrequency");
 const propertyBiweeklyAnchorDateRow = document.getElementById("propertyBiweeklyAnchorDateRow");
 const propertyBiweeklyAnchorDate = document.getElementById("propertyBiweeklyAnchorDate");
@@ -1487,6 +1488,7 @@ function openEditModal(id) {
   if (propertyPaymentTerms) propertyPaymentTerms.value = property.payment_terms || DEFAULT_INVOICE_TERMS;
   if (propertyInvoiceNotes) propertyInvoiceNotes.value = property.invoice_notes || "";
   if (propertyCompanyBranch) propertyCompanyBranch.value = normalizeCompanyBranch(property.company_branch);
+  if (propertyStatus) propertyStatus.value = isPropertyActive(property) ? "active" : "inactive";
   if (propertyServiceFrequency) propertyServiceFrequency.value = getPropertyFrequencyForScheduling(property);
   if (propertyBiweeklyAnchorDate) {
     propertyBiweeklyAnchorDate.value = getBiweeklyAnchorDateForScheduling(property);
@@ -1515,6 +1517,14 @@ function getServiceFrequencyLabel(value) {
   return normalizeServiceFrequency(value) === SERVICE_FREQUENCY_BIWEEKLY
     ? "Bi-Weekly"
     : "Weekly";
+}
+
+function isPropertyActive(property) {
+  return property?.active !== false;
+}
+
+function getPropertyStatusLabel(property) {
+  return isPropertyActive(property) ? "Active" : "Inactive";
 }
 
 function formatIsoDateUtc(date) {
@@ -2477,7 +2487,7 @@ async function ensureWeeklyStandardTasksForMonth(monthType) {
   if (!["current", "next", "previous"].includes(monthType)) return 0;
 
   const propertiesForGeneration = properties.filter((property) => {
-    if (property.active === false) return false;
+    if (!isPropertyActive(property)) return false;
     const frequency = getPropertyFrequencyForScheduling(property);
     if (frequency === SERVICE_FREQUENCY_BIWEEKLY) {
       return Boolean(getBiweeklyAnchorDateForScheduling(property));
@@ -3419,7 +3429,10 @@ async function loadProperties() {
     return;
   }
 
-  properties = data || [];
+  properties = (data || []).map((property) => ({
+    ...property,
+    active: property.active !== false,
+  }));
 }
 
 async function loadCleaningTasks() {
@@ -3499,6 +3512,7 @@ async function saveProperty() {
   const selectedBiweeklyAnchorDate = selectedServiceFrequency === SERVICE_FREQUENCY_BIWEEKLY
     ? normalizeBiweeklyAnchorDate(propertyBiweeklyAnchorDate?.value)
     : null;
+  const selectedPropertyActive = String(propertyStatus?.value || "active") !== "inactive";
   const taxable = String(propertyTaxable?.value || "yes") === "yes";
 
   if (selectedServiceFrequency === SERVICE_FREQUENCY_BIWEEKLY && !selectedBiweeklyAnchorDate) {
@@ -3507,6 +3521,9 @@ async function saveProperty() {
   }
 
   const existingProperty = editingPropertyId ? properties.find((property) => property.id === editingPropertyId) : null;
+  const deactivatingProperty = Boolean(existingProperty)
+    && isPropertyActive(existingProperty)
+    && !selectedPropertyActive;
   const todayDate = new Date();
   todayDate.setHours(0, 0, 0, 0);
   const todayKey = formatDateValue(todayDate);
@@ -3526,7 +3543,7 @@ async function saveProperty() {
       || existingStandardDay !== (String(standardDay.value || "").trim() || "Wednesday")
     );
 
-  const staleFutureAutoWeeklyTasks = scheduleChanged
+  const staleFutureAutoWeeklyTasks = scheduleChanged && !deactivatingProperty
     ? getFutureAutoWeeklyTasksOutsideSchedule(editingPropertyId, nextSchedule, todayKey)
     : [];
 
@@ -3562,7 +3579,7 @@ async function saveProperty() {
     company_branch: normalizeCompanyBranch(propertyCompanyBranch?.value),
     service_frequency: selectedServiceFrequency,
     biweekly_anchor_date: selectedBiweeklyAnchorDate,
-    active: true
+    active: selectedPropertyActive
   };
 
   if (!propertyData.property_name) {
@@ -3600,6 +3617,7 @@ async function saveProperty() {
     "company_branch",
     "service_frequency",
     "biweekly_anchor_date",
+    "active",
   ];
 
   let legacyPropertyData = { ...propertyData };
@@ -3670,16 +3688,16 @@ async function deleteProperty(id) {
 
 async function syncAllIcal() {
   const allProperties = properties;
-  const icalProperties = allProperties.filter(p => p.ical_url);
+  const icalProperties = allProperties.filter((p) => p.ical_url && isPropertyActive(p));
 
   if (icalProperties.length === 0) {
-    syncAllStatus.textContent = "No properties with an iCal URL configured.";
+    syncAllStatus.textContent = "No active properties with an iCal URL configured.";
     return;
   }
 
   syncAllIcalBtn.disabled = true;
   renderSyncReport(null); // clear previous report
-  console.log(`[SyncAll] Starting sync for ${icalProperties.length} properties (${allProperties.length - icalProperties.length} skipped — no iCal URL)`);
+  console.log(`[SyncAll] Starting sync for ${icalProperties.length} active properties. Inactive properties are skipped.`);
 
   const results = [];
 
@@ -3687,7 +3705,12 @@ async function syncAllIcal() {
   for (const p of allProperties) {
     if (!p.ical_url) {
       console.log(`[SyncAll] SKIP "${p.property_name}" — no iCal URL`);
-      results.push({ propertyName: p.property_name, skipped: true });
+      results.push({ propertyName: p.property_name, skipped: true, skippedReason: "No iCal URL" });
+      continue;
+    }
+    if (!isPropertyActive(p)) {
+      console.log(`[SyncAll] SKIP "${p.property_name}" — property is inactive`);
+      results.push({ propertyName: p.property_name, skipped: true, skippedReason: "Property inactive" });
     }
   }
 
@@ -3752,7 +3775,7 @@ function renderSyncReport(results) {
       return `
         <tr class="sync-row-skipped">
           <td>${r.propertyName}</td>
-          <td colspan="8" class="sync-skipped-label">Skipped — no iCal URL</td>
+          <td colspan="8" class="sync-skipped-label">Skipped — ${r.skippedReason || "Not eligible"}</td>
         </tr>`;
     }
     if (!r.success) {
@@ -3811,6 +3834,13 @@ async function syncPropertyIcal(propertyId) {
   const property = properties.find((p) => p.id === propertyId);
   if (!property || !property.ical_url) {
     const msg = "No iCal URL configured for this property.";
+    console.log("[SynciCal] Aborted:", msg);
+    statusMessage.textContent = msg;
+    return;
+  }
+
+  if (!isPropertyActive(property)) {
+    const msg = "This property is inactive. iCal auto-generation is paused until it is reactivated.";
     console.log("[SynciCal] Aborted:", msg);
     statusMessage.textContent = msg;
     return;
@@ -4306,6 +4336,7 @@ function clearPropertyForm() {
   if (propertyPaymentTerms) propertyPaymentTerms.value = DEFAULT_INVOICE_TERMS;
   if (propertyInvoiceNotes) propertyInvoiceNotes.value = "";
   if (propertyCompanyBranch) propertyCompanyBranch.value = COMPANY_BRANCH_GUEST_READY;
+  if (propertyStatus) propertyStatus.value = "active";
   if (propertyServiceFrequency) propertyServiceFrequency.value = SERVICE_FREQUENCY_WEEKLY;
   if (propertyBiweeklyAnchorDate) propertyBiweeklyAnchorDate.value = "";
   syncPropertyServiceFrequencyDependentFields();
@@ -8588,13 +8619,13 @@ function renderRouteFragmentationAnalytics() {
     return;
   }
 
-  const activeProperties = properties.filter((property) => property.active !== false);
-  if (!activeProperties.length) {
-    routeFragContainer.innerHTML = `<div class="empty">No active properties found.</div>`;
+  const reportProperties = properties;
+  if (!reportProperties.length) {
+    routeFragContainer.innerHTML = `<div class="empty">No properties found.</div>`;
     return;
   }
 
-  const clientLabels = Array.from(new Set(activeProperties.map((property) => getRouteFragmentationGroupLabel(property))))
+  const clientLabels = Array.from(new Set(reportProperties.map((property) => getRouteFragmentationGroupLabel(property))))
     .sort((a, b) => a.localeCompare(b));
 
   if (routeFragClientSelect) {
@@ -8608,8 +8639,8 @@ function renderRouteFragmentationAnalytics() {
 
   const selectedClient = routeFragClientSelect?.value || "";
   const filteredProperties = selectedClient
-    ? activeProperties.filter((property) => getRouteFragmentationGroupLabel(property) === selectedClient)
-    : activeProperties;
+    ? reportProperties.filter((property) => getRouteFragmentationGroupLabel(property) === selectedClient)
+    : reportProperties;
 
   if (!filteredProperties.length) {
     routeFragContainer.innerHTML = `<div class="empty">No properties found for the selected client.</div>`;
@@ -9429,6 +9460,8 @@ function renderProperties() {
     tasks = tasks.filter((task) => taskMatchesDateFilter(task, selectedMonthFilter));
     const serviceFrequency = getPropertyFrequencyForScheduling(property);
     const anchorCleaningDate = getBiweeklyAnchorDateForScheduling(property);
+    const propertyIsActive = isPropertyActive(property);
+    const propertyStatusLabel = getPropertyStatusLabel(property);
 
     const hasSameDayGuestReady = tasks.some((task) => isSameDayCheckInGuestReadyTask(task));
     const isCollapsed = collapsedPropertyCards.has(property.id);
@@ -9513,16 +9546,18 @@ function renderProperties() {
         }).join("");
 
     return `
-      <div class="property-card">
+      <div class="property-card ${propertyIsActive ? "property-card-active" : "property-card-inactive"}">
         <div class="property-card-header">
           <div>
             <h3>${property.property_name}</h3>
             ${hasSameDayGuestReady ? `<span class="task-alert-badge badge-alert-red">🚨 Same-Day Check-In</span>` : ""}
+            <span class="property-status-badge ${propertyIsActive ? "status-active" : "status-inactive"}">Status: ${propertyStatusLabel}</span>
           </div>
           <button class="collapse-btn" onclick="togglePropertyCardCollapse('${property.id}')">${toggleButtonText}</button>
         </div>
 
         <div class="property-meta">
+          <div><strong>Status:</strong> ${propertyStatusLabel}</div>
           <div><strong>Company Branch:</strong> ${normalizeCompanyBranch(property.company_branch)}</div>
           <div><strong>Client Name:</strong> ${property.client_name || ""}</div>
           <div><strong>Billing Company:</strong> ${property.billing_company_name || "Not entered"}</div>

@@ -407,6 +407,15 @@ button:hover {
     box-shadow: 0 3px 10px rgba(0,0,0,.08);
 }
 
+.property-card-active {
+    border-left: 6px solid #22c55e;
+}
+
+.property-card-inactive {
+    border-left: 6px solid #ef4444;
+    background: #fef2f2;
+}
+
 .property-card h3 {
     margin-top: 0;
     font-size: 28px;
@@ -1123,6 +1132,25 @@ textarea{
 .property-card-header h3 {
     margin: 0;
     font-size: 28px;
+}
+
+.property-status-badge {
+    display: inline-block;
+    margin-top: 8px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.property-status-badge.status-active {
+    background: #dcfce7;
+    color: #166534;
+}
+
+.property-status-badge.status-inactive {
+    background: #fee2e2;
+    color: #991b1b;
 }
 
 .collapse-btn {

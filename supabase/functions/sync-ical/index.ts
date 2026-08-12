@@ -248,6 +248,7 @@ Deno.serve(async (req: Request) => {
     const property = properties as {
       id: string;
       ical_url: string | null;
+      active: boolean | null;
       default_off_cycle_charge: number | null;
       standard_service_day: string | null;
       coverage_days: number | null;
@@ -255,6 +256,9 @@ Deno.serve(async (req: Request) => {
       service_frequency: string | null;
       biweekly_anchor_date: string | null;
     };
+    if (property.active === false) {
+      return createSuccessResponse(reservationsCreated, tasksCreated, { reservationsParsed, activeReservations: activeReservationCount, oldIgnored, weeklyTasksCreated, guestReadyTasksCreated });
+    }
     console.log("STEP 1 property loaded");
     if (!property.ical_url) {
       return createSuccessResponse(reservationsCreated, tasksCreated);
