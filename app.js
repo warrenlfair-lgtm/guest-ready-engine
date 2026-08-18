@@ -1761,7 +1761,9 @@ function openEditCleaning(taskId) {
   }
   cleaningStatus.value = task.status || "Scheduled";
   cleaningTechnician.value = task.technician || "";
-  cleaningCharge.value = task.charge || 0;
+  cleaningCharge.value = task.service_type === "Weekly Standard"
+    ? getTaskBillingAmount(task)
+    : (task.charge || 0);
   if (cleaningLaborAmount) {
     const hasStoredLabor = task?.labor_amount !== null && task?.labor_amount !== undefined && String(task.labor_amount).trim() !== "";
     cleaningLaborAmount.value = hasStoredLabor ? Number(task.labor_amount || 0) : "";
@@ -2465,7 +2467,13 @@ function getServiceDatesForMonthByDay(standardDayName, monthType) {
 function hasGuestReadyInsideCoverageWindow(propertyId, weeklyServiceDate, coverageRuleValue) {
   return cleaningTasks.some((task) => {
     if (task.property_id !== propertyId) return false;
-    if (!isTaskGuestReady(task)) return false;
+    const sourceType = String(task.source_type || "").trim().toLowerCase();
+    const sourceKey = String(task.source_key || "").trim().toLowerCase();
+    const notes = String(task.notes || "").trim().toLowerCase();
+    const hasReservationGuestReadyIdentity = sourceType === "reservation_guest_ready"
+      || sourceKey.startsWith("gr:")
+      || (Boolean(task.check_in_date) && notes.includes("auto-created from ical sync for check-in"));
+    if (!isTaskGuestReady(task) && !hasReservationGuestReadyIdentity) return false;
     if (String(task.status || "").toLowerCase() === "cancelled") return false;
     const guestReadyDate = task.service_date || task.scheduled_date;
     if (!guestReadyDate) return false;
@@ -4352,23 +4360,35 @@ function toggleInvoiceMarker(taskId) {
   }
   
   const newInvoiced = !task.invoiced;
-  
+  const updatePayload = { invoiced: newInvoiced };
+  const previousCharge = task.charge;
+
+  // Reconciling locks in the effective charge (task charge, or property default fallback) so later rate changes don't alter this task's billed amount.
+  if (newInvoiced && task.service_type === "Weekly Standard" && !(Number(task.charge || 0) > 0)) {
+    const effectiveCharge = getTaskBillingAmount(task);
+    if (effectiveCharge > 0) {
+      updatePayload.charge = effectiveCharge;
+    }
+  }
+
   // Optimistically update UI
   task.invoiced = newInvoiced;
+  if ("charge" in updatePayload) {
+    task.charge = updatePayload.charge;
+  }
   renderTaskViews();
   refreshBillingCard();
   
   // Update database
   supabaseClient
     .from("cleaning_tasks")
-    .update({
-      invoiced: newInvoiced,
-    })
+    .update(updatePayload)
     .eq("id", taskId)
     .then(({ error }) => {
       if (error) {
         // Revert on error
         task.invoiced = !newInvoiced;
+        task.charge = previousCharge;
         renderTaskViews();
         refreshBillingCard();
         alert("Error updating invoice marker: " + error.message);
@@ -4903,8 +4923,33 @@ function getGuestReadyBillingDetails(task) {
   };
 }
 
+function getEffectiveWeeklyStandardCharge(task, property) {
+  const rawCharge = Number(task?.charge || 0);
+  if (rawCharge > 0) return rawCharge;
+  const defaultRate = Number(property?.default_cleaning_rate || 0);
+  return defaultRate > 0 ? defaultRate : 0;
+}
+
 function getTaskBillingContext(task) {
   if (!isTaskGuestReady(task)) {
+    if (task.service_type === "Weekly Standard") {
+      const property = properties.find((p) => p.id === task.property_id);
+      const rawCharge = Number(task.charge || 0);
+      const effectiveCharge = getEffectiveWeeklyStandardCharge(task, property);
+      const isManualOverride = rawCharge > 0 && hasManualBillingOverride(task);
+      const billingReasonLabel = effectiveCharge <= 0
+        ? "Included"
+        : isManualOverride
+          ? "Manual Override"
+          : rawCharge > 0
+            ? "Manual Charge"
+            : "Standard Cleaning Rate";
+      return {
+        billableAmount: effectiveCharge,
+        isBillable: effectiveCharge > 0,
+        billingReasonLabel,
+      };
+    }
     const amount = Number(task.charge || 0);
     return {
       billableAmount: amount,
@@ -8896,7 +8941,7 @@ function shouldShowReconcileForTask(task) {
     const status = String(task.status || "").toLowerCase();
     if (status === "cancelled" || status === "void" || status === "deleted") return false;
     if (isTaskLinkedToFinalizedInvoice(task)) return false;
-    return Number(task.charge || 0) > 0;
+    return getTaskBillingAmount(task) > 0;
   }
 
   if (isTaskGuestReady(task)) {
@@ -9194,7 +9239,7 @@ function renderWeekViewListTaskCard(task) {
         ? `<div class="task-line"><small>Billing: Included (${guestReadyBilling.serviceDay}; rule: ${guestReadyBilling.coverageRuleLabel}; included days: ${guestReadyBilling.includedDaysLabel})</small></div>`
         : `<div class="task-line"><small>Billing: Chargeable (${guestReadyBilling.serviceDay || "Outside route window"}; rule: ${guestReadyBilling.coverageRuleLabel}; included days: ${guestReadyBilling.includedDaysLabel})</small></div>`
     : taskBillingAmount > 0
-      ? `<div class="task-line"><small>Billing: Manual Charge</small></div>`
+      ? `<div class="task-line"><small>Billing: ${billingContext.billingReasonLabel || "Manual Charge"}</small></div>`
       : "";
   const weeklyReconcileLine = getWeeklyReconciliationBillingLine(task, taskBillingAmount);
 
@@ -9501,7 +9546,7 @@ function renderProperties() {
                 ? `<div class="task-line"><small>Billing: Included (${guestReadyBilling.serviceDay}; rule: ${guestReadyBilling.coverageRuleLabel}; included days: ${guestReadyBilling.includedDaysLabel})</small></div>`
                 : `<div class="task-line"><small>Billing: Chargeable (${guestReadyBilling.serviceDay || "Outside route window"}; rule: ${guestReadyBilling.coverageRuleLabel}; included days: ${guestReadyBilling.includedDaysLabel})</small></div>`
             : taskBillingAmount > 0
-              ? `<div class="task-line"><small>Billing: Manual Charge</small></div>`
+              ? `<div class="task-line"><small>Billing: ${billingContext.billingReasonLabel || "Manual Charge"}</small></div>`
               : "";
           const weeklyReconcileLine = getWeeklyReconciliationBillingLine(task, taskBillingAmount);
           const weeklyServiceLevelMarkup = renderTaskWeeklyServiceLevelSelector(task);
