@@ -51,7 +51,7 @@ function createSuccessResponse(
 function parseICalReservations(icalText: string) {
   const unfolded = icalText.replace(/\r?\n[ \t]/g, "");
   const events = unfolded.split(/BEGIN:VEVENT/i).slice(1);
-  const reservations: Array<{ check_in: string; check_out: string | null; summary: string | null }> = [];
+  const reservations: Array<{ check_in: string; check_out: string | null; summary: string | null; uid: string | null; cancelled: boolean }> = [];
 
   for (const eventText of events) {
     const checkInMatch = eventText.match(/DTSTART(?:;VALUE=DATE)?:(\d{8})(?:T\d{6}Z?)?/i);
@@ -59,16 +59,28 @@ function parseICalReservations(icalText: string) {
 
     const checkOutMatch = eventText.match(/DTEND(?:;VALUE=DATE)?:(\d{8})(?:T\d{6}Z?)?/i);
     const summaryMatch = eventText.match(/SUMMARY:(.*)/i);
+    const uidMatch = eventText.match(/UID:(.*)/i);
+    const statusMatch = eventText.match(/STATUS:(.*)/i);
 
     const check_in = `${checkInMatch[1].slice(0, 4)}-${checkInMatch[1].slice(4, 6)}-${checkInMatch[1].slice(6, 8)}`;
     const check_out = checkOutMatch
       ? `${checkOutMatch[1].slice(0, 4)}-${checkOutMatch[1].slice(4, 6)}-${checkOutMatch[1].slice(6, 8)}`
       : null;
     const summary = summaryMatch ? summaryMatch[1].trim() : null;
-    reservations.push({ check_in, check_out, summary });
+    const uid = uidMatch ? uidMatch[1].trim() || null : null;
+    const cancelled = statusMatch ? /cancelled/i.test(statusMatch[1]) : false;
+    reservations.push({ check_in, check_out, summary, uid, cancelled });
   }
 
   return reservations;
+}
+
+// Prefers the iCal UID as a stable identity; falls back to the check-in/check-out
+// date pair for legacy rows imported before reservation_uid was captured.
+function getReservationIdentityKey(reservation: { reservation_uid?: string | null; uid?: string | null; check_in: string; check_out: string | null }) {
+  const uid = reservation.reservation_uid || reservation.uid || null;
+  if (uid) return `uid:${uid}`;
+  return `date:${reservation.check_in}|${reservation.check_out || ""}`;
 }
 
 function parseDateString(dateString: string) {
@@ -309,7 +321,10 @@ Deno.serve(async (req: Request) => {
     console.log("cutoffDate", cutoffDate);
     console.log("parsedReservations", parsedReservations.length);
 
-    const activeReservations = parsedReservations.filter((res) => {
+    // An explicit STATUS:CANCELLED event must never be treated as active, even if Hostaway still lists it.
+    const nonCancelledParsed = parsedReservations.filter((reservation) => !reservation.cancelled);
+
+    const activeReservations = nonCancelledParsed.filter((res) => {
       return res.check_out != null && res.check_out >= cutoffDate;
     });
     activeReservationCount = activeReservations.length;
@@ -319,31 +334,69 @@ Deno.serve(async (req: Request) => {
     console.log("activeReservations", activeReservations.length);
     console.log("ignored old reservations", parsedReservations.length - activeReservations.length);
 
+    // Reconcile previously imported iCal reservations for THIS property against what the current feed contains.
+    // Anything future/current that's no longer present is marked cancelled rather than deleted, so any historical
+    // cleaning tasks, invoices, chemical usage, or labor tied to it are left completely untouched.
+    const presentKeys = new Set(nonCancelledParsed.map((reservation) => getReservationIdentityKey(reservation)));
+
+    const { data: existingIcalReservations, error: existingIcalError } = await supabase
+      .from("reservations")
+      .select("id, check_in, check_out, reservation_uid, status")
+      .eq("property_id", propertyId)
+      .eq("source", "ical")
+      .gte("check_out", cutoffDate);
+
+    if (existingIcalError) {
+      console.error("sync-ical fatal error", existingIcalError?.message || existingIcalError);
+      return createSuccessResponse(reservationsCreated, tasksCreated, { reservationsParsed, activeReservations: activeReservationCount, oldIgnored, weeklyTasksCreated, guestReadyTasksCreated });
+    }
+
+    const existingIcalRows = (existingIcalReservations || []) as Array<{ id: string; check_in: string; check_out: string | null; reservation_uid: string | null; status: string | null }>;
+    // Legacy rows created before this column existed have status = NULL; treat that as "active" rather than excluding them.
+    const isRowAlreadyCancelled = (row: { status: string | null }) => String(row.status || "active").toLowerCase() === "cancelled";
+
+    const staleReservationIds = existingIcalRows
+      .filter((row) => !isRowAlreadyCancelled(row))
+      .filter((row) => !presentKeys.has(getReservationIdentityKey(row)))
+      .map((row) => row.id);
+
+    if (staleReservationIds.length) {
+      const { error: cancelError } = await supabase
+        .from("reservations")
+        .update({ status: "cancelled", cancelled_at: new Date().toISOString() })
+        .in("id", staleReservationIds);
+
+      if (cancelError) {
+        console.error("sync-ical fatal error", cancelError?.message || cancelError);
+        return createSuccessResponse(reservationsCreated, tasksCreated, { reservationsParsed, activeReservations: activeReservationCount, oldIgnored, weeklyTasksCreated, guestReadyTasksCreated });
+      }
+      console.log("[RESERVATION CANCEL APPLIED]", staleReservationIds.length, "stale reservation(s) marked cancelled");
+    }
+
     if (!activeReservations.length) {
       return createSuccessResponse(reservationsCreated, tasksCreated, { reservationsParsed, activeReservations: activeReservationCount, oldIgnored, weeklyTasksCreated, guestReadyTasksCreated });
     }
 
     const checkIns = activeReservations.filter((reservation) => reservation.check_in).map((reservation) => reservation.check_in);
 
-    const { data: existingReservations } = checkIns.length
-      ? await supabase
-          .from("reservations")
-          .select("check_in")
-          .eq("property_id", propertyId)
-          .in("check_in", checkIns)
-      : { data: [] };
-
-    const existingReservationKeys = new Set((existingReservations || []).map((r: { check_in: string }) => r.check_in));
+    const staleIdSet = new Set(staleReservationIds);
+    const existingActiveKeys = new Set(
+      existingIcalRows
+        .filter((row) => !isRowAlreadyCancelled(row))
+        .filter((row) => !staleIdSet.has(row.id))
+        .map((row) => getReservationIdentityKey(row))
+    );
 
     const newReservations = activeReservations
       .filter((reservation) => reservation.check_in)
-      .filter((reservation) => !existingReservationKeys.has(reservation.check_in))
+      .filter((reservation) => !existingActiveKeys.has(getReservationIdentityKey(reservation)))
       .map((reservation) => ({
         property_id: propertyId,
         guest_name: reservation.summary || null,
         check_in: reservation.check_in,
         check_out: reservation.check_out || null,
-        reservation_uid: null,
+        reservation_uid: reservation.uid || null,
+        status: "active",
         imported_at: new Date().toISOString(),
         source: "ical",
       }));

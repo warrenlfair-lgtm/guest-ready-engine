@@ -3496,8 +3496,13 @@ async function loadReservations() {
     return;
   }
 
-  reservations = data || [];
+  // Cancelled/stale iCal reservations must not participate in Same-Day Turnover, scheduling, or route planning.
+  reservations = (data || []).filter((reservation) => isReservationActive(reservation));
   console.log("[loadReservations] reservations[] set to", reservations.length, "rows");
+}
+
+function isReservationActive(reservation) {
+  return String(reservation?.status || "active").toLowerCase() !== "cancelled";
 }
 
 async function loadOperationsReminders() {
