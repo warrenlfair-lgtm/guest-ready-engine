@@ -699,6 +699,9 @@
       <label>Default Cleaning Rate</label>
       <input id="propertyDefaultCleaningRate" type="number" min="0" step="0.01" value="0">
 
+      <label>Same-Day Surcharge (SDS)</label>
+      <input id="propertySameDaySurcharge" type="number" min="0" step="0.01" value="0">
+
       <label>Taxable</label>
       <select id="propertyTaxable">
         <option value="yes">Yes</option>
@@ -768,6 +771,9 @@
 
       <label>Charge</label>
       <input id="cleaningCharge" type="number" value="0">
+
+      <label id="cleaningSdsAmountLabel" class="hidden">Same-Day Surcharge (SDS)</label>
+      <input id="cleaningSdsAmount" class="hidden" type="number" min="0" step="0.01" placeholder="Uses property default if blank">
 
       <label>Labor Amount</label>
       <input id="cleaningLaborAmount" type="number" min="0" step="0.01" placeholder="Manual tasks only">

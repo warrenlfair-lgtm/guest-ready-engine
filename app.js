@@ -70,6 +70,7 @@ const INVOICE_ITEM_SOURCES = {
   MANUAL: "manual",
   TASK: "task",
   CHEMICAL: "chemical",
+  SDS: "sds",
 };
 const INVOICE_QUICK_ADD_TEMPLATES = {
   filter_cleaning: { description: "Filter Cleaning", unit: "service", rate: 95, itemType: "manual" },
@@ -140,6 +141,7 @@ const propertyWeeklyLaborRate = document.getElementById("propertyWeeklyLaborRate
 const propertyGuestReadyLaborRate = document.getElementById("propertyGuestReadyLaborRate");
 const propertyAdditionalLaborRate = document.getElementById("propertyAdditionalLaborRate");
 const propertyDefaultCleaningRate = document.getElementById("propertyDefaultCleaningRate");
+const propertySameDaySurcharge = document.getElementById("propertySameDaySurcharge");
 const propertyTaxable = document.getElementById("propertyTaxable");
 const propertyTaxRate = document.getElementById("propertyTaxRate");
 const propertyPaymentTerms = document.getElementById("propertyPaymentTerms");
@@ -156,6 +158,8 @@ const cleaningServiceType = document.getElementById("cleaningServiceType");
 const cleaningStatus = document.getElementById("cleaningStatus");
 const cleaningTechnician = document.getElementById("cleaningTechnician");
 const cleaningCharge = document.getElementById("cleaningCharge");
+const cleaningSdsAmount = document.getElementById("cleaningSdsAmount");
+const cleaningSdsAmountLabel = document.getElementById("cleaningSdsAmountLabel");
 const cleaningLaborAmount = document.getElementById("cleaningLaborAmount");
 const cleaningWeeklyServiceLevelRow = document.getElementById("cleaningWeeklyServiceLevelRow");
 const cleaningWeeklyServiceLevel = document.getElementById("cleaningWeeklyServiceLevel");
@@ -1483,6 +1487,7 @@ function openEditModal(id) {
   if (propertyGuestReadyLaborRate) propertyGuestReadyLaborRate.value = Number(property.guest_ready_service_labor || 0);
   if (propertyAdditionalLaborRate) propertyAdditionalLaborRate.value = Number(property.additional_cleaning_labor || 0);
   if (propertyDefaultCleaningRate) propertyDefaultCleaningRate.value = Number(property.default_cleaning_rate || 0);
+  if (propertySameDaySurcharge) propertySameDaySurcharge.value = Number(property.same_day_surcharge || 0);
   if (propertyTaxable) propertyTaxable.value = property.billing_taxable === false ? "no" : "yes";
   if (propertyTaxRate) propertyTaxRate.value = Number(property.billing_tax_rate || 0);
   if (propertyPaymentTerms) propertyPaymentTerms.value = property.payment_terms || DEFAULT_INVOICE_TERMS;
@@ -1733,6 +1738,11 @@ function openCleaningModal(propertyId) {
   cleaningStatus.value = "Scheduled";
   cleaningTechnician.value = "";
   cleaningCharge.value = 0;
+  if (cleaningSdsAmount) {
+    if (cleaningSdsAmountLabel) cleaningSdsAmountLabel.classList.add("hidden");
+    cleaningSdsAmount.classList.add("hidden");
+    cleaningSdsAmount.value = "";
+  }
   if (cleaningLaborAmount) cleaningLaborAmount.value = "";
   cleaningNotes.value = "";
   syncCleaningServiceTypeDependentFields();
@@ -1764,6 +1774,12 @@ function openEditCleaning(taskId) {
   cleaningCharge.value = task.service_type === "Weekly Standard"
     ? getTaskBillingAmount(task)
     : (task.charge || 0);
+  if (cleaningSdsAmount) {
+    const isEligibleForSds = isSameDayTurnoverTask(task);
+    if (cleaningSdsAmountLabel) cleaningSdsAmountLabel.classList.toggle("hidden", !isEligibleForSds);
+    cleaningSdsAmount.classList.toggle("hidden", !isEligibleForSds);
+    cleaningSdsAmount.value = isEligibleForSds ? getSdsBillingAmount(task) : "";
+  }
   if (cleaningLaborAmount) {
     const hasStoredLabor = task?.labor_amount !== null && task?.labor_amount !== undefined && String(task.labor_amount).trim() !== "";
     cleaningLaborAmount.value = hasStoredLabor ? Number(task.labor_amount || 0) : "";
@@ -3585,6 +3601,7 @@ async function saveProperty() {
     guest_ready_service_labor: Math.max(0, Number(propertyGuestReadyLaborRate?.value || 0)),
     additional_cleaning_labor: Math.max(0, Number(propertyAdditionalLaborRate?.value || 0)),
     default_cleaning_rate: Number(propertyDefaultCleaningRate?.value || 0),
+    same_day_surcharge: Number(propertySameDaySurcharge?.value || 0),
     billing_taxable: taxable,
     billing_tax_rate: taxable ? Number(propertyTaxRate?.value || 0) : 0,
     payment_terms: String(propertyPaymentTerms?.value || "").trim() || DEFAULT_INVOICE_TERMS,
@@ -3620,6 +3637,7 @@ async function saveProperty() {
     "billing_address",
     "billing_account_reference",
     "default_cleaning_rate",
+    "same_day_surcharge",
     "weekly_service_labor",
     "guest_ready_service_labor",
     "additional_cleaning_labor",
@@ -3933,6 +3951,15 @@ async function saveCleaningTask() {
     return;
   }
 
+  const sdsAmountInput = cleaningSdsAmount && !cleaningSdsAmount.classList.contains("hidden")
+    ? Number(cleaningSdsAmount.value || 0)
+    : null;
+  const existingSdsAmount = Number(existingTask?.same_day_surcharge_amount || 0);
+  if (editingCleaningId && existingTask && isSdsLinkedToFinalizedInvoice(existingTask) && sdsAmountInput !== null && sdsAmountInput !== existingSdsAmount) {
+    alert("This task's Same-Day Surcharge is already on a finalized invoice. The finalized amount cannot be changed.");
+    return;
+  }
+
   // If a task's date is being changed, flag it as manually modified
   // so that future syncs do not overwrite it or recreate it on the original date.
   const isManuallyMoving = editingCleaningId && existingTask?.service_date !== serviceDate;
@@ -4022,7 +4049,9 @@ async function saveCleaningTask() {
     notes: notesWithOverride,
     guest_ready: serviceType === "Guest Ready",
     completed_at: completedAt,
-    ...(isManuallyMoving ? { manually_modified: true } : {})
+    ...(isManuallyMoving ? { manually_modified: true } : {}),
+    // Only persist an explicit manual SDS override; a blank/0 field leaves any existing reconciled snapshot untouched.
+    ...(sdsAmountInput !== null && sdsAmountInput > 0 ? { same_day_surcharge_amount: sdsAmountInput } : {})
   };
 
   let result;
@@ -4344,6 +4373,7 @@ function clearPropertyForm() {
   if (propertyGuestReadyLaborRate) propertyGuestReadyLaborRate.value = 0;
   if (propertyAdditionalLaborRate) propertyAdditionalLaborRate.value = 0;
   if (propertyDefaultCleaningRate) propertyDefaultCleaningRate.value = 0;
+  if (propertySameDaySurcharge) propertySameDaySurcharge.value = 0;
   if (propertyTaxable) propertyTaxable.value = "yes";
   if (propertyTaxRate) propertyTaxRate.value = 0;
   if (propertyPaymentTerms) propertyPaymentTerms.value = DEFAULT_INVOICE_TERMS;
@@ -5505,6 +5535,59 @@ function getBillingReportRowsForFilters({
     });
 }
 
+// SDS is billed as its own line, independent from the Guest Ready/Weekly charge on the same task.
+function getSdsBillingReportRowsForFilters({
+  startDate,
+  endDate,
+  selectedPropertyId = "",
+  selectedClientName = "",
+  includeInvoiced = true,
+} = {}) {
+  if (!startDate || !endDate) return [];
+
+  const scopePropertyIds = new Set(resolvePropertyIdsForScope({ selectedPropertyId, selectedClientName }).map((id) => normalizePropertyId(id)));
+
+  return cleaningTasks
+    .filter((task) => isSameDayTurnoverTask(task))
+    .filter((task) => scopePropertyIds.has(normalizePropertyId(task.property_id)))
+    .filter((task) => {
+      const taskDate = task.service_date || task.scheduled_date;
+      return Boolean(taskDate && taskDate >= startDate && taskDate <= endDate);
+    })
+    .filter((task) => includeInvoiced ? true : !isSdsLinkedToFinalizedInvoice(task))
+    .map((task) => {
+      const property = properties.find((item) => normalizePropertyId(item.id) === normalizePropertyId(task.property_id));
+      const taskDate = task.service_date || task.scheduled_date || "";
+      const amount = getEffectiveSameDaySurcharge(task, property);
+      return {
+        id: `sds:${task.id}`,
+        taskId: task.id,
+        property_id: task.property_id,
+        propertyName: property?.property_name || getPropertyName(task.property_id),
+        clientName: String(property?.client_name || "").trim(),
+        service_date: taskDate,
+        serviceDate: taskDate,
+        service_type: "Same-Day Turnover Surcharge",
+        serviceLabel: "Same-Day Turnover Surcharge",
+        billableAmount: amount,
+        billingReasonLabel: "Same-Day Turnover Surcharge",
+        quantity: 1,
+        unit: "service",
+        rate: amount,
+        notes: "",
+        invoiced: isSdsReconciled(task),
+        invoice_id: task.same_day_surcharge_invoice_id || null,
+        invoiced_invoice_id: task.same_day_surcharge_invoice_id || null,
+      };
+    })
+    .filter((row) => Number(row.billableAmount || 0) > 0)
+    .sort((a, b) => {
+      const propertyCompare = String(a.propertyName || "").localeCompare(String(b.propertyName || ""));
+      if (propertyCompare !== 0) return propertyCompare;
+      return String(a.serviceDate || "").localeCompare(String(b.serviceDate || ""));
+    });
+}
+
 function getChemicalReportRowsForFilters({
   startDate,
   endDate,
@@ -6425,7 +6508,17 @@ function getBillingReportRows() {
     includeInvoiced: true,
   });
 
-  return reconciledOnly ? rows.filter((row) => isBillingRowReconciled(row)) : rows;
+  const sdsRows = getSdsBillingReportRowsForFilters({
+    startDate,
+    endDate,
+    selectedPropertyId,
+    selectedClientName,
+    includeInvoiced: true,
+  });
+
+  const combinedRows = [...rows, ...sdsRows];
+
+  return reconciledOnly ? combinedRows.filter((row) => isBillingRowReconciled(row)) : combinedRows;
 }
 
 function isBillingRowReconciled(row) {
@@ -7145,6 +7238,36 @@ function getInvoiceTermsDays(terms) {
   return 15;
 }
 
+// SDS candidates are reconciled-only (mirrors the Weekly Standard reconcile-gated pattern) and always
+// rendered as their own invoice line item — never merged into the Guest Ready/Weekly task line.
+function getInvoiceSdsCandidates({ startDate, endDate, selectedPropertyId = "", selectedClientName = "" }) {
+  const rows = getSdsBillingReportRowsForFilters({
+    startDate,
+    endDate,
+    selectedPropertyId,
+    selectedClientName,
+    includeInvoiced: false,
+  }).filter((row) => row.invoiced);
+
+  return rows.map((row) => ({
+    sourceId: row.taskId,
+    taskId: row.taskId,
+    chemicalUsageId: null,
+    propertyId: row.property_id,
+    propertyName: row.propertyName,
+    clientName: row.clientName || "",
+    description: `${row.propertyName} - Same-Day Turnover Surcharge`,
+    serviceDate: row.serviceDate,
+    quantity: 1,
+    unit: "service",
+    rate: Number(row.billableAmount || 0),
+    amount: Number(row.billableAmount || 0),
+    itemType: "sds",
+    itemSource: INVOICE_ITEM_SOURCES.SDS,
+    notes: "",
+  }));
+}
+
 function formatInvoiceDate(date) {
   return formatDateValue(date || new Date());
 }
@@ -7175,12 +7298,19 @@ function buildDraftInvoiceModel({ property, clientName = "", propertyIds = [], s
     includeNonBillableChemicals,
   }).filter((item) => !propertyIds.length || propertyIds.some((id) => normalizePropertyId(id) === normalizePropertyId(item.propertyId)));
 
+  const sdsItems = getInvoiceSdsCandidates({
+    startDate,
+    endDate,
+    selectedPropertyId,
+    selectedClientName,
+  }).filter((item) => !propertyIds.length || propertyIds.some((id) => normalizePropertyId(id) === normalizePropertyId(item.propertyId)));
+
   latestInvoiceCandidates = {
     tasks: taskItems,
     chemicalRows: chemicalItems,
   };
 
-  const items = [...taskItems, ...chemicalItems];
+  const items = [...taskItems, ...chemicalItems, ...sdsItems];
   const subtotal = Number(items.reduce((sum, item) => sum + Number(item.amount || 0), 0).toFixed(2));
   const propertyTaxable = property?.billing_taxable !== false;
   const taxable = taxOverride === "yes" ? true : taxOverride === "no" ? false : propertyTaxable;
@@ -8053,7 +8183,10 @@ async function finalizeInvoiceDraft() {
   if (!currentInvoiceDraft?.id) return;
 
   const cleaningTaskIds = Array.from(new Set(currentInvoiceDraft.items
-    .filter((item) => item.taskId)
+    .filter((item) => item.taskId && item.itemSource !== INVOICE_ITEM_SOURCES.SDS)
+    .map((item) => item.taskId)));
+  const sdsTaskIds = Array.from(new Set(currentInvoiceDraft.items
+    .filter((item) => item.taskId && item.itemSource === INVOICE_ITEM_SOURCES.SDS)
     .map((item) => item.taskId)));
   const chemicalUsageIds = Array.from(new Set(currentInvoiceDraft.items
     .filter((item) => item.chemicalUsageId)
@@ -8073,6 +8206,24 @@ async function finalizeInvoiceDraft() {
     const duplicateTask = (latestTasks || []).find((task) => isTaskAlreadyInvoiced(task));
     if (duplicateTask) {
       alert("One or more selected cleaning tasks are already invoiced. Finalize canceled to prevent duplicate billing.");
+      return;
+    }
+  }
+
+  if (sdsTaskIds.length) {
+    const { data: latestSdsTasks, error: latestSdsTaskError } = await supabaseClient
+      .from("cleaning_tasks")
+      .select("id, same_day_surcharge_reconciled, same_day_surcharge_invoice_id")
+      .in("id", sdsTaskIds);
+
+    if (latestSdsTaskError) {
+      alert("Could not verify Same-Day Surcharge billing status before finalizing: " + latestSdsTaskError.message);
+      return;
+    }
+
+    const duplicateSds = (latestSdsTasks || []).find((task) => isSdsLinkedToFinalizedInvoice(task));
+    if (duplicateSds) {
+      alert("One or more Same-Day Surcharge charges are already invoiced. Finalize canceled to prevent duplicate billing.");
       return;
     }
   }
@@ -8119,6 +8270,22 @@ async function finalizeInvoiceDraft() {
 
     if (taskUpdateError) {
       alert("Invoice finalized, but linking tasks failed: " + taskUpdateError.message);
+      return;
+    }
+  }
+
+  if (sdsTaskIds.length) {
+    const { error: sdsUpdateError } = await supabaseClient
+      .from("cleaning_tasks")
+      .update({
+        same_day_surcharge_reconciled: true,
+        same_day_surcharge_invoice_id: currentInvoiceDraft.id,
+        same_day_surcharge_reconciled_at: new Date().toISOString(),
+      })
+      .in("id", sdsTaskIds);
+
+    if (sdsUpdateError) {
+      alert("Invoice finalized, but linking Same-Day Surcharge charges failed: " + sdsUpdateError.message);
       return;
     }
   }
@@ -8178,6 +8345,20 @@ async function updateInvoiceStatus(invoiceId, status) {
 
     if (taskReleaseError) {
       alert("Invoice was voided, but task linkage release failed: " + taskReleaseError.message);
+      return;
+    }
+
+    const { error: sdsReleaseError } = await supabaseClient
+      .from("cleaning_tasks")
+      .update({
+        same_day_surcharge_reconciled: false,
+        same_day_surcharge_invoice_id: null,
+        same_day_surcharge_reconciled_at: null,
+      })
+      .eq("same_day_surcharge_invoice_id", invoiceId);
+
+    if (sdsReleaseError) {
+      alert("Invoice was voided, but Same-Day Surcharge linkage release failed: " + sdsReleaseError.message);
       return;
     }
 
@@ -8962,6 +9143,112 @@ function isTaskReconciled(task) {
   return task.invoiced === true || task.invoiced === 1 || task.invoiced === "true";
 }
 
+// Same-Day Surcharge (SDS) is a separate billable line from the Guest Ready/Weekly charge,
+// with its own reconcile control and its own reconciliation flags on cleaning_tasks.
+function getEffectiveSameDaySurcharge(task, property) {
+  const taskAmount = Number(task?.same_day_surcharge_amount || 0);
+  if (taskAmount > 0) return taskAmount;
+  const propertyAmount = Number(property?.same_day_surcharge || 0);
+  return propertyAmount > 0 ? propertyAmount : 0;
+}
+
+function getSdsBillingAmount(task) {
+  const property = properties.find((p) => p.id === task.property_id);
+  return getEffectiveSameDaySurcharge(task, property);
+}
+
+function isSdsReconciled(task) {
+  return task?.same_day_surcharge_reconciled === true || task?.same_day_surcharge_reconciled === 1 || task?.same_day_surcharge_reconciled === "true";
+}
+
+function isSdsLinkedToFinalizedInvoice(task) {
+  const linkedInvoiceId = task?.same_day_surcharge_invoice_id || null;
+  if (!linkedInvoiceId) return false;
+  const status = getInvoiceStatusById(linkedInvoiceId);
+  if (!status) return true;
+  return isFinalizedInvoiceStatus(status);
+}
+
+function shouldShowSdsReconcileForTask(task) {
+  if (!task) return false;
+  if (!isSameDayTurnoverTask(task)) return false;
+  if (isSdsReconciled(task)) return false;
+  if (isSdsLinkedToFinalizedInvoice(task)) return false;
+  return getSdsBillingAmount(task) > 0;
+}
+
+function getSdsBillingLine(task) {
+  if (!isSameDayTurnoverTask(task)) return "";
+  const amount = getSdsBillingAmount(task);
+  if (amount <= 0) return "";
+  const reconciledLabel = isSdsReconciled(task) || isSdsLinkedToFinalizedInvoice(task) ? " (Reconciled)" : "";
+  return `<div class="task-line"><small>Same-Day Surcharge: $${amount.toFixed(2)}${reconciledLabel}</small></div>`;
+}
+
+function renderSdsReconcileControl(task) {
+  if (!shouldShowSdsReconcileForTask(task)) return "";
+  const invoiceMarkerClass = task.same_day_surcharge_reconciled ? "invoice-marker-checked" : "invoice-marker-unchecked";
+  return `
+    <label class="invoice-marker ${invoiceMarkerClass}">
+      <input type="checkbox" ${task.same_day_surcharge_reconciled ? "checked" : ""} onchange="toggleSdsInvoiceMarker('${task.id}')" />
+      <span>SDS Reconcile</span>
+    </label>
+  `;
+}
+
+function toggleSdsInvoiceMarker(taskId) {
+  const task = cleaningTasks.find((t) => t.id === taskId);
+  if (!task) return;
+
+  if (isSdsLinkedToFinalizedInvoice(task)) {
+    alert("This Same-Day Surcharge is already linked to a finalized invoice and cannot be changed.");
+    return;
+  }
+
+  const newReconciled = !task.same_day_surcharge_reconciled;
+  const updatePayload = { same_day_surcharge_reconciled: newReconciled };
+  const previousAmount = task.same_day_surcharge_amount;
+  const previousReconciledAt = task.same_day_surcharge_reconciled_at;
+
+  if (newReconciled) {
+    updatePayload.same_day_surcharge_reconciled_at = new Date().toISOString();
+    // Snapshot the effective SDS amount at reconcile time so a later property rate change never alters this historical charge.
+    if (!(Number(task.same_day_surcharge_amount || 0) > 0)) {
+      const effectiveAmount = getSdsBillingAmount(task);
+      if (effectiveAmount > 0) {
+        updatePayload.same_day_surcharge_amount = effectiveAmount;
+      }
+    }
+  } else {
+    updatePayload.same_day_surcharge_reconciled_at = null;
+  }
+
+  task.same_day_surcharge_reconciled = newReconciled;
+  if ("same_day_surcharge_amount" in updatePayload) {
+    task.same_day_surcharge_amount = updatePayload.same_day_surcharge_amount;
+  }
+  task.same_day_surcharge_reconciled_at = updatePayload.same_day_surcharge_reconciled_at;
+  renderTaskViews();
+  refreshBillingCard();
+
+  supabaseClient
+    .from("cleaning_tasks")
+    .update(updatePayload)
+    .eq("id", taskId)
+    .then(({ error }) => {
+      if (error) {
+        task.same_day_surcharge_reconciled = !newReconciled;
+        task.same_day_surcharge_amount = previousAmount;
+        task.same_day_surcharge_reconciled_at = previousReconciledAt;
+        renderTaskViews();
+        refreshBillingCard();
+        alert("Error updating SDS reconcile marker: " + error.message);
+      } else {
+        refreshBillingCard();
+      }
+    });
+}
+
 function getWeeklyReconciliationBillingLine(task, taskBillingAmount) {
   if (!task || task.service_type !== "Weekly Standard") return "";
   if (Number(taskBillingAmount || 0) <= 0) return "";
@@ -8987,6 +9274,8 @@ function renderTaskCard(task) {
   const invoiceMarkerClass = task.invoiced ? "invoice-marker-checked" : "invoice-marker-unchecked";
   const taskBillingAmount = getTaskBillingAmount(task);
   const weeklyReconcileLine = getWeeklyReconciliationBillingLine(task, taskBillingAmount);
+  const sdsBillingLine = getSdsBillingLine(task);
+  const sdsReconcileControl = renderSdsReconcileControl(task);
   const weeklyServiceLevelMarkup = renderTaskWeeklyServiceLevelSelector(task);
   const technicianMarkup = renderTaskTechnicianSelector(task);
   const laborSnapshotLine = renderTaskLaborSnapshot(task);
@@ -9001,6 +9290,7 @@ function renderTaskCard(task) {
           <span>$</span>
         </label>
         ` : ""}
+        ${sdsReconcileControl}
       </div>
       ${alertBadge}
       <div class="task-card-details">
@@ -9009,6 +9299,7 @@ function renderTaskCard(task) {
         <div><strong>Guest Ready:</strong> ${isTaskGuestReady(task) ? "Yes" : "No"}</div>
         ${taskBillingAmount > 0 ? `<div><strong>Charge:</strong> $${taskBillingAmount}</div>` : ""}
         ${weeklyReconcileLine}
+        ${sdsBillingLine}
         ${weeklyServiceLevelMarkup}
         ${technicianMarkup}
         ${laborSnapshotLine}
@@ -9247,6 +9538,8 @@ function renderWeekViewListTaskCard(task) {
       ? `<div class="task-line"><small>Billing: ${billingContext.billingReasonLabel || "Manual Charge"}</small></div>`
       : "";
   const weeklyReconcileLine = getWeeklyReconciliationBillingLine(task, taskBillingAmount);
+  const sdsBillingLine = getSdsBillingLine(task);
+  const sdsReconcileControl = renderSdsReconcileControl(task);
 
   const sameDayBadge = isSameDayCheckInGuestReadyTask(task)
     ? `<span class="task-alert-badge badge-alert-red">🚨 Same-Day Check-In</span>`
@@ -9265,6 +9558,7 @@ function renderWeekViewListTaskCard(task) {
           <span>$ Reconcile</span>
         </label>
         ` : ""}
+        ${sdsReconcileControl}
       </div>
       ${badge}
       ${sameDayBadge}
@@ -9273,6 +9567,7 @@ function renderWeekViewListTaskCard(task) {
       ${taskBillingAmount > 0 ? `<div class="task-line">$${taskBillingAmount}</div>` : ""}
       ${billingLine}
       ${weeklyReconcileLine}
+      ${sdsBillingLine}
       ${weeklyServiceLevelMarkup}
       ${technicianMarkup}
       ${laborSnapshotLine}
@@ -9340,6 +9635,7 @@ function renderWeekViewCalendar(weekTasks) {
                     const alertBadge = getAlertBadgeForTask(task);
                     const showReconcile = shouldShowReconcileForTask(task);
                     const invoiceMarkerClass = task.invoiced ? "invoice-marker-checked" : "invoice-marker-unchecked";
+                    const sdsReconcileControl = renderSdsReconcileControl(task);
                     const weeklyServiceLevelMarkup = renderTaskWeeklyServiceLevelSelector(task, { compact: true });
                     const technicianMarkup = renderTaskTechnicianSelector(task, { compact: true });
                     const laborSnapshotLine = renderTaskLaborSnapshot(task);
@@ -9354,6 +9650,7 @@ function renderWeekViewCalendar(weekTasks) {
                             <span>$</span>
                           </label>
                           ` : ""}
+                          ${sdsReconcileControl}
                         </div>
                         <div class="calendar-task-type">${task.service_type}</div>
                         ${badgesToShow}
@@ -9554,6 +9851,8 @@ function renderProperties() {
               ? `<div class="task-line"><small>Billing: ${billingContext.billingReasonLabel || "Manual Charge"}</small></div>`
               : "";
           const weeklyReconcileLine = getWeeklyReconciliationBillingLine(task, taskBillingAmount);
+          const sdsBillingLine = getSdsBillingLine(task);
+          const sdsReconcileControl = renderSdsReconcileControl(task);
           const weeklyServiceLevelMarkup = renderTaskWeeklyServiceLevelSelector(task);
           const technicianMarkup = renderTaskTechnicianSelector(task);
           const laborSnapshotLine = renderTaskLaborSnapshot(task);
@@ -9572,12 +9871,14 @@ function renderProperties() {
                   <span>$ Reconcile</span>
                 </label>
                 ` : ""}
+                ${sdsReconcileControl}
               </div>
               ${badge}
               ${sameDayBadge}
               ${taskBillingAmount > 0 ? `<div class="task-line">$${taskBillingAmount}</div>` : ""}
               ${billingLine}
               ${weeklyReconcileLine}
+              ${sdsBillingLine}
               ${weeklyServiceLevelMarkup}
               ${technicianMarkup}
               ${laborSnapshotLine}
@@ -9626,6 +9927,7 @@ function renderProperties() {
           <div><strong>Guest Ready Service Labor:</strong> $${Number(property.guest_ready_service_labor || 0).toFixed(2)}</div>
           <div><strong>Additional / Billable Cleaning Labor:</strong> $${Number(property.additional_cleaning_labor || 0).toFixed(2)}</div>
           <div><strong>Default Cleaning Rate:</strong> $${Number(property.default_cleaning_rate ?? 0).toFixed(2)}</div>
+          <div><strong>Same-Day Surcharge:</strong> $${Number(property.same_day_surcharge ?? 0).toFixed(2)}</div>
           <div><strong>Taxable:</strong> ${property.billing_taxable === false ? "No" : "Yes"}</div>
           <div><strong>Tax Rate:</strong> ${Number(property.billing_tax_rate || 0).toFixed(2)}%</div>
           <div><strong>Payment Terms:</strong> ${property.payment_terms || DEFAULT_INVOICE_TERMS}</div>
