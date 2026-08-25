@@ -340,6 +340,41 @@
     <div id="laborReportContainer" class="billing-report-paper"></div>
   </section>
 
+  <section id="servicePnlView" class="view-panel">
+    <div class="view-header labor-report-header-row">
+      <div>
+        <h2>Service P&amp;L</h2>
+        <p>Compare actual paid-tech profitability with fully staffed service profitability.</p>
+      </div>
+      <div class="labor-report-actions">
+        <button type="button" onclick="navigateToView('reports')">Back to Reports</button>
+        <button type="button" id="servicePnlPrintBtn" class="print-btn">Print Service P&amp;L</button>
+      </div>
+    </div>
+
+    <div class="billing-filters" id="servicePnlFilterPanel">
+      <div class="filter-group">
+        <label for="servicePnlStartDate">Start Date:</label>
+        <input id="servicePnlStartDate" type="date">
+      </div>
+      <div class="filter-group">
+        <label for="servicePnlEndDate">End Date:</label>
+        <input id="servicePnlEndDate" type="date">
+      </div>
+      <div class="filter-group">
+        <label for="servicePnlPropertySelect">Property:</label>
+        <select id="servicePnlPropertySelect">
+          <option value="">All Properties</option>
+        </select>
+      </div>
+      <div class="filter-group">
+        <button type="button" id="servicePnlRunBtn">Run Report</button>
+      </div>
+    </div>
+
+    <div id="servicePnlContainer" class="billing-report-paper"></div>
+  </section>
+
   <section id="reportsView" class="view-panel">
     <div class="view-header">
       <div>
@@ -365,6 +400,12 @@
         <h3>Labor Report</h3>
         <p>Review completed services, labor due, and technician payout totals by date range.</p>
         <button type="button" onclick="openReportFromDashboard('labor')">Open Report</button>
+      </article>
+
+      <article class="report-dashboard-card">
+        <h3>Service P&amp;L</h3>
+        <p>Compare actual paid-tech costs with fully staffed profitability by property.</p>
+        <button type="button" onclick="openReportFromDashboard('servicePnl')">Open Report</button>
       </article>
 
       <article class="report-dashboard-card">
@@ -575,6 +616,11 @@
           <input id="technicianActiveCheckbox" type="checkbox" checked>
           Active (available on task cards)
         </label>
+
+        <label class="chemical-settings-active-toggle" for="technicianPaidLaborCheckbox">
+          <input id="technicianPaidLaborCheckbox" type="checkbox" checked>
+          Paid Labor (company owes labor when this technician completes a task)
+        </label>
       </div>
 
       <div class="settings-actions chemical-settings-actions">
@@ -589,6 +635,7 @@
             <tr>
               <th>Name</th>
               <th>Status</th>
+              <th>Paid Labor</th>
               <th>Created</th>
               <th>Actions</th>
             </tr>
@@ -689,6 +736,16 @@
       <label>Standard Weekly Service Labor</label>
       <input id="propertyWeeklyLaborRate" type="number" min="0" step="0.01" value="0">
 
+      <label>Contract Revenue Amount</label>
+      <input id="propertyContractRevenueAmount" type="number" min="0" step="0.01" value="0">
+
+      <label>Contract Rate Basis</label>
+      <select id="propertyContractRateBasis">
+        <option value="no_contract" selected>No Contract</option>
+        <option value="monthly">Monthly</option>
+        <option value="weekly">Weekly</option>
+      </select>
+
       <label>Guest Ready Service Labor</label>
       <input id="propertyGuestReadyLaborRate" type="number" min="0" step="0.01" value="0">
 
@@ -777,6 +834,9 @@
       <label>Labor Amount</label>
       <input id="cleaningLaborAmount" type="number" min="0" step="0.01" placeholder="Manual tasks only">
       <div class="field-hint">Manual tasks: enter labor amount to snapshot on completion. Weekly Standard and Guest Ready use property labor rules.</div>
+
+      <label>Parts Cost</label>
+      <input id="cleaningPartsCost" type="number" min="0" step="0.01" value="0">
 
       <label>Notes</label>
       <textarea id="cleaningNotes" rows="3"></textarea>

@@ -6,6 +6,9 @@ let chemicalUsageEntries = [];
 let chemicals = [];
 let technicians = [];
 let invoices = [];
+let invoiceItems = [];
+let propertyContractRevenueHistory = [];
+let propertyContractRevenueHistoryAvailable = true;
 let invoicePropertyLabelById = new Map();
 let currentInvoiceDraft = null;
 let currentInvoiceBatchDrafts = [];
@@ -138,6 +141,8 @@ const coverageDays = document.getElementById("coverageDays");
 const coverageRule = document.getElementById("coverageRule");
 const offCycleCharge = document.getElementById("offCycleCharge");
 const propertyWeeklyLaborRate = document.getElementById("propertyWeeklyLaborRate");
+const propertyContractRevenueAmount = document.getElementById("propertyContractRevenueAmount");
+const propertyContractRateBasis = document.getElementById("propertyContractRateBasis");
 const propertyGuestReadyLaborRate = document.getElementById("propertyGuestReadyLaborRate");
 const propertyAdditionalLaborRate = document.getElementById("propertyAdditionalLaborRate");
 const propertyDefaultCleaningRate = document.getElementById("propertyDefaultCleaningRate");
@@ -161,6 +166,7 @@ const cleaningCharge = document.getElementById("cleaningCharge");
 const cleaningSdsAmount = document.getElementById("cleaningSdsAmount");
 const cleaningSdsAmountLabel = document.getElementById("cleaningSdsAmountLabel");
 const cleaningLaborAmount = document.getElementById("cleaningLaborAmount");
+const cleaningPartsCost = document.getElementById("cleaningPartsCost");
 const cleaningWeeklyServiceLevelRow = document.getElementById("cleaningWeeklyServiceLevelRow");
 const cleaningWeeklyServiceLevel = document.getElementById("cleaningWeeklyServiceLevel");
 const cleaningNotes = document.getElementById("cleaningNotes");
@@ -244,6 +250,12 @@ const laborReportRunBtn = document.getElementById("laborReportRunBtn");
 const laborReportPrintBtn = document.getElementById("laborReportPrintBtn");
 const laborBackfillBtn = document.getElementById("laborBackfillBtn");
 const laborReportContainer = document.getElementById("laborReportContainer");
+const servicePnlStartDate = document.getElementById("servicePnlStartDate");
+const servicePnlEndDate = document.getElementById("servicePnlEndDate");
+const servicePnlPropertySelect = document.getElementById("servicePnlPropertySelect");
+const servicePnlRunBtn = document.getElementById("servicePnlRunBtn");
+const servicePnlPrintBtn = document.getElementById("servicePnlPrintBtn");
+const servicePnlContainer = document.getElementById("servicePnlContainer");
 const chemicalReportStartDate = document.getElementById("chemicalReportStartDate");
 const chemicalReportEndDate = document.getElementById("chemicalReportEndDate");
 const chemicalReportPropertySelect = document.getElementById("chemicalReportPropertySelect");
@@ -287,6 +299,7 @@ const chemicalSettingsList = document.getElementById("chemicalSettingsList");
 const chemicalSettingsStatus = document.getElementById("chemicalSettingsStatus");
 const technicianNameInput = document.getElementById("technicianNameInput");
 const technicianActiveCheckbox = document.getElementById("technicianActiveCheckbox");
+const technicianPaidLaborCheckbox = document.getElementById("technicianPaidLaborCheckbox");
 const saveTechnicianBtn = document.getElementById("saveTechnicianBtn");
 const cancelTechnicianEditBtn = document.getElementById("cancelTechnicianEditBtn");
 const technicianSettingsList = document.getElementById("technicianSettingsList");
@@ -627,6 +640,18 @@ if (laborBackfillBtn) {
   laborBackfillBtn.addEventListener("click", runHistoricalLaborBackfill);
 }
 
+if (servicePnlRunBtn) {
+  servicePnlRunBtn.addEventListener("click", renderServicePnlReport);
+}
+
+[servicePnlStartDate, servicePnlEndDate, servicePnlPropertySelect].forEach((control) => {
+  if (control) control.addEventListener("change", renderServicePnlReport);
+});
+
+if (servicePnlPrintBtn) {
+  servicePnlPrintBtn.addEventListener("click", printServicePnlReport);
+}
+
 if (chemicalReportStartDate) {
   chemicalReportStartDate.addEventListener("change", renderChemicalUsageReport);
 }
@@ -709,6 +734,7 @@ initializeWeekViewMode();
 initializeBillingReportFilters();
 initializeRouteFragmentationFilters();
 initializeLaborReportFilters();
+initializeServicePnlFilters();
 initializeChemicalReportFilters();
 initializeMessagesDefaults();
 initializeChemicalSettingsForm();
@@ -914,6 +940,11 @@ function showView(viewName) {
   if (viewName === "laborReport") {
     populateLaborReportTechnicianOptions();
     renderLaborReport();
+  }
+
+  if (viewName === "servicePnl") {
+    populateServicePnlPropertyOptions();
+    renderServicePnlReport();
   }
 
   if (viewName === "reports") {
@@ -1308,6 +1339,14 @@ function initializeLaborReportFilters() {
   }
 }
 
+function initializeServicePnlFilters() {
+  if (!servicePnlStartDate || !servicePnlEndDate) return;
+
+  const today = new Date();
+  servicePnlStartDate.value = formatDateValue(new Date(today.getFullYear(), today.getMonth(), 1));
+  servicePnlEndDate.value = formatDateValue(new Date(today.getFullYear(), today.getMonth() + 1, 0));
+}
+
 function initializeChemicalReportFilters() {
   if (!chemicalReportStartDate || !chemicalReportEndDate) return;
 
@@ -1321,11 +1360,11 @@ function initializeChemicalReportFilters() {
 
 function runPrintForView(viewClassName) {
   const body = document.body;
-  body.classList.remove("print-view-billing", "print-view-chemical", "print-view-invoice", "print-view-labor");
+  body.classList.remove("print-view-billing", "print-view-chemical", "print-view-invoice", "print-view-labor", "print-view-service-pnl");
   body.classList.add(viewClassName);
   window.print();
   setTimeout(() => {
-    body.classList.remove("print-view-billing", "print-view-chemical", "print-view-invoice", "print-view-labor");
+    body.classList.remove("print-view-billing", "print-view-chemical", "print-view-invoice", "print-view-labor", "print-view-service-pnl");
   }, 250);
 }
 
@@ -1339,6 +1378,10 @@ function printChemicalUsageReport() {
 
 function printLaborReport() {
   runPrintForView("print-view-labor");
+}
+
+function printServicePnlReport() {
+  runPrintForView("print-view-service-pnl");
 }
 
 async function runHistoricalLaborBackfill() {
@@ -1484,6 +1527,8 @@ function openEditModal(id) {
   }
   offCycleCharge.value = property.default_off_cycle_charge || 65;
   if (propertyWeeklyLaborRate) propertyWeeklyLaborRate.value = Number(property.weekly_service_labor || 0);
+  if (propertyContractRevenueAmount) propertyContractRevenueAmount.value = Number(property.contract_revenue_amount || 0);
+  if (propertyContractRateBasis) propertyContractRateBasis.value = normalizeContractRateBasis(property.contract_rate_basis);
   if (propertyGuestReadyLaborRate) propertyGuestReadyLaborRate.value = Number(property.guest_ready_service_labor || 0);
   if (propertyAdditionalLaborRate) propertyAdditionalLaborRate.value = Number(property.additional_cleaning_labor || 0);
   if (propertyDefaultCleaningRate) propertyDefaultCleaningRate.value = Number(property.default_cleaning_rate || 0);
@@ -1509,6 +1554,24 @@ function closePropertyModal() {
 
 const SERVICE_FREQUENCY_WEEKLY = "weekly";
 const SERVICE_FREQUENCY_BIWEEKLY = "bi_weekly";
+const CONTRACT_RATE_BASIS_NONE = "no_contract";
+const CONTRACT_RATE_BASIS_MONTHLY = "monthly";
+const CONTRACT_RATE_BASIS_WEEKLY = "weekly";
+
+function normalizeContractRateBasis(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === CONTRACT_RATE_BASIS_MONTHLY || normalized === CONTRACT_RATE_BASIS_WEEKLY) {
+    return normalized;
+  }
+  return CONTRACT_RATE_BASIS_NONE;
+}
+
+function getContractRateBasisLabel(value) {
+  const basis = normalizeContractRateBasis(value);
+  if (basis === CONTRACT_RATE_BASIS_MONTHLY) return "Monthly";
+  if (basis === CONTRACT_RATE_BASIS_WEEKLY) return "Weekly";
+  return "No Contract";
+}
 
 function normalizeServiceFrequency(value) {
   const normalized = String(value || "").trim().toLowerCase();
@@ -1744,6 +1807,7 @@ function openCleaningModal(propertyId) {
     cleaningSdsAmount.value = "";
   }
   if (cleaningLaborAmount) cleaningLaborAmount.value = "";
+  if (cleaningPartsCost) cleaningPartsCost.value = 0;
   cleaningNotes.value = "";
   syncCleaningServiceTypeDependentFields();
   renderCleaningSafetyCultureAccess();
@@ -1784,6 +1848,7 @@ function openEditCleaning(taskId) {
     const hasStoredLabor = task?.labor_amount !== null && task?.labor_amount !== undefined && String(task.labor_amount).trim() !== "";
     cleaningLaborAmount.value = hasStoredLabor ? Number(task.labor_amount || 0) : "";
   }
+  if (cleaningPartsCost) cleaningPartsCost.value = Math.max(0, Number(task.parts_cost || 0));
   cleaningNotes.value = stripManualBillingOverrideTag(task.notes || "");
   syncCleaningServiceTypeDependentFields();
   renderCleaningSafetyCultureAccess();
@@ -1805,6 +1870,7 @@ function getCleaningModalStateSnapshot() {
     technician: String(cleaningTechnician?.value || "").trim(),
     charge: String(cleaningCharge?.value || ""),
     laborAmount: String(cleaningLaborAmount?.value || ""),
+    partsCost: String(cleaningPartsCost?.value || ""),
     notes: String(cleaningNotes?.value || "").trim(),
   };
 }
@@ -2053,6 +2119,7 @@ async function loadData() {
   await loadCompanyProfile();
   await initializeCompanyLogoUploadSupport();
   await loadProperties();
+  await loadPropertyContractRevenueHistory();
   await loadCleaningTasks();
   await loadReservations();
   await loadOperationsReminders();
@@ -2077,6 +2144,8 @@ async function loadData() {
   renderOperationsRemindersWidget();
   populateLaborReportTechnicianOptions();
   renderLaborReport();
+  populateServicePnlPropertyOptions();
+  renderServicePnlReport();
   renderBillingReport();
   renderInvoicePreview();
   renderInvoiceBatchPreview();
@@ -2577,7 +2646,7 @@ async function ensureWeeklyStandardTasksForMonth(monthType) {
 
   if (!filteredWeeklyTasks.length) return 0;
 
-  const { error: insertError } = await supabaseClient
+  let { error: insertError } = await supabaseClient
     .from("cleaning_tasks")
     .insert(filteredWeeklyTasks);
 
@@ -3261,6 +3330,7 @@ function resetTechnicianSettingsForm() {
   editingTechnicianId = null;
   if (technicianNameInput) technicianNameInput.value = "";
   if (technicianActiveCheckbox) technicianActiveCheckbox.checked = true;
+  if (technicianPaidLaborCheckbox) technicianPaidLaborCheckbox.checked = true;
   if (saveTechnicianBtn) saveTechnicianBtn.textContent = "Add Technician";
   if (cancelTechnicianEditBtn) cancelTechnicianEditBtn.classList.add("hidden");
 }
@@ -3281,6 +3351,10 @@ function findTechnicianById(technicianId) {
   return technicians.find((technician) => String(technician.id || "").trim() === normalizedId) || null;
 }
 
+function isTechnicianPaidLabor(technician) {
+  return technician?.paid_labor !== false;
+}
+
 function findActiveTechnicianByName(name) {
   const normalized = String(name || "").trim().toLowerCase();
   if (!normalized) return null;
@@ -3292,7 +3366,7 @@ function renderTechnicianSettingsSection() {
 
   const rows = getSortedTechnicians();
   if (!rows.length) {
-    technicianSettingsList.innerHTML = '<tr><td colspan="4">No technicians configured yet.</td></tr>';
+    technicianSettingsList.innerHTML = '<tr><td colspan="5">No technicians configured yet.</td></tr>';
     return;
   }
 
@@ -3305,6 +3379,7 @@ function renderTechnicianSettingsSection() {
       <tr>
         <td>${escapeHtml(technician.name || "")}</td>
         <td>${technician.active === false ? "Inactive" : "Active"}</td>
+        <td>${technician.paid_labor === false ? "No" : "Yes"}</td>
         <td>${createdDate}</td>
         <td>
           <div class="chemical-settings-row-actions">
@@ -3324,15 +3399,17 @@ function openEditTechnician(technicianId) {
   editingTechnicianId = technician.id;
   if (technicianNameInput) technicianNameInput.value = technician.name || "";
   if (technicianActiveCheckbox) technicianActiveCheckbox.checked = technician.active !== false;
+  if (technicianPaidLaborCheckbox) technicianPaidLaborCheckbox.checked = technician.paid_labor !== false;
   if (saveTechnicianBtn) saveTechnicianBtn.textContent = "Update Technician";
   if (cancelTechnicianEditBtn) cancelTechnicianEditBtn.classList.remove("hidden");
 }
 
 async function saveTechnician() {
-  if (!technicianNameInput || !technicianActiveCheckbox) return;
+  if (!technicianNameInput || !technicianActiveCheckbox || !technicianPaidLaborCheckbox) return;
 
   const name = String(technicianNameInput.value || "").trim();
   const active = Boolean(technicianActiveCheckbox.checked);
+  const paidLabor = Boolean(technicianPaidLaborCheckbox.checked);
   if (!name) {
     alert("Technician name is required.");
     return;
@@ -3352,6 +3429,7 @@ async function saveTechnician() {
   const payload = {
     name,
     active,
+    paid_labor: paidLabor,
   };
 
   let response;
@@ -3367,8 +3445,8 @@ async function saveTechnician() {
   }
 
   if (response.error) {
-    const missingActiveColumn = /active/i.test(String(response.error.message || ""));
-    if (missingActiveColumn) {
+    const missingOptionalColumn = /active|paid_labor/i.test(String(response.error.message || ""));
+    if (missingOptionalColumn) {
       const legacyPayload = { name };
       if (editingTechnicianId) {
         response = await supabaseClient
@@ -3386,6 +3464,19 @@ async function saveTechnician() {
   if (response.error) {
     alert("Error saving technician: " + response.error.message);
     return;
+  }
+
+  if (editingTechnicianId) {
+    const { error: snapshotError } = await supabaseClient
+      .from("cleaning_tasks")
+      .update({ labor_payable: paidLabor })
+      .is("labor_payable", null)
+      .or(`completed_by_technician_id.eq.${editingTechnicianId},technician_id.eq.${editingTechnicianId}`);
+
+    const missingSnapshotColumn = /labor_payable/i.test(String(snapshotError?.message || ""));
+    if (snapshotError && !missingSnapshotColumn) {
+      console.warn("Could not snapshot historical labor classification:", snapshotError.message);
+    }
   }
 
   await loadTechnicians();
@@ -3457,6 +3548,26 @@ async function loadProperties() {
     ...property,
     active: property.active !== false,
   }));
+}
+
+async function loadPropertyContractRevenueHistory() {
+  const { data, error } = await supabaseClient
+    .from("property_contract_revenue_history")
+    .select("*")
+    .order("effective_from", { ascending: true });
+
+  if (error) {
+    propertyContractRevenueHistory = [];
+    propertyContractRevenueHistoryAvailable = false;
+    const message = String(error.message || "").toLowerCase();
+    if (!message.includes("property_contract_revenue_history")) {
+      console.warn("Could not load contract revenue history:", error.message);
+    }
+    return;
+  }
+
+  propertyContractRevenueHistory = data || [];
+  propertyContractRevenueHistoryAvailable = true;
 }
 
 async function loadCleaningTasks() {
@@ -3598,6 +3709,8 @@ async function saveProperty() {
     coverage_rule: selectedCoverageRule,
     default_off_cycle_charge: Number(offCycleCharge.value),
     weekly_service_labor: Math.max(0, Number(propertyWeeklyLaborRate?.value || 0)),
+    contract_revenue_amount: Math.max(0, Number(propertyContractRevenueAmount?.value || 0)),
+    contract_rate_basis: normalizeContractRateBasis(propertyContractRateBasis?.value),
     guest_ready_service_labor: Math.max(0, Number(propertyGuestReadyLaborRate?.value || 0)),
     additional_cleaning_labor: Math.max(0, Number(propertyAdditionalLaborRate?.value || 0)),
     default_cleaning_rate: Number(propertyDefaultCleaningRate?.value || 0),
@@ -3639,6 +3752,8 @@ async function saveProperty() {
     "default_cleaning_rate",
     "same_day_surcharge",
     "weekly_service_labor",
+    "contract_revenue_amount",
+    "contract_rate_basis",
     "guest_ready_service_labor",
     "additional_cleaning_labor",
     "billing_taxable",
@@ -3928,9 +4043,15 @@ async function saveCleaningTask() {
   const hasManualLaborInput = manualLaborRaw !== "";
   const parsedManualLabor = hasManualLaborInput ? Number(manualLaborRaw) : null;
   const manualLaborAmount = hasManualLaborInput ? Math.max(0, parsedManualLabor) : null;
+  const parsedPartsCost = Number(cleaningPartsCost?.value || 0);
 
   if (hasManualLaborInput && !Number.isFinite(parsedManualLabor)) {
     alert("Manual labor amount must be a valid number.");
+    return;
+  }
+
+  if (!Number.isFinite(parsedPartsCost) || parsedPartsCost < 0) {
+    alert("Parts cost must be a valid non-negative number.");
     return;
   }
 
@@ -3974,14 +4095,13 @@ async function saveCleaningTask() {
   const completedByTechnician = selectedModalTechnician
     || (taskStatus === "Completed" ? persistedCompletedByTechnician : null);
   const hasCompletedTechnician = Boolean(completedByTechnician?.id || completedByTechnician?.name);
+  const previousTechnicianId = String(existingTask?.completed_by_technician_id || existingTask?.technician_id || "").trim();
+  const previousTechnicianName = String(existingTask?.completed_by_technician_name || existingTask?.technician_name || existingTask?.technician || "").trim();
+  const nextTechnicianId = String(completedByTechnician?.id || "").trim();
+  const nextTechnicianName = String(completedByTechnician?.name || "").trim();
+  const technicianChanged = previousTechnicianId !== nextTechnicianId || previousTechnicianName !== nextTechnicianName;
 
   if (existingTask && wasCompleted && isLaborTaskMarkedPaid(existingTask)) {
-    const previousTechnicianId = String(existingTask.completed_by_technician_id || existingTask.technician_id || "").trim();
-    const previousTechnicianName = String(existingTask.completed_by_technician_name || existingTask.technician_name || existingTask.technician || "").trim();
-    const nextTechnicianId = String(completedByTechnician?.id || "").trim();
-    const nextTechnicianName = String(completedByTechnician?.name || "").trim();
-    const technicianChanged = previousTechnicianId !== nextTechnicianId || previousTechnicianName !== nextTechnicianName;
-
     if (technicianChanged) {
       const warning = "This labor has already been marked paid. Changing the technician will change who this payment is attributed to. Continue?";
       if (!window.confirm(warning)) {
@@ -3994,6 +4114,12 @@ async function saveCleaningTask() {
   const hasExistingLaborSnapshot = existingLaborRaw !== null && existingLaborRaw !== undefined && String(existingLaborRaw).trim() !== "";
   const wasMissingTechnicianAtCompletion = Boolean(existingTask && wasCompleted && !hasTechnicianSnapshot(existingTask));
   const shouldBackfillLaborNow = taskStatus === "Completed" && hasCompletedTechnician && wasMissingTechnicianAtCompletion && !isManualServiceTask;
+  const hasExistingLaborPayableSnapshot = existingTask?.labor_payable === true || existingTask?.labor_payable === false;
+  const laborPayable = taskStatus === "Completed" && hasCompletedTechnician
+    ? (isMarkingCompleteNow || shouldBackfillLaborNow || technicianChanged || !hasExistingLaborPayableSnapshot
+      ? isTechnicianPaidLabor(completedByTechnician)
+      : existingTask.labor_payable)
+    : null;
 
   const laborCalculatedAt = taskStatus === "Completed"
     ? (hasCompletedTechnician
@@ -4029,7 +4155,6 @@ async function saveCleaningTask() {
             )))
       : null)
     : (hasManualLaborInput ? manualLaborAmount : Number(existingTask?.labor_amount || 0));
-
   const task = {
     property_id: selectedCleaningPropertyId,
     service_date: serviceDate,
@@ -4046,6 +4171,8 @@ async function saveCleaningTask() {
     charge: charge,
     labor_amount: laborAmount === null ? null : Number(laborAmount || 0),
     labor_calculated_at: laborCalculatedAt,
+    labor_payable: laborPayable,
+    parts_cost: parsedPartsCost,
     notes: notesWithOverride,
     guest_ready: serviceType === "Guest Ready",
     completed_at: completedAt,
@@ -4075,6 +4202,8 @@ async function saveCleaningTask() {
     "weekly_service_level",
     "labor_amount",
     "labor_calculated_at",
+    "labor_payable",
+    "parts_cost",
   ];
 
   let legacyTaskPayload = { ...task };
@@ -4290,6 +4419,7 @@ async function markCleaningComplete(id) {
     completed_by_technician_name: selectedTechnician?.name || null,
     labor_amount: hasCompletedTechnician ? Number(laborAmount || 0) : null,
     labor_calculated_at: hasCompletedTechnician && laborAmount !== null ? completionTimestamp : null,
+    labor_payable: hasCompletedTechnician ? isTechnicianPaidLabor(selectedTechnician) : null,
   };
 
   let result = await supabaseClient
@@ -4305,6 +4435,7 @@ async function markCleaningComplete(id) {
     "weekly_service_level",
     "labor_amount",
     "labor_calculated_at",
+    "labor_payable",
   ];
 
   let legacyPayload = { ...completionPayload };
@@ -4370,6 +4501,8 @@ function clearPropertyForm() {
   }
   offCycleCharge.value = 65;
   if (propertyWeeklyLaborRate) propertyWeeklyLaborRate.value = 0;
+  if (propertyContractRevenueAmount) propertyContractRevenueAmount.value = 0;
+  if (propertyContractRateBasis) propertyContractRateBasis.value = CONTRACT_RATE_BASIS_NONE;
   if (propertyGuestReadyLaborRate) propertyGuestReadyLaborRate.value = 0;
   if (propertyAdditionalLaborRate) propertyAdditionalLaborRate.value = 0;
   if (propertyDefaultCleaningRate) propertyDefaultCleaningRate.value = 0;
@@ -5290,6 +5423,7 @@ async function saveCompletedTaskTechnician(taskId, technicianId = "") {
     technician_name: selectedTechnician.name,
     completed_by_technician_id: selectedTechnician.id,
     completed_by_technician_name: selectedTechnician.name,
+    labor_payable: isTechnicianPaidLabor(selectedTechnician),
   };
 
   if (shouldCalculateLaborNow) {
@@ -5309,6 +5443,7 @@ async function saveCompletedTaskTechnician(taskId, technicianId = "") {
     "completed_by_technician_name",
     "labor_amount",
     "labor_calculated_at",
+    "labor_payable",
   ];
 
   let fallbackPayload = { ...correctionPayload };
@@ -5452,6 +5587,12 @@ function renderTaskLaborSnapshot(task) {
   }
 
   return `<div class="task-line"><small>Labor: ${toMoney(Number(task?.labor_amount || 0))}</small></div>`;
+}
+
+function renderTaskPartsCost(task) {
+  const partsCost = Number(task?.parts_cost || 0);
+  if (!Number.isFinite(partsCost) || partsCost <= 0) return "";
+  return `<div class="task-line"><small>Parts Cost: ${toMoney(partsCost)}</small></div>`;
 }
 
 function hasManualBillingOverride(task) {
@@ -6489,6 +6630,438 @@ function renderLaborReport() {
   `;
 }
 
+function populateServicePnlPropertyOptions() {
+  if (!servicePnlPropertySelect) return;
+
+  const previousValue = servicePnlPropertySelect.value;
+  const options = ['<option value="">All Properties</option>'];
+  properties
+    .slice()
+    .sort((a, b) => String(a.property_name || "").localeCompare(String(b.property_name || "")))
+    .forEach((property) => {
+      options.push(`<option value="${escapeHtml(property.id)}">${escapeHtml(property.property_name || "Unnamed Property")}</option>`);
+    });
+
+  servicePnlPropertySelect.innerHTML = options.join("");
+  servicePnlPropertySelect.value = Array.from(servicePnlPropertySelect.options).some((option) => option.value === previousValue)
+    ? previousValue
+    : "";
+}
+
+function getTaskLaborPayableStatus(task) {
+  if (task?.labor_payable === true || task?.labor_payable === 1 || task?.labor_payable === "true") return true;
+  if (task?.labor_payable === false || task?.labor_payable === 0 || task?.labor_payable === "false") return false;
+
+  const technicianSnapshot = getLaborTaskTechnicianSnapshot(task);
+  if (!technicianSnapshot.hasTechnician) return null;
+
+  const technician = (technicianSnapshot.technicianId ? findTechnicianById(technicianSnapshot.technicianId) : null)
+    || technicians.find((item) => String(item.name || "").trim().toLowerCase() === technicianSnapshot.technicianName.toLowerCase());
+  if (!technician) return null;
+  return isTechnicianPaidLabor(technician);
+}
+
+function getChemicalUsageCost(entry) {
+  const quantity = Number(entry?.quantity || 0);
+  const costPerUnit = Number(getChemicalCatalogItemForEntry(entry)?.cost_per_unit || 0);
+  if (!Number.isFinite(quantity) || !Number.isFinite(costPerUnit)) return 0;
+  return Math.max(0, quantity) * Math.max(0, costPerUnit);
+}
+
+const SERVICE_PNL_UNASSIGNED_PROPERTY_ID = "__unassigned__";
+
+function getContractRateForDate(property, dateKey) {
+  const propertyId = normalizePropertyId(property?.id);
+  const normalizedDate = normalizeDateKey(dateKey);
+  if (!propertyId || !normalizedDate) {
+    return { amount: 0, basis: CONTRACT_RATE_BASIS_NONE, serviceDay: "Wednesday" };
+  }
+
+  const historicalRate = propertyContractRevenueHistory
+    .filter((entry) => normalizePropertyId(entry.property_id) === propertyId)
+    .filter((entry) => {
+      const effectiveFrom = normalizeDateKey(entry.effective_from);
+      const effectiveTo = normalizeDateKey(entry.effective_to);
+      return effectiveFrom && effectiveFrom <= normalizedDate && (!effectiveTo || effectiveTo >= normalizedDate);
+    })
+    .sort((a, b) => String(b.effective_from || "").localeCompare(String(a.effective_from || "")))[0];
+
+  const source = historicalRate || (!propertyContractRevenueHistoryAvailable ? property : null);
+  return {
+    amount: Math.max(0, Number(source?.contract_revenue_amount || 0)),
+    basis: normalizeContractRateBasis(source?.contract_rate_basis),
+    serviceDay: String(source?.contract_service_day || property?.standard_service_day || "Wednesday"),
+  };
+}
+
+function getMonthStartDateKey(dateKey) {
+  const date = parseDateString(dateKey);
+  return formatIsoDateUtc(new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1)));
+}
+
+function getMonthEndDateKey(dateKey) {
+  const date = parseDateString(dateKey);
+  return formatIsoDateUtc(new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0)));
+}
+
+function getNextMonthStartDateKey(dateKey) {
+  const date = parseDateString(dateKey);
+  return formatIsoDateUtc(new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 1)));
+}
+
+function formatContractMonthLabel(dateKey) {
+  return parseDateString(dateKey).toLocaleDateString("en-US", {
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
+
+function getContractRevenueForProperty(property, startDate, endDate) {
+  let contractRevenue = 0;
+  let monthlyPeriodCount = 0;
+  let weeklyPeriodCount = 0;
+  const partialMonthlyPeriods = [];
+
+  let monthStart = getMonthStartDateKey(startDate);
+  const finalMonthStart = getMonthStartDateKey(endDate);
+  while (monthStart <= finalMonthStart) {
+    const monthEnd = getMonthEndDateKey(monthStart);
+    const rangeIncludesFullMonth = startDate <= monthStart && endDate >= monthEnd;
+    const monthStartRate = getContractRateForDate(property, monthStart);
+    const monthEndRate = getContractRateForDate(property, monthEnd);
+    const hasSameMonthlyRateForFullMonth = monthStartRate.basis === CONTRACT_RATE_BASIS_MONTHLY
+      && monthEndRate.basis === CONTRACT_RATE_BASIS_MONTHLY
+      && monthStartRate.amount === monthEndRate.amount
+      && monthStartRate.amount > 0;
+    const hasAnyMonthlyContract = (monthStartRate.basis === CONTRACT_RATE_BASIS_MONTHLY && monthStartRate.amount > 0)
+      || (monthEndRate.basis === CONTRACT_RATE_BASIS_MONTHLY && monthEndRate.amount > 0);
+    if (hasSameMonthlyRateForFullMonth && rangeIncludesFullMonth) {
+        contractRevenue += monthStartRate.amount;
+        monthlyPeriodCount += 1;
+    } else if (hasAnyMonthlyContract) {
+      partialMonthlyPeriods.push(formatContractMonthLabel(monthStart));
+    }
+    monthStart = getNextMonthStartDateKey(monthStart);
+  }
+
+  const cursor = parseDateString(startDate);
+  const end = parseDateString(endDate);
+  while (cursor <= end) {
+    const contractWeekDate = formatIsoDateUtc(cursor);
+    const rate = getContractRateForDate(property, contractWeekDate);
+    const contractDayNumber = getDayNumberFromName(rate.serviceDay);
+    if (rate.basis === CONTRACT_RATE_BASIS_WEEKLY
+        && rate.amount > 0
+        && cursor.getUTCDay() === contractDayNumber) {
+      contractRevenue += rate.amount;
+      weeklyPeriodCount += 1;
+    }
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+
+  return {
+    contractRevenue,
+    monthlyPeriodCount,
+    weeklyPeriodCount,
+    partialMonthlyPeriods,
+  };
+}
+
+function getServicePnlInvoiceItemPropertyId(item) {
+  const itemSource = String(item?.item_source || item?.source_type || "").trim().toLowerCase();
+  const chemicalUsageId = item?.chemical_usage_id
+    || (itemSource === INVOICE_ITEM_SOURCES.CHEMICAL ? item?.source_id : null);
+  if (chemicalUsageId) {
+    const chemicalEntry = chemicalUsageEntries.find((entry) => String(entry.id || "") === String(chemicalUsageId));
+    const chemicalPropertyId = normalizePropertyId(chemicalEntry?.property_id);
+    if (chemicalPropertyId) return chemicalPropertyId;
+  }
+
+  const taskSourceTypes = new Set([
+    INVOICE_ITEM_SOURCES.TASK,
+    INVOICE_ITEM_SOURCES.SDS,
+    "cleaning",
+    "weekly_standard",
+    "weekly standard",
+    "guest_ready",
+    "guest ready",
+  ]);
+  const taskId = item?.task_id || (taskSourceTypes.has(itemSource) ? item?.source_id : null);
+  if (taskId) {
+    const task = cleaningTasks.find((entry) => String(entry.id || "") === String(taskId));
+    const taskPropertyId = normalizePropertyId(task?.property_id);
+    if (taskPropertyId) return taskPropertyId;
+  }
+
+  return SERVICE_PNL_UNASSIGNED_PROPERTY_ID;
+}
+
+function getServicePnlInvoiceRevenueCategory(status) {
+  const normalized = String(status || "").trim().toLowerCase();
+  if (normalized === "draft") return "draft";
+  if (isFinalizedInvoiceStatus(normalized)) return "finalized";
+  return "";
+}
+
+function getServicePnlRows({ startDate, endDate, selectedPropertyId = "" } = {}) {
+  if (!startDate || !endDate) return [];
+
+  const rowsByProperty = new Map();
+  const ensureRow = (propertyId) => {
+    const normalizedId = normalizePropertyId(propertyId);
+    if (!normalizedId) return null;
+    if (!rowsByProperty.has(normalizedId)) {
+      const isUnassigned = normalizedId === SERVICE_PNL_UNASSIGNED_PROPERTY_ID;
+      rowsByProperty.set(normalizedId, {
+        propertyId: normalizedId,
+        propertyName: isUnassigned ? "Unassigned / No Source Property" : getPropertyName(normalizedId),
+        guestEngineRevenue: 0,
+        draftRevenue: 0,
+        finalizedRevenue: 0,
+        contractRevenue: 0,
+        contractMonthlyPeriods: 0,
+        contractWeeklyPeriods: 0,
+        partialMonthlyPeriods: [],
+        revenue: 0,
+        ownerPerformedServices: 0,
+        techPerformedServices: 0,
+        actualTechLabor: 0,
+        potentialLabor: 0,
+        chemicalCost: 0,
+        partsCost: 0,
+      });
+    }
+    return rowsByProperty.get(normalizedId);
+  };
+  const propertyMatches = (propertyId) => !selectedPropertyId || normalizePropertyId(propertyId) === normalizePropertyId(selectedPropertyId);
+
+  const eligibleInvoicesById = new Map(
+    invoices
+      .filter((invoice) => getServicePnlInvoiceRevenueCategory(invoice.status))
+      .filter((invoice) => {
+        const invoiceDate = normalizeDateKey(invoice.invoice_date || invoice.created_at);
+        return invoiceDate && invoiceDate >= startDate && invoiceDate <= endDate;
+      })
+      .map((invoice) => [String(invoice.id), invoice])
+  );
+
+  const countedInvoiceItemIds = new Set();
+  invoiceItems.forEach((item) => {
+    const invoice = eligibleInvoicesById.get(String(item.invoice_id || ""));
+    if (!invoice) return;
+    const invoiceItemId = String(item.id || "").trim();
+    if (invoiceItemId && countedInvoiceItemIds.has(invoiceItemId)) return;
+    if (invoiceItemId) countedInvoiceItemIds.add(invoiceItemId);
+    const itemPropertyId = getServicePnlInvoiceItemPropertyId(item);
+    if (!propertyMatches(itemPropertyId)) return;
+    const row = ensureRow(itemPropertyId);
+    if (!row) return;
+    const amount = Number(item.amount || 0);
+    const category = getServicePnlInvoiceRevenueCategory(invoice.status);
+    row.guestEngineRevenue += amount;
+    if (category === "draft") {
+      row.draftRevenue += amount;
+    } else if (category === "finalized") {
+      row.finalizedRevenue += amount;
+    }
+  });
+
+  properties
+    .filter((property) => propertyMatches(property.id))
+    .forEach((property) => {
+      const contract = getContractRevenueForProperty(property, startDate, endDate);
+      if (contract.contractRevenue <= 0 && contract.partialMonthlyPeriods.length === 0) return;
+      const row = ensureRow(property.id);
+      if (!row) return;
+      row.contractRevenue += contract.contractRevenue;
+      row.contractMonthlyPeriods += contract.monthlyPeriodCount;
+      row.contractWeeklyPeriods += contract.weeklyPeriodCount;
+      row.partialMonthlyPeriods.push(...contract.partialMonthlyPeriods);
+    });
+
+  cleaningTasks
+    .filter((task) => String(task?.status || "").trim().toLowerCase() === "completed")
+    .filter((task) => propertyMatches(task.property_id))
+    .filter((task) => {
+      const completionDate = getLaborCompletionDateKey(task);
+      return completionDate && completionDate >= startDate && completionDate <= endDate;
+    })
+    .forEach((task) => {
+      const row = ensureRow(task.property_id);
+      if (!row) return;
+      const laborAmount = Number(task.labor_amount || 0);
+      const potentialLabor = Number.isFinite(laborAmount) ? Math.max(0, laborAmount) : 0;
+      const payableStatus = getTaskLaborPayableStatus(task);
+      const partsCost = Number(task.parts_cost || 0);
+      if (Number.isFinite(partsCost)) row.partsCost += Math.max(0, partsCost);
+      row.potentialLabor += potentialLabor;
+      if (payableStatus === true) {
+        row.techPerformedServices += 1;
+      } else if (payableStatus === false) {
+        row.ownerPerformedServices += 1;
+      }
+      if (payableStatus === true) {
+        row.actualTechLabor += potentialLabor;
+      }
+    });
+
+  chemicalUsageEntries
+    .filter((entry) => propertyMatches(entry.property_id))
+    .filter((entry) => {
+      const serviceDate = normalizeDateKey(entry.service_date);
+      return serviceDate && serviceDate >= startDate && serviceDate <= endDate;
+    })
+    .forEach((entry) => {
+      const row = ensureRow(entry.property_id);
+      if (row) row.chemicalCost += getChemicalUsageCost(entry);
+    });
+
+  if (selectedPropertyId) ensureRow(selectedPropertyId);
+
+  return Array.from(rowsByProperty.values())
+    .map((row) => {
+      const revenue = row.guestEngineRevenue + row.contractRevenue;
+      const actualDirectCosts = row.actualTechLabor + row.chemicalCost + row.partsCost;
+      const actualProfit = revenue - actualDirectCosts;
+      const fullyStaffedProfit = revenue - row.potentialLabor - row.chemicalCost - row.partsCost;
+      return {
+        ...row,
+        revenue,
+        actualDirectCosts,
+        actualProfit,
+        fullyStaffedProfit,
+        actualMargin: revenue !== 0 ? (actualProfit / revenue) * 100 : null,
+        fullyStaffedMargin: revenue !== 0 ? (fullyStaffedProfit / revenue) * 100 : null,
+      };
+    })
+    .sort((a, b) => a.propertyName.localeCompare(b.propertyName));
+}
+
+function formatServicePnlMargin(value) {
+  return Number.isFinite(value) ? `${value.toFixed(2)}%` : "-";
+}
+
+function renderServicePnlReport() {
+  if (!servicePnlContainer) return;
+
+  const startDate = servicePnlStartDate?.value || "";
+  const endDate = servicePnlEndDate?.value || "";
+  if (!startDate || !endDate) {
+    servicePnlContainer.innerHTML = '<div class="billing-report-sheet"><div class="empty">Select a start and end date.</div></div>';
+    return;
+  }
+  if (startDate > endDate) {
+    servicePnlContainer.innerHTML = '<div class="billing-report-sheet"><div class="empty">Start date must be on or before end date.</div></div>';
+    return;
+  }
+
+  const rows = getServicePnlRows({
+    startDate,
+    endDate,
+    selectedPropertyId: servicePnlPropertySelect?.value || "",
+  });
+  const totals = rows.reduce((summary, row) => {
+    summary.guestEngineRevenue += row.guestEngineRevenue;
+    summary.draftRevenue += row.draftRevenue;
+    summary.finalizedRevenue += row.finalizedRevenue;
+    summary.contractRevenue += row.contractRevenue;
+    summary.revenue += row.revenue;
+    summary.actualTechLabor += row.actualTechLabor;
+    summary.potentialLabor += row.potentialLabor;
+    summary.chemicalCost += row.chemicalCost;
+    summary.partsCost += row.partsCost;
+    return summary;
+  }, { guestEngineRevenue: 0, draftRevenue: 0, finalizedRevenue: 0, contractRevenue: 0, revenue: 0, actualTechLabor: 0, potentialLabor: 0, chemicalCost: 0, partsCost: 0 });
+  totals.actualDirectCosts = totals.actualTechLabor + totals.chemicalCost + totals.partsCost;
+  totals.actualProfit = totals.revenue - totals.actualDirectCosts;
+  totals.fullyStaffedProfit = totals.revenue - totals.potentialLabor - totals.chemicalCost - totals.partsCost;
+  totals.actualMargin = totals.revenue !== 0 ? (totals.actualProfit / totals.revenue) * 100 : null;
+  totals.fullyStaffedMargin = totals.revenue !== 0 ? (totals.fullyStaffedProfit / totals.revenue) * 100 : null;
+  const partialMonthlyNotices = rows.flatMap((row) => row.partialMonthlyPeriods.map((period) => `${row.propertyName}: ${period}`));
+  const reportNotices = [];
+  if (partialMonthlyNotices.length > 0) {
+    reportNotices.push(`Monthly contract revenue excluded for partial calendar period(s): ${partialMonthlyNotices.join(", ")}. No proration was applied.`);
+  }
+  if (!propertyContractRevenueHistoryAvailable) {
+    reportNotices.push("Contract history is unavailable. Run the contract revenue migration before relying on historical P&L results.");
+  }
+
+  const tableRows = rows.length
+    ? rows.map((row) => `
+        <tr>
+          <td>${escapeHtml(row.propertyName)}</td>
+          <td class="route-frag-money">${toMoney(row.contractRevenue)}</td>
+          <td class="route-frag-money">${toMoney(row.draftRevenue)}</td>
+          <td class="route-frag-money">${toMoney(row.finalizedRevenue)}</td>
+          <td class="route-frag-money">${toMoney(row.guestEngineRevenue)}</td>
+          <td class="route-frag-money">${toMoney(row.revenue)}</td>
+          <td>${row.ownerPerformedServices}</td>
+          <td>${row.techPerformedServices}</td>
+          <td class="route-frag-money">${toMoney(row.actualTechLabor)}</td>
+          <td class="route-frag-money">${toMoney(row.potentialLabor)}</td>
+          <td class="route-frag-money">${toMoney(row.chemicalCost)}</td>
+          <td class="route-frag-money">${toMoney(row.partsCost)}</td>
+          <td class="route-frag-money">${toMoney(row.actualProfit)}</td>
+          <td class="route-frag-money">${toMoney(row.fullyStaffedProfit)}</td>
+          <td class="route-frag-money">${formatServicePnlMargin(row.actualMargin)}</td>
+          <td class="route-frag-money">${formatServicePnlMargin(row.fullyStaffedMargin)}</td>
+        </tr>
+      `).join("")
+    : '<tr><td colspan="16">No contract revenue, Guest Engine revenue, completed task costs, or chemical usage found for this period.</td></tr>';
+
+  servicePnlContainer.innerHTML = `
+    <div class="billing-report-sheet service-pnl-sheet">
+      ${renderBillingReportHeader()}
+      <h2 class="billing-report-title">Service P&amp;L</h2>
+      <div class="billing-report-meta">Date Range: ${escapeHtml(startDate)} to ${escapeHtml(endDate)}</div>
+      ${reportNotices.map((notice) => `<div class="billing-report-notice">${escapeHtml(notice)}</div>`).join("")}
+      <div class="service-pnl-summary-grid">
+        <article><span>Contract Revenue</span><strong>${toMoney(totals.contractRevenue)}</strong></article>
+        <article><span>Draft Revenue</span><strong>${toMoney(totals.draftRevenue)}</strong></article>
+        <article><span>Finalized Revenue</span><strong>${toMoney(totals.finalizedRevenue)}</strong></article>
+        <article><span>Guest Engine Revenue</span><strong>${toMoney(totals.guestEngineRevenue)}</strong></article>
+        <article class="service-pnl-highlight"><span>Total Service Revenue</span><strong>${toMoney(totals.revenue)}</strong></article>
+        <article><span>Actual Tech Labor</span><strong>${toMoney(totals.actualTechLabor)}</strong></article>
+        <article><span>Chemical Cost</span><strong>${toMoney(totals.chemicalCost)}</strong></article>
+        <article><span>Parts Cost</span><strong>${toMoney(totals.partsCost)}</strong></article>
+        <article><span>Actual Direct Costs</span><strong>${toMoney(totals.actualDirectCosts)}</strong></article>
+        <article class="service-pnl-highlight"><span>Actual Service Profit</span><strong>${toMoney(totals.actualProfit)}</strong></article>
+        <article><span>Actual Margin</span><strong>${formatServicePnlMargin(totals.actualMargin)}</strong></article>
+        <article><span>Potential Fully Staffed Labor</span><strong>${toMoney(totals.potentialLabor)}</strong></article>
+        <article class="service-pnl-highlight"><span>Fully Staffed Service Profit</span><strong>${toMoney(totals.fullyStaffedProfit)}</strong></article>
+        <article><span>Fully Staffed Margin</span><strong>${formatServicePnlMargin(totals.fullyStaffedMargin)}</strong></article>
+      </div>
+      <div class="service-pnl-table-wrap">
+        <table class="route-frag-table service-pnl-table">
+          <thead>
+            <tr>
+              <th>Property</th>
+              <th>Contract Revenue</th>
+              <th>Draft Revenue</th>
+              <th>Finalized Revenue</th>
+              <th>Guest Engine Revenue</th>
+              <th>Total Service Revenue</th>
+              <th>Owner-Performed Services</th>
+              <th>Tech-Performed Services</th>
+              <th>Actual Tech Labor</th>
+              <th>Potential Labor</th>
+              <th>Chemical Cost</th>
+              <th>Parts Cost</th>
+              <th>Actual Profit</th>
+              <th>Fully Staffed Profit</th>
+              <th>Actual Margin</th>
+              <th>Fully Staffed Margin</th>
+            </tr>
+          </thead>
+          <tbody>${tableRows}</tbody>
+        </table>
+      </div>
+      ${renderBillingReportFooter()}
+    </div>
+  `;
+}
+
 function getBillingReportRows() {
   if (!billingReportStartDate || !billingReportEndDate) return [];
 
@@ -6894,6 +7467,7 @@ function renderBillingReport() {
 }
 
 async function loadInvoices() {
+  invoiceItems = [];
   const { data, error } = await supabaseClient
     .from("invoices")
     .select("*")
@@ -6923,6 +7497,8 @@ async function loadInvoices() {
     console.warn("Could not load invoice item property labels:", invoiceItemsError.message);
     return;
   }
+
+  invoiceItems = invoiceItemsData || [];
 
   const itemsByInvoiceId = new Map();
   (invoiceItemsData || []).forEach((item) => {
@@ -9279,6 +9855,7 @@ function renderTaskCard(task) {
   const weeklyServiceLevelMarkup = renderTaskWeeklyServiceLevelSelector(task);
   const technicianMarkup = renderTaskTechnicianSelector(task);
   const laborSnapshotLine = renderTaskLaborSnapshot(task);
+  const partsCostLine = renderTaskPartsCost(task);
 
   return `
     <div class="${cardClass}">
@@ -9303,6 +9880,7 @@ function renderTaskCard(task) {
         ${weeklyServiceLevelMarkup}
         ${technicianMarkup}
         ${laborSnapshotLine}
+        ${partsCostLine}
         ${task.check_in_date ? `<div><strong>Check-In:</strong> ${task.check_in_date}</div>` : ""}
         <div><strong>Status:</strong> <span class="status-badge ${badgeClass}">${status}</span></div>
       </div>
@@ -9547,6 +10125,7 @@ function renderWeekViewListTaskCard(task) {
   const weeklyServiceLevelMarkup = renderTaskWeeklyServiceLevelSelector(task);
   const technicianMarkup = renderTaskTechnicianSelector(task);
   const laborSnapshotLine = renderTaskLaborSnapshot(task);
+  const partsCostLine = renderTaskPartsCost(task);
 
   return `
     <div class="${taskClass}">
@@ -9571,6 +10150,7 @@ function renderWeekViewListTaskCard(task) {
       ${weeklyServiceLevelMarkup}
       ${technicianMarkup}
       ${laborSnapshotLine}
+      ${partsCostLine}
       ${task.check_in_date ? `<div class="task-line"><small>Prior to check-in: ${task.check_in_date}</small></div>` : ""}
       <div class="task-line"><small>Status: ${status}</small></div>
       ${task.notes ? `<div class="task-line"><small>Notes: ${stripManualBillingOverrideTag(task.notes)}</small></div>` : ""}
@@ -9641,6 +10221,7 @@ function renderWeekViewCalendar(weekTasks) {
                     const weeklyServiceLevelMarkup = renderTaskWeeklyServiceLevelSelector(task, { compact: true });
                     const technicianMarkup = renderTaskTechnicianSelector(task, { compact: true });
                     const laborSnapshotLine = renderTaskLaborSnapshot(task);
+                    const partsCostLine = renderTaskPartsCost(task);
                     
                     return `
                       <div class="calendar-task-card">
@@ -9657,6 +10238,7 @@ function renderWeekViewCalendar(weekTasks) {
                         ${weeklyServiceLevelMarkup}
                         ${technicianMarkup}
                         ${laborSnapshotLine}
+                        ${partsCostLine}
                         ${showBilling ? `
                         <div class="calendar-task-billing-section">
                           <div class="calendar-task-section-label">Billing:</div>
@@ -9864,6 +10446,7 @@ function renderProperties() {
           const weeklyServiceLevelMarkup = renderTaskWeeklyServiceLevelSelector(task);
           const technicianMarkup = renderTaskTechnicianSelector(task);
           const laborSnapshotLine = renderTaskLaborSnapshot(task);
+          const partsCostLine = renderTaskPartsCost(task);
 
           const sameDayBadge = isSameDayCheckInGuestReadyTask(task)
             ? `<span class="task-alert-badge badge-alert-red">🚨 Same-Day Check-In</span>`
@@ -9890,6 +10473,7 @@ function renderProperties() {
               ${weeklyServiceLevelMarkup}
               ${technicianMarkup}
               ${laborSnapshotLine}
+              ${partsCostLine}
               <div class="task-line"><small>Status: ${task.status}</small></div>
               ${task.completed_at ? `<div class="task-line"><small>Completed: ${new Date(task.completed_at).toLocaleString()}</small></div>` : ""}
               ${task.check_in_date ? `<div class="task-line"><small>Prior to check-in: ${task.check_in_date}</small></div>` : ""}
@@ -9932,6 +10516,7 @@ function renderProperties() {
           <div><strong>Guest Ready Coverage Rule:</strong> ${getCoverageRuleLabel(getCoverageRuleForProperty(property))}</div>
           <div><strong>Billable Guest Ready Charge:</strong> $${Number(property.default_off_cycle_charge ?? 65).toFixed(2)}</div>
           <div><strong>Standard Weekly Service Labor:</strong> $${Number(property.weekly_service_labor || 0).toFixed(2)}</div>
+          <div><strong>Contract Revenue:</strong> $${Number(property.contract_revenue_amount || 0).toFixed(2)} ${getContractRateBasisLabel(property.contract_rate_basis)}</div>
           <div><strong>Guest Ready Service Labor:</strong> $${Number(property.guest_ready_service_labor || 0).toFixed(2)}</div>
           <div><strong>Additional / Billable Cleaning Labor:</strong> $${Number(property.additional_cleaning_labor || 0).toFixed(2)}</div>
           <div><strong>Default Cleaning Rate:</strong> $${Number(property.default_cleaning_rate ?? 0).toFixed(2)}</div>
@@ -10114,6 +10699,11 @@ async function openReportFromDashboard(reportKey) {
 
   if (reportKey === "labor") {
     await navigateToView("laborReport");
+    return;
+  }
+
+  if (reportKey === "servicePnl") {
+    await navigateToView("servicePnl");
     return;
   }
 
