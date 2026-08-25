@@ -9630,12 +9630,14 @@ function renderWeekViewCalendar(weekTasks) {
                 : dayTasks.map(task => {
                     const propertyName = properties.find(p => p.id === task.property_id)?.property_name || 'Unknown';
                     const guestReadyBadge = task.guest_ready ? `<span class="status-badge badge-yellow">GUEST READY</span>` : '';
-                    const completedBadge = task.status === "Completed" ? `<span class="status-badge badge-green">COMPLETED</span>` : '';
-                    const badgesToShow = guestReadyBadge || completedBadge || `<span class="status-badge badge-blue">${task.status || 'Scheduled'}</span>`;
+                    const statusBadge = task.status === "Completed"
+                      ? `<span class="status-badge badge-green">COMPLETED</span>`
+                      : `<span class="status-badge badge-blue">${task.status || 'Scheduled'}</span>`;
                     const alertBadge = getAlertBadgeForTask(task);
                     const showReconcile = shouldShowReconcileForTask(task);
                     const invoiceMarkerClass = task.invoiced ? "invoice-marker-checked" : "invoice-marker-unchecked";
                     const sdsReconcileControl = renderSdsReconcileControl(task);
+                    const showBilling = showReconcile || Boolean(sdsReconcileControl);
                     const weeklyServiceLevelMarkup = renderTaskWeeklyServiceLevelSelector(task, { compact: true });
                     const technicianMarkup = renderTaskTechnicianSelector(task, { compact: true });
                     const laborSnapshotLine = renderTaskLaborSnapshot(task);
@@ -9644,25 +9646,31 @@ function renderWeekViewCalendar(weekTasks) {
                       <div class="calendar-task-card">
                         <div class="calendar-task-header">
                           <div class="calendar-task-property">${propertyName}</div>
+                        </div>
+                        <div class="calendar-task-type">${task.service_type}</div>
+                        ${guestReadyBadge}
+                        ${alertBadge}
+                        <div class="calendar-task-status">
+                          <span>Status:</span>
+                          ${statusBadge}
+                        </div>
+                        ${weeklyServiceLevelMarkup}
+                        ${technicianMarkup}
+                        ${laborSnapshotLine}
+                        ${showBilling ? `
+                        <div class="calendar-task-billing-section">
+                          <div class="calendar-task-section-label">Billing:</div>
                           ${showReconcile ? `
                           <label class="invoice-marker ${invoiceMarkerClass}">
                             <input type="checkbox" ${task.invoiced ? "checked" : ""} onchange="toggleInvoiceMarker('${task.id}')" />
-                            <span>$</span>
+                            <span>Reconcile</span>
                           </label>
                           ` : ""}
                           ${sdsReconcileControl}
                         </div>
-                        <div class="calendar-task-type">${task.service_type}</div>
-                        ${badgesToShow}
-                        ${alertBadge}
-                        <div class="calendar-task-status">${task.status || 'Scheduled'}</div>
-                        ${weeklyServiceLevelMarkup}
-                        ${technicianMarkup}
-                        ${laborSnapshotLine}
-                        <div class="calendar-task-edit-section">
-                          <button class="calendar-task-btn edit-btn" onclick="openEditCleaning('${task.id}')">Edit</button>
-                        </div>
+                        ` : ""}
                         <div class="calendar-task-action-section">
+                          <button class="calendar-task-btn edit-btn" onclick="openEditCleaning('${task.id}')">Edit</button>
                           ${task.status !== "Completed" ? `<button class="calendar-task-btn complete-btn" onclick="markCleaningComplete('${task.id}')">Complete</button>` : '<div class="calendar-task-btn-placeholder"></div>'}
                           <button class="calendar-task-btn delete-btn" onclick="deleteCleaningTask('${task.id}')">Delete</button>
                         </div>

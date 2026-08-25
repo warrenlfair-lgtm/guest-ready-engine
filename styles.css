@@ -1344,20 +1344,15 @@ textarea{
 }
 
 .calendar-task-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    gap: 8px;
+    min-height: 34px;
 }
 
 .calendar-task-property {
-    font-size: 13px;
+    font-size: 14px;
+    line-height: 1.25;
     font-weight: 700;
     color: #1f2937;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    flex: 1;
+    overflow-wrap: anywhere;
 }
 
 .calendar-task-type {
@@ -1372,19 +1367,62 @@ textarea{
 }
 
 .calendar-task-status {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
     font-size: 12px;
     color: #374151;
 }
 
-.calendar-task-edit-section {
+.calendar-task-billing-section {
     display: flex;
+    flex-direction: column;
+    align-items: flex-start;
     gap: 6px;
-    margin-top: 8px;
-    margin-bottom: 8px;
+    margin-top: 6px;
+    padding-top: 8px;
+    border-top: 1px solid #e5e7eb;
+}
+
+.calendar-task-section-label {
+    font-size: 12px;
+    font-weight: 700;
+    color: #374151;
+}
+
+.calendar-task-billing-section .invoice-marker {
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+    padding: 5px 7px;
+    font-size: 12px;
+    white-space: normal;
+}
+
+.calendar-task-billing-section .invoice-marker span {
+    overflow-wrap: anywhere;
+}
+
+.calendar-task-card .task-tech-select-row {
+    flex-direction: column;
+    align-items: stretch;
+}
+
+.calendar-task-card .task-tech-select,
+.calendar-task-card .manual-labor-input {
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+}
+
+.calendar-task-card .task-tech-save-btn {
+    white-space: normal;
 }
 
 .calendar-task-action-section {
     display: flex;
+    flex-wrap: wrap;
     gap: 6px;
     margin-top: 8px;
 }
@@ -1402,14 +1440,9 @@ textarea{
     text-overflow: ellipsis;
 }
 
-.calendar-task-edit-section .calendar-task-btn {
-    flex: 1;
-    width: 100%;
-}
-
 .calendar-task-action-section .calendar-task-btn {
-    flex: 1;
-    min-width: 0;
+    flex: 1 1 76px;
+    min-width: 76px;
 }
 
 .calendar-task-btn-placeholder {
