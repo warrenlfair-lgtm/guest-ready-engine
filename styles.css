@@ -1996,7 +1996,99 @@ textarea{
 }
 
 .service-pnl-table {
-    min-width: 1780px;
+    min-width: 2020px;
+}
+
+.service-pnl-operating-breakdown {
+    margin: 18px 0;
+    padding-top: 14px;
+    border-top: 1px solid #dbe2ea;
+}
+
+.service-pnl-operating-breakdown h3 {
+    margin: 0 0 10px;
+}
+
+.service-pnl-expense-split {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px 24px;
+    margin-bottom: 12px;
+    color: #475569;
+}
+
+.service-pnl-expense-split strong {
+    color: #0f172a;
+    margin-left: 6px;
+}
+
+.expense-ledger-summary {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    margin: 14px 0 8px;
+    padding: 12px 14px;
+    border-left: 4px solid #0f766e;
+    background: #f0fdfa;
+    color: #334155;
+}
+
+.expense-ledger-summary strong,
+.expense-report-total {
+    color: #0f172a;
+    font-size: 20px;
+}
+
+.expense-table-wrap {
+    width: 100%;
+    overflow-x: auto;
+}
+
+.expense-table {
+    width: 100%;
+    min-width: 1050px;
+    border-collapse: collapse;
+}
+
+.expense-table th,
+.expense-table td {
+    padding: 9px 10px;
+    border-bottom: 1px solid #e2e8f0;
+    text-align: left;
+    vertical-align: top;
+}
+
+.expense-table th {
+    background: #f8fafc;
+    color: #334155;
+    font-size: 12px;
+}
+
+.expense-category-table {
+    width: min(100%, 480px);
+    margin: 12px 0 18px;
+}
+
+.expense-category-table th:last-child,
+.expense-category-table td:last-child {
+    text-align: right;
+}
+
+.expense-report-total {
+    margin: 16px 0;
+    padding: 12px 0;
+    border-top: 2px solid #0f766e;
+    border-bottom: 1px solid #dbe2ea;
+    font-weight: 700;
+}
+
+@media (max-width: 700px) {
+    .expense-ledger-summary,
+    .service-pnl-expense-split {
+        align-items: flex-start;
+        flex-direction: column;
+    }
 }
 
 .labor-summary-grid {
@@ -2875,6 +2967,8 @@ textarea{
     #laborReportActions,
     #servicePnlFilterPanel,
     #servicePnlView .labor-report-actions,
+    #expenseReportFilterPanel,
+    #expenseReportView .labor-report-actions,
     #reportsDashboardCards,
     #invoiceHistoryFilterPanel,
     #invoiceHistoryContainer,
@@ -2888,6 +2982,7 @@ textarea{
     body.print-view-billing #billingView,
     body.print-view-labor #laborReportView,
     body.print-view-service-pnl #servicePnlView,
+    body.print-view-expense-report #expenseReportView,
     body.print-view-invoice #billingView {
         display: block !important;
     }

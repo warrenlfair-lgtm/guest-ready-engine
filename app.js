@@ -7,6 +7,7 @@ let chemicals = [];
 let technicians = [];
 let invoices = [];
 let invoiceItems = [];
+let expenses = [];
 let propertyContractRevenueHistory = [];
 let propertyContractRevenueHistoryAvailable = true;
 let invoicePropertyLabelById = new Map();
@@ -40,6 +41,7 @@ let editingReminderId = null;
 let editingChemicalUsageId = null;
 let editingChemicalSettingId = null;
 let editingTechnicianId = null;
+let editingExpenseId = null;
 let taskTechnicianSelections = new Map();
 let taskWeeklyServiceLevelSelections = new Map();
 let cleaningModalInitialState = null;
@@ -88,6 +90,10 @@ const INVOICE_QUICK_ADD_TEMPLATES = {
   credit: { description: "Credit", unit: "credit", rate: -25, itemType: "credit" },
 };
 const CHEMICAL_UNIT_OPTIONS = ["gallons", "pounds", "ounces", "tablets", "bags", "quarts"];
+const EXPENSE_CATEGORIES = [
+  "Fuel", "Vehicle", "Equipment", "Supplies", "Insurance", "Software",
+  "Advertising", "Disposal / Dump Fees", "Subcontractor", "Office", "Other",
+];
 const DEFAULT_CHEMICAL_CATALOG = [
   { name: "Liquid Chlorine", default_unit: "gallons", cost_per_unit: 0, billable_rate_per_unit: 0, is_billable: true },
   { name: "Chlorine Tablets", default_unit: "tablets", cost_per_unit: 0, billable_rate_per_unit: 0, is_billable: true },
@@ -256,6 +262,34 @@ const servicePnlPropertySelect = document.getElementById("servicePnlPropertySele
 const servicePnlRunBtn = document.getElementById("servicePnlRunBtn");
 const servicePnlPrintBtn = document.getElementById("servicePnlPrintBtn");
 const servicePnlContainer = document.getElementById("servicePnlContainer");
+const addExpenseBtn = document.getElementById("addExpenseBtn");
+const expenseLedgerRows = document.getElementById("expenseLedgerRows");
+const expenseLedgerSummary = document.getElementById("expenseLedgerSummary");
+const expenseStartDate = document.getElementById("expenseStartDate");
+const expenseEndDate = document.getElementById("expenseEndDate");
+const expenseCategoryFilter = document.getElementById("expenseCategoryFilter");
+const expenseBranchFilter = document.getElementById("expenseBranchFilter");
+const expensePropertyFilter = document.getElementById("expensePropertyFilter");
+const expenseRunFilterBtn = document.getElementById("expenseRunFilterBtn");
+const expenseModal = document.getElementById("expenseModal");
+const expenseModalTitle = document.getElementById("expenseModalTitle");
+const expenseDateInput = document.getElementById("expenseDateInput");
+const expenseCategoryInput = document.getElementById("expenseCategoryInput");
+const expenseDescriptionInput = document.getElementById("expenseDescriptionInput");
+const expenseAmountInput = document.getElementById("expenseAmountInput");
+const expenseBranchInput = document.getElementById("expenseBranchInput");
+const expensePropertyInput = document.getElementById("expensePropertyInput");
+const expenseNotesInput = document.getElementById("expenseNotesInput");
+const cancelExpenseBtn = document.getElementById("cancelExpenseBtn");
+const saveExpenseBtn = document.getElementById("saveExpenseBtn");
+const expenseReportStartDate = document.getElementById("expenseReportStartDate");
+const expenseReportEndDate = document.getElementById("expenseReportEndDate");
+const expenseReportCategory = document.getElementById("expenseReportCategory");
+const expenseReportBranch = document.getElementById("expenseReportBranch");
+const expenseReportProperty = document.getElementById("expenseReportProperty");
+const expenseReportRunBtn = document.getElementById("expenseReportRunBtn");
+const expenseReportPrintBtn = document.getElementById("expenseReportPrintBtn");
+const expenseReportContainer = document.getElementById("expenseReportContainer");
 const chemicalReportStartDate = document.getElementById("chemicalReportStartDate");
 const chemicalReportEndDate = document.getElementById("chemicalReportEndDate");
 const chemicalReportPropertySelect = document.getElementById("chemicalReportPropertySelect");
@@ -652,6 +686,18 @@ if (servicePnlPrintBtn) {
   servicePnlPrintBtn.addEventListener("click", printServicePnlReport);
 }
 
+if (addExpenseBtn) addExpenseBtn.addEventListener("click", () => openExpenseModal());
+if (cancelExpenseBtn) cancelExpenseBtn.addEventListener("click", closeExpenseModal);
+if (saveExpenseBtn) saveExpenseBtn.addEventListener("click", saveExpense);
+if (expenseRunFilterBtn) expenseRunFilterBtn.addEventListener("click", renderExpenseLedger);
+if (expenseReportRunBtn) expenseReportRunBtn.addEventListener("click", renderExpenseReport);
+if (expenseReportPrintBtn) expenseReportPrintBtn.addEventListener("click", () => runPrintForView("print-view-expense-report"));
+if (expenseModal) {
+  expenseModal.addEventListener("click", (event) => {
+    if (event.target === expenseModal) closeExpenseModal();
+  });
+}
+
 if (chemicalReportStartDate) {
   chemicalReportStartDate.addEventListener("change", renderChemicalUsageReport);
 }
@@ -945,6 +991,16 @@ function showView(viewName) {
   if (viewName === "servicePnl") {
     populateServicePnlPropertyOptions();
     renderServicePnlReport();
+  }
+
+  if (viewName === "expenses") {
+    populateExpenseControls();
+    renderExpenseLedger();
+  }
+
+  if (viewName === "expenseReport") {
+    populateExpenseControls();
+    renderExpenseReport();
   }
 
   if (viewName === "reports") {
@@ -1360,11 +1416,11 @@ function initializeChemicalReportFilters() {
 
 function runPrintForView(viewClassName) {
   const body = document.body;
-  body.classList.remove("print-view-billing", "print-view-chemical", "print-view-invoice", "print-view-labor", "print-view-service-pnl");
+  body.classList.remove("print-view-billing", "print-view-chemical", "print-view-invoice", "print-view-labor", "print-view-service-pnl", "print-view-expense-report");
   body.classList.add(viewClassName);
   window.print();
   setTimeout(() => {
-    body.classList.remove("print-view-billing", "print-view-chemical", "print-view-invoice", "print-view-labor", "print-view-service-pnl");
+    body.classList.remove("print-view-billing", "print-view-chemical", "print-view-invoice", "print-view-labor", "print-view-service-pnl", "print-view-expense-report");
   }, 250);
 }
 
@@ -1382,6 +1438,241 @@ function printLaborReport() {
 
 function printServicePnlReport() {
   runPrintForView("print-view-service-pnl");
+}
+
+function getExpenseDefaultDateRange() {
+  const now = new Date();
+  return {
+    startDate: formatDateValue(new Date(now.getFullYear(), now.getMonth(), 1)),
+    endDate: formatDateValue(new Date(now.getFullYear(), now.getMonth() + 1, 0)),
+  };
+}
+
+function ensureExpenseDateDefaults(startInput, endInput) {
+  const defaults = getExpenseDefaultDateRange();
+  if (startInput && !startInput.value) startInput.value = defaults.startDate;
+  if (endInput && !endInput.value) endInput.value = defaults.endDate;
+}
+
+function populateSelectOptions(select, options, firstLabel, selectedValue = "") {
+  if (!select) return;
+  select.innerHTML = [`<option value="">${escapeHtml(firstLabel)}</option>`]
+    .concat(options.map((option) => `<option value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</option>`))
+    .join("");
+  select.value = options.some((option) => String(option.value) === String(selectedValue)) ? selectedValue : "";
+}
+
+function populateExpenseControls() {
+  ensureExpenseDateDefaults(expenseStartDate, expenseEndDate);
+  ensureExpenseDateDefaults(expenseReportStartDate, expenseReportEndDate);
+
+  const categoryOptions = EXPENSE_CATEGORIES.map((category) => ({ value: category, label: category }));
+  const branchOptions = COMPANY_BRANCH_OPTIONS.map((branch) => ({ value: branch, label: branch }));
+  const propertyOptions = properties
+    .slice()
+    .sort((a, b) => String(a.property_name || "").localeCompare(String(b.property_name || "")))
+    .map((property) => ({ value: property.id, label: property.property_name || "Unnamed Property" }));
+  const propertyFilterOptions = [{ value: "__general__", label: "General Business Expenses" }, ...propertyOptions];
+
+  const controls = [
+    [expenseCategoryFilter, categoryOptions, "All Categories"],
+    [expenseReportCategory, categoryOptions, "All Categories"],
+    [expenseBranchFilter, branchOptions, "All Branches"],
+    [expenseReportBranch, branchOptions, "All Branches"],
+    [expensePropertyFilter, propertyFilterOptions, "All Properties"],
+    [expenseReportProperty, propertyFilterOptions, "All Properties"],
+  ];
+  controls.forEach(([select, options, label]) => populateSelectOptions(select, options, label, select?.value || ""));
+
+  if (expenseCategoryInput) {
+    expenseCategoryInput.innerHTML = categoryOptions.map((option) => `<option value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</option>`).join("");
+  }
+  if (expenseBranchInput) {
+    expenseBranchInput.innerHTML = branchOptions.map((option) => `<option value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</option>`).join("");
+  }
+  if (expensePropertyInput) {
+    populateSelectOptions(expensePropertyInput, propertyOptions, "General Business Expense", expensePropertyInput.value || "");
+  }
+}
+
+function getExpensePropertyLabel(expense) {
+  if (!expense?.property_id) return "General Business Expense";
+  return getPropertyName(expense.property_id);
+}
+
+function getFilteredExpenses({ startDate = "", endDate = "", category = "", branch = "", propertyId = "" } = {}) {
+  return expenses
+    .filter((expense) => !startDate || normalizeDateKey(expense.expense_date) >= startDate)
+    .filter((expense) => !endDate || normalizeDateKey(expense.expense_date) <= endDate)
+    .filter((expense) => !category || expense.category === category)
+    .filter((expense) => !branch || normalizeCompanyBranch(expense.company_branch) === branch)
+    .filter((expense) => {
+      if (!propertyId) return true;
+      if (propertyId === "__general__") return !expense.property_id;
+      return normalizePropertyId(expense.property_id) === normalizePropertyId(propertyId);
+    })
+    .slice()
+    .sort((a, b) => String(b.expense_date || "").localeCompare(String(a.expense_date || "")));
+}
+
+function getExpenseLedgerFilters(reportMode = false) {
+  return reportMode
+    ? {
+        startDate: expenseReportStartDate?.value || "",
+        endDate: expenseReportEndDate?.value || "",
+        category: expenseReportCategory?.value || "",
+        branch: expenseReportBranch?.value || "",
+        propertyId: expenseReportProperty?.value || "",
+      }
+    : {
+        startDate: expenseStartDate?.value || "",
+        endDate: expenseEndDate?.value || "",
+        category: expenseCategoryFilter?.value || "",
+        branch: expenseBranchFilter?.value || "",
+        propertyId: expensePropertyFilter?.value || "",
+      };
+}
+
+async function loadExpenses() {
+  const { data, error } = await supabaseClient
+    .from("expenses")
+    .select("*")
+    .order("expense_date", { ascending: false });
+
+  if (error) {
+    expenses = [];
+    if (!String(error.message || "").toLowerCase().includes("expenses")) {
+      console.warn("Could not load expenses:", error.message);
+    }
+    return;
+  }
+  expenses = data || [];
+}
+
+function openExpenseModal(expenseId = null) {
+  editingExpenseId = expenseId;
+  const expense = expenseId ? expenses.find((item) => String(item.id) === String(expenseId)) : null;
+  populateExpenseControls();
+  if (expenseModalTitle) expenseModalTitle.textContent = expense ? "Edit Expense" : "Add Expense";
+  if (expenseDateInput) expenseDateInput.value = normalizeDateKey(expense?.expense_date) || formatDateValue(new Date());
+  if (expenseCategoryInput) expenseCategoryInput.value = expense?.category || EXPENSE_CATEGORIES[0];
+  if (expenseDescriptionInput) expenseDescriptionInput.value = expense?.description || "";
+  if (expenseAmountInput) expenseAmountInput.value = expense ? Number(expense.amount || 0) : "";
+  if (expenseBranchInput) expenseBranchInput.value = normalizeCompanyBranch(expense?.company_branch);
+  if (expensePropertyInput) expensePropertyInput.value = expense?.property_id || "";
+  if (expenseNotesInput) expenseNotesInput.value = expense?.notes || "";
+  expenseModal?.classList.remove("hidden");
+}
+
+function closeExpenseModal() {
+  editingExpenseId = null;
+  expenseModal?.classList.add("hidden");
+}
+
+async function saveExpense() {
+  const amount = Number(expenseAmountInput?.value || 0);
+  const expenseDateValue = normalizeDateKey(expenseDateInput?.value);
+  const description = String(expenseDescriptionInput?.value || "").trim();
+  if (!expenseDateValue || !description || !Number.isFinite(amount) || amount <= 0) {
+    alert("Expense date, description, and an amount greater than zero are required.");
+    return;
+  }
+
+  const selectedPropertyId = expensePropertyInput?.value || null;
+  const payload = {
+    expense_date: expenseDateValue,
+    category: EXPENSE_CATEGORIES.includes(expenseCategoryInput?.value) ? expenseCategoryInput.value : "Other",
+    description,
+    amount,
+    company_branch: normalizeCompanyBranch(expenseBranchInput?.value),
+    property_id: selectedPropertyId,
+    company_id: null,
+    notes: String(expenseNotesInput?.value || "").trim() || null,
+  };
+
+  const result = editingExpenseId
+    ? await supabaseClient.from("expenses").update(payload).eq("id", editingExpenseId)
+    : await supabaseClient.from("expenses").insert([payload]);
+  if (result.error) {
+    alert("Could not save expense: " + result.error.message + "\nRun the expense migration first if needed.");
+    return;
+  }
+
+  closeExpenseModal();
+  await loadExpenses();
+  renderExpenseLedger();
+  renderExpenseReport();
+  renderServicePnlReport();
+}
+
+async function deleteExpense(expenseId) {
+  const expense = expenses.find((item) => String(item.id) === String(expenseId));
+  if (!expense || !window.confirm(`Delete ${expense.description} for ${toMoney(expense.amount)}?`)) return;
+  const { error } = await supabaseClient.from("expenses").delete().eq("id", expenseId);
+  if (error) {
+    alert("Could not delete expense: " + error.message);
+    return;
+  }
+  await loadExpenses();
+  renderExpenseLedger();
+  renderExpenseReport();
+  renderServicePnlReport();
+}
+
+function renderExpenseLedger() {
+  if (!expenseLedgerRows) return;
+  const rows = getFilteredExpenses(getExpenseLedgerFilters(false));
+  const total = rows.reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
+  if (expenseLedgerSummary) {
+    expenseLedgerSummary.innerHTML = `<span>${rows.length} expense${rows.length === 1 ? "" : "s"}</span><strong>${toMoney(total)}</strong>`;
+  }
+  expenseLedgerRows.innerHTML = rows.length
+    ? rows.map((expense) => `
+      <tr>
+        <td>${escapeHtml(normalizeDateKey(expense.expense_date) || "")}</td>
+        <td>${escapeHtml(expense.category || "Other")}</td>
+        <td>${escapeHtml(expense.description || "")}</td>
+        <td class="route-frag-money">${toMoney(expense.amount)}</td>
+        <td>${escapeHtml(normalizeCompanyBranch(expense.company_branch))}</td>
+        <td>${escapeHtml(getExpensePropertyLabel(expense))}</td>
+        <td>${escapeHtml(expense.notes || "")}</td>
+        <td><button type="button" onclick="openExpenseModal('${expense.id}')">Edit</button> <button type="button" class="delete-btn" onclick="deleteExpense('${expense.id}')">Delete</button></td>
+      </tr>`).join("")
+    : '<tr><td colspan="8">No operating expenses found for these filters.</td></tr>';
+}
+
+function getExpenseCategoryTotals(rows) {
+  return rows.reduce((totals, expense) => {
+    const category = EXPENSE_CATEGORIES.includes(expense.category) ? expense.category : "Other";
+    totals[category] = (totals[category] || 0) + Number(expense.amount || 0);
+    return totals;
+  }, {});
+}
+
+function renderExpenseReport() {
+  if (!expenseReportContainer) return;
+  const filters = getExpenseLedgerFilters(true);
+  const rows = getFilteredExpenses(filters);
+  const total = rows.reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
+  const categoryTotals = getExpenseCategoryTotals(rows);
+  const categoryMarkup = EXPENSE_CATEGORIES
+    .filter((category) => Number(categoryTotals[category] || 0) > 0)
+    .map((category) => `<tr><td>${escapeHtml(category)}</td><td class="route-frag-money">${toMoney(categoryTotals[category])}</td></tr>`)
+    .join("");
+  const tableRows = rows.length
+    ? rows.map((expense) => `<tr><td>${escapeHtml(normalizeDateKey(expense.expense_date) || "")}</td><td>${escapeHtml(expense.category)}</td><td>${escapeHtml(expense.description)}</td><td>${escapeHtml(normalizeCompanyBranch(expense.company_branch))}</td><td>${escapeHtml(getExpensePropertyLabel(expense))}</td><td>${escapeHtml(expense.notes || "")}</td><td class="route-frag-money">${toMoney(expense.amount)}</td></tr>`).join("")
+    : '<tr><td colspan="7">No operating expenses found for these filters.</td></tr>';
+
+  expenseReportContainer.innerHTML = `
+    <div class="billing-report-sheet expense-report-sheet">
+      ${renderBillingReportHeader()}
+      <h2 class="billing-report-title">Expense Ledger Report</h2>
+      <div class="billing-report-meta">Date Range: ${escapeHtml(filters.startDate || "All")} to ${escapeHtml(filters.endDate || "All")}</div>
+      <div class="expense-report-total">Total Operating Expenses: ${toMoney(total)}</div>
+      ${categoryMarkup ? `<table class="route-frag-table expense-category-table"><thead><tr><th>Category</th><th>Total</th></tr></thead><tbody>${categoryMarkup}</tbody></table>` : ""}
+      <div class="expense-table-wrap"><table class="expense-table"><thead><tr><th>Date</th><th>Category</th><th>Description</th><th>Branch</th><th>Property</th><th>Notes</th><th>Amount</th></tr></thead><tbody>${tableRows}</tbody></table></div>
+      ${renderBillingReportFooter()}
+    </div>`;
 }
 
 async function runHistoricalLaborBackfill() {
@@ -2127,6 +2418,7 @@ async function loadData() {
   await loadTechnicians();
   await loadChemicalUsageEntries();
   await loadInvoices();
+  await loadExpenses();
   renderChemicalSettingsSection();
   renderTechnicianSettingsSection();
   initializeChemicalUsageOptions();
@@ -2150,6 +2442,9 @@ async function loadData() {
   renderInvoicePreview();
   renderInvoiceBatchPreview();
   renderInvoiceHistory();
+  populateExpenseControls();
+  renderExpenseLedger();
+  renderExpenseReport();
   renderRouteFragmentationAnalytics();
   if (!document.getElementById("chemicalReportWorkspace")?.classList.contains("hidden")) {
     renderChemicalUsageReport();
@@ -6830,6 +7125,7 @@ function getServicePnlRows({ startDate, endDate, selectedPropertyId = "" } = {})
         potentialLabor: 0,
         chemicalCost: 0,
         partsCost: 0,
+        propertyOperatingExpenses: 0,
       });
     }
     return rowsByProperty.get(normalizedId);
@@ -6917,6 +7213,18 @@ function getServicePnlRows({ startDate, endDate, selectedPropertyId = "" } = {})
       if (row) row.chemicalCost += getChemicalUsageCost(entry);
     });
 
+  expenses
+    .filter((expense) => Boolean(expense.property_id))
+    .filter((expense) => propertyMatches(expense.property_id))
+    .filter((expense) => {
+      const expenseDateKey = normalizeDateKey(expense.expense_date);
+      return expenseDateKey && expenseDateKey >= startDate && expenseDateKey <= endDate;
+    })
+    .forEach((expense) => {
+      const row = ensureRow(expense.property_id);
+      if (row) row.propertyOperatingExpenses += Math.max(0, Number(expense.amount || 0));
+    });
+
   if (selectedPropertyId) ensureRow(selectedPropertyId);
 
   return Array.from(rowsByProperty.values())
@@ -6925,11 +7233,13 @@ function getServicePnlRows({ startDate, endDate, selectedPropertyId = "" } = {})
       const actualDirectCosts = row.actualTechLabor + row.chemicalCost + row.partsCost;
       const actualProfit = revenue - actualDirectCosts;
       const fullyStaffedProfit = revenue - row.potentialLabor - row.chemicalCost - row.partsCost;
+      const propertyNetProfit = actualProfit - row.propertyOperatingExpenses;
       return {
         ...row,
         revenue,
         actualDirectCosts,
         actualProfit,
+        propertyNetProfit,
         fullyStaffedProfit,
         actualMargin: revenue !== 0 ? (actualProfit / revenue) * 100 : null,
         fullyStaffedMargin: revenue !== 0 ? (fullyStaffedProfit / revenue) * 100 : null,
@@ -6961,6 +7271,20 @@ function renderServicePnlReport() {
     endDate,
     selectedPropertyId: servicePnlPropertySelect?.value || "",
   });
+  const selectedPropertyId = servicePnlPropertySelect?.value || "";
+  const operatingExpenseRows = getFilteredExpenses({
+    startDate,
+    endDate,
+    propertyId: selectedPropertyId,
+  }).filter((expense) => !selectedPropertyId || Boolean(expense.property_id));
+  const operatingExpenseCategoryTotals = getExpenseCategoryTotals(operatingExpenseRows);
+  const generalBusinessExpenses = selectedPropertyId
+    ? 0
+    : operatingExpenseRows.filter((expense) => !expense.property_id).reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
+  const propertySpecificExpenses = operatingExpenseRows
+    .filter((expense) => Boolean(expense.property_id))
+    .reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
+  const operatingExpenses = generalBusinessExpenses + propertySpecificExpenses;
   const totals = rows.reduce((summary, row) => {
     summary.guestEngineRevenue += row.guestEngineRevenue;
     summary.draftRevenue += row.draftRevenue;
@@ -6971,13 +7295,17 @@ function renderServicePnlReport() {
     summary.potentialLabor += row.potentialLabor;
     summary.chemicalCost += row.chemicalCost;
     summary.partsCost += row.partsCost;
+    summary.propertyOperatingExpenses += row.propertyOperatingExpenses;
     return summary;
-  }, { guestEngineRevenue: 0, draftRevenue: 0, finalizedRevenue: 0, contractRevenue: 0, revenue: 0, actualTechLabor: 0, potentialLabor: 0, chemicalCost: 0, partsCost: 0 });
+  }, { guestEngineRevenue: 0, draftRevenue: 0, finalizedRevenue: 0, contractRevenue: 0, revenue: 0, actualTechLabor: 0, potentialLabor: 0, chemicalCost: 0, partsCost: 0, propertyOperatingExpenses: 0 });
   totals.actualDirectCosts = totals.actualTechLabor + totals.chemicalCost + totals.partsCost;
   totals.actualProfit = totals.revenue - totals.actualDirectCosts;
   totals.fullyStaffedProfit = totals.revenue - totals.potentialLabor - totals.chemicalCost - totals.partsCost;
   totals.actualMargin = totals.revenue !== 0 ? (totals.actualProfit / totals.revenue) * 100 : null;
   totals.fullyStaffedMargin = totals.revenue !== 0 ? (totals.fullyStaffedProfit / totals.revenue) * 100 : null;
+  totals.operatingExpenses = operatingExpenses;
+  totals.netOperatingProfit = totals.actualProfit - operatingExpenses;
+  totals.operatingMargin = totals.revenue !== 0 ? (totals.netOperatingProfit / totals.revenue) * 100 : null;
   const partialMonthlyNotices = rows.flatMap((row) => row.partialMonthlyPeriods.map((period) => `${row.propertyName}: ${period}`));
   const reportNotices = [];
   if (partialMonthlyNotices.length > 0) {
@@ -7003,12 +7331,18 @@ function renderServicePnlReport() {
           <td class="route-frag-money">${toMoney(row.chemicalCost)}</td>
           <td class="route-frag-money">${toMoney(row.partsCost)}</td>
           <td class="route-frag-money">${toMoney(row.actualProfit)}</td>
+          <td class="route-frag-money">${toMoney(row.propertyOperatingExpenses)}</td>
+          <td class="route-frag-money">${toMoney(row.propertyNetProfit)}</td>
           <td class="route-frag-money">${toMoney(row.fullyStaffedProfit)}</td>
           <td class="route-frag-money">${formatServicePnlMargin(row.actualMargin)}</td>
           <td class="route-frag-money">${formatServicePnlMargin(row.fullyStaffedMargin)}</td>
         </tr>
       `).join("")
-    : '<tr><td colspan="16">No contract revenue, Guest Engine revenue, completed task costs, or chemical usage found for this period.</td></tr>';
+    : '<tr><td colspan="18">No revenue, service costs, or property operating expenses found for this period.</td></tr>';
+  const operatingCategoryRows = EXPENSE_CATEGORIES
+    .filter((category) => Number(operatingExpenseCategoryTotals[category] || 0) > 0)
+    .map((category) => `<tr><td>${escapeHtml(category)}</td><td class="route-frag-money">${toMoney(operatingExpenseCategoryTotals[category])}</td></tr>`)
+    .join("");
 
   servicePnlContainer.innerHTML = `
     <div class="billing-report-sheet service-pnl-sheet">
@@ -7026,11 +7360,22 @@ function renderServicePnlReport() {
         <article><span>Chemical Cost</span><strong>${toMoney(totals.chemicalCost)}</strong></article>
         <article><span>Parts Cost</span><strong>${toMoney(totals.partsCost)}</strong></article>
         <article><span>Actual Direct Costs</span><strong>${toMoney(totals.actualDirectCosts)}</strong></article>
-        <article class="service-pnl-highlight"><span>Actual Service Profit</span><strong>${toMoney(totals.actualProfit)}</strong></article>
-        <article><span>Actual Margin</span><strong>${formatServicePnlMargin(totals.actualMargin)}</strong></article>
+        <article class="service-pnl-highlight"><span>Service Profit</span><strong>${toMoney(totals.actualProfit)}</strong></article>
+        <article><span>Service Margin</span><strong>${formatServicePnlMargin(totals.actualMargin)}</strong></article>
+        <article><span>Operating Expenses</span><strong>${toMoney(totals.operatingExpenses)}</strong></article>
+        <article class="service-pnl-highlight"><span>Net Operating Profit</span><strong>${toMoney(totals.netOperatingProfit)}</strong></article>
+        <article><span>Operating Margin</span><strong>${formatServicePnlMargin(totals.operatingMargin)}</strong></article>
         <article><span>Potential Fully Staffed Labor</span><strong>${toMoney(totals.potentialLabor)}</strong></article>
         <article class="service-pnl-highlight"><span>Fully Staffed Service Profit</span><strong>${toMoney(totals.fullyStaffedProfit)}</strong></article>
         <article><span>Fully Staffed Margin</span><strong>${formatServicePnlMargin(totals.fullyStaffedMargin)}</strong></article>
+      </div>
+      <div class="service-pnl-operating-breakdown">
+        <h3>Operating Expense Breakdown</h3>
+        <div class="service-pnl-expense-split">
+          <span>General Business Expenses <strong>${toMoney(generalBusinessExpenses)}</strong></span>
+          <span>Property-Specific Expenses <strong>${toMoney(propertySpecificExpenses)}</strong></span>
+        </div>
+        ${operatingCategoryRows ? `<table class="route-frag-table expense-category-table"><thead><tr><th>Category</th><th>Amount</th></tr></thead><tbody>${operatingCategoryRows}</tbody></table>` : '<div class="empty">No operating expenses in this period.</div>'}
       </div>
       <div class="service-pnl-table-wrap">
         <table class="route-frag-table service-pnl-table">
@@ -7048,9 +7393,11 @@ function renderServicePnlReport() {
               <th>Potential Labor</th>
               <th>Chemical Cost</th>
               <th>Parts Cost</th>
-              <th>Actual Profit</th>
+              <th>Service Profit</th>
+              <th>Property Operating Expenses</th>
+              <th>Property Net Profit</th>
               <th>Fully Staffed Profit</th>
-              <th>Actual Margin</th>
+              <th>Service Margin</th>
               <th>Fully Staffed Margin</th>
             </tr>
           </thead>
@@ -10704,6 +11051,11 @@ async function openReportFromDashboard(reportKey) {
 
   if (reportKey === "servicePnl") {
     await navigateToView("servicePnl");
+    return;
+  }
+
+  if (reportKey === "expenses") {
+    await navigateToView("expenseReport");
     return;
   }
 

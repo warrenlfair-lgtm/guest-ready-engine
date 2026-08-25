@@ -65,6 +65,7 @@
     <button type="button" class="view-btn" data-view="week">Week View</button>
     <button type="button" class="view-btn" data-view="properties">Properties</button>
     <button type="button" class="view-btn" data-view="reports">Reports</button>
+    <button type="button" class="view-btn" data-view="expenses">Expenses</button>
     <button type="button" class="view-btn" data-view="invoices">Invoices</button>
     <button type="button" class="view-btn" data-view="settings">Settings</button>
   </div>
@@ -197,6 +198,55 @@
     <div id="billingInvoiceHandoffMessage" class="billing-handoff-message hidden"></div>
 
     <div id="billingReportContainer" class="billing-report-paper"></div>
+  </section>
+
+  <section id="expensesView" class="view-panel">
+    <div class="view-header expense-ledger-header">
+      <div>
+        <h2>Expense Ledger</h2>
+        <p>Manage business operating expenses without affecting service billing.</p>
+      </div>
+      <button type="button" id="addExpenseBtn">Add Expense</button>
+    </div>
+
+    <div class="billing-filters" id="expenseLedgerFilterPanel">
+      <div class="filter-group">
+        <label for="expenseStartDate">Start Date:</label>
+        <input id="expenseStartDate" type="date">
+      </div>
+      <div class="filter-group">
+        <label for="expenseEndDate">End Date:</label>
+        <input id="expenseEndDate" type="date">
+      </div>
+      <div class="filter-group">
+        <label for="expenseCategoryFilter">Category:</label>
+        <select id="expenseCategoryFilter"><option value="">All Categories</option></select>
+      </div>
+      <div class="filter-group">
+        <label for="expenseBranchFilter">Company Branch:</label>
+        <select id="expenseBranchFilter"><option value="">All Branches</option></select>
+      </div>
+      <div class="filter-group">
+        <label for="expensePropertyFilter">Property:</label>
+        <select id="expensePropertyFilter"><option value="">All Properties</option></select>
+      </div>
+      <div class="filter-group">
+        <button type="button" id="expenseRunFilterBtn">Apply Filters</button>
+      </div>
+    </div>
+
+    <div id="expenseLedgerSummary" class="expense-ledger-summary"></div>
+    <div class="expense-table-wrap">
+      <table class="expense-table">
+        <thead>
+          <tr>
+            <th>Date</th><th>Category</th><th>Description</th><th>Amount</th>
+            <th>Branch</th><th>Property</th><th>Notes</th><th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="expenseLedgerRows"></tbody>
+      </table>
+    </div>
   </section>
 
   <section id="invoicesView" class="view-panel">
@@ -375,6 +425,28 @@
     <div id="servicePnlContainer" class="billing-report-paper"></div>
   </section>
 
+  <section id="expenseReportView" class="view-panel">
+    <div class="view-header labor-report-header-row">
+      <div>
+        <h2>Expense Ledger Report</h2>
+        <p>Review operating expenses by date, category, branch, and property.</p>
+      </div>
+      <div class="labor-report-actions">
+        <button type="button" onclick="navigateToView('reports')">Back to Reports</button>
+        <button type="button" id="expenseReportPrintBtn" class="print-btn">Print Expense Report</button>
+      </div>
+    </div>
+    <div class="billing-filters" id="expenseReportFilterPanel">
+      <div class="filter-group"><label for="expenseReportStartDate">Start Date:</label><input id="expenseReportStartDate" type="date"></div>
+      <div class="filter-group"><label for="expenseReportEndDate">End Date:</label><input id="expenseReportEndDate" type="date"></div>
+      <div class="filter-group"><label for="expenseReportCategory">Category:</label><select id="expenseReportCategory"><option value="">All Categories</option></select></div>
+      <div class="filter-group"><label for="expenseReportBranch">Company Branch:</label><select id="expenseReportBranch"><option value="">All Branches</option></select></div>
+      <div class="filter-group"><label for="expenseReportProperty">Property:</label><select id="expenseReportProperty"><option value="">All Properties</option></select></div>
+      <div class="filter-group"><button type="button" id="expenseReportRunBtn">Run Report</button></div>
+    </div>
+    <div id="expenseReportContainer" class="billing-report-paper"></div>
+  </section>
+
   <section id="reportsView" class="view-panel">
     <div class="view-header">
       <div>
@@ -406,6 +478,12 @@
         <h3>Service P&amp;L</h3>
         <p>Compare actual paid-tech costs with fully staffed profitability by property.</p>
         <button type="button" onclick="openReportFromDashboard('servicePnl')">Open Report</button>
+      </article>
+
+      <article class="report-dashboard-card">
+        <h3>Expense Ledger Report</h3>
+        <p>Review operating expenses by date, category, branch, and property.</p>
+        <button type="button" onclick="openReportFromDashboard('expenses')">Open Report</button>
       </article>
 
       <article class="report-dashboard-card">
@@ -862,6 +940,30 @@
     <div class="modal-actions edit-task-modal-footer">
       <button id="cancelCleaningBtn" type="button">Cancel</button>
       <button id="saveCleaningBtn" type="button">Save Task</button>
+    </div>
+  </div>
+</div>
+
+<div id="expenseModal" class="modal hidden">
+  <div class="modal-card expense-modal-card">
+    <h2 id="expenseModalTitle">Add Expense</h2>
+    <label for="expenseDateInput">Date</label>
+    <input id="expenseDateInput" type="date">
+    <label for="expenseCategoryInput">Category</label>
+    <select id="expenseCategoryInput"></select>
+    <label for="expenseDescriptionInput">Description</label>
+    <input id="expenseDescriptionInput" type="text" maxlength="200">
+    <label for="expenseAmountInput">Amount</label>
+    <input id="expenseAmountInput" type="number" min="0.01" step="0.01">
+    <label for="expenseBranchInput">Company Branch</label>
+    <select id="expenseBranchInput"></select>
+    <label for="expensePropertyInput">Property (optional)</label>
+    <select id="expensePropertyInput"><option value="">General Business Expense</option></select>
+    <label for="expenseNotesInput">Notes</label>
+    <textarea id="expenseNotesInput" rows="3"></textarea>
+    <div class="modal-actions">
+      <button type="button" id="cancelExpenseBtn">Cancel</button>
+      <button type="button" id="saveExpenseBtn">Save Expense</button>
     </div>
   </div>
 </div>
