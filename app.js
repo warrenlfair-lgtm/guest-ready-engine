@@ -259,6 +259,7 @@ const laborReportContainer = document.getElementById("laborReportContainer");
 const servicePnlStartDate = document.getElementById("servicePnlStartDate");
 const servicePnlEndDate = document.getElementById("servicePnlEndDate");
 const servicePnlPropertySelect = document.getElementById("servicePnlPropertySelect");
+const servicePnlModeInputs = Array.from(document.querySelectorAll('input[name="servicePnlMode"]'));
 const servicePnlRunBtn = document.getElementById("servicePnlRunBtn");
 const servicePnlPrintBtn = document.getElementById("servicePnlPrintBtn");
 const servicePnlContainer = document.getElementById("servicePnlContainer");
@@ -685,6 +686,7 @@ if (servicePnlRunBtn) {
 if (servicePnlPrintBtn) {
   servicePnlPrintBtn.addEventListener("click", printServicePnlReport);
 }
+servicePnlModeInputs.forEach((input) => input.addEventListener("change", renderServicePnlReport));
 
 if (addExpenseBtn) addExpenseBtn.addEventListener("click", () => openExpenseModal());
 if (cancelExpenseBtn) cancelExpenseBtn.addEventListener("click", closeExpenseModal);
@@ -7248,12 +7250,496 @@ function getServicePnlRows({ startDate, endDate, selectedPropertyId = "" } = {})
     .sort((a, b) => a.propertyName.localeCompare(b.propertyName));
 }
 
+function getForecastTaskDate(task) {
+  return normalizeDateKey(task?.service_date || task?.scheduled_date || task?.suggested_date);
+}
+
+function isForecastTaskEligible(task, startDate, endDate, selectedPropertyId = "") {
+  const status = String(task?.status || "Scheduled").trim().toLowerCase();
+  if (["cancelled", "canceled", "void", "deleted"].includes(status)) return false;
+  const serviceDate = getForecastTaskDate(task);
+  if (!serviceDate || serviceDate < startDate || serviceDate > endDate) return false;
+  return !selectedPropertyId || normalizePropertyId(task.property_id) === normalizePropertyId(selectedPropertyId);
+}
+
+function getForecastTaskLaborAmount(task, property, useCapturedAmount = false) {
+  const capturedAmount = Number(task?.labor_amount);
+  if (useCapturedAmount && Number.isFinite(capturedAmount)) return Math.max(0, capturedAmount);
+  const calculatedAmount = getLaborAmountForTask(task, property);
+  const amount = calculatedAmount === null ? Number(task?.labor_amount || 0) : Number(calculatedAmount || 0);
+  return Number.isFinite(amount) ? Math.max(0, amount) : 0;
+}
+
+function getForecastTaskChemicalCost(task) {
+  const taskId = String(task?.id || "").trim();
+  if (!taskId) return 0;
+  return chemicalUsageEntries
+    .filter((entry) => String(entry?.task_id || "").trim() === taskId)
+    .reduce((sum, entry) => sum + getChemicalUsageCost(entry), 0);
+}
+
+function getForecastAssignedTechnician(task) {
+  const selectedId = String(taskTechnicianSelections.get(task?.id) || "").trim();
+  const assignedId = selectedId || String(task?.technician_id || "").trim();
+  if (assignedId) {
+    const byId = findTechnicianById(assignedId);
+    if (byId) return byId;
+  }
+  const assignedName = String(task?.technician_name || task?.technician || "").trim().toLowerCase();
+  return assignedName
+    ? technicians.find((technician) => String(technician?.name || "").trim().toLowerCase() === assignedName) || null
+    : null;
+}
+
+function getForecastInvoiceItemSource(item) {
+  const itemSource = String(item?.item_source || item?.source_type || item?.item_type || "").trim().toLowerCase();
+  if (itemSource === INVOICE_ITEM_SOURCES.SDS || itemSource === "same-day surcharge" || itemSource === "same day surcharge") return INVOICE_ITEM_SOURCES.SDS;
+  if (itemSource === INVOICE_ITEM_SOURCES.CHEMICAL) return INVOICE_ITEM_SOURCES.CHEMICAL;
+  if (itemSource === INVOICE_ITEM_SOURCES.TASK) return INVOICE_ITEM_SOURCES.TASK;
+  if (itemSource === INVOICE_ITEM_SOURCES.MANUAL) return INVOICE_ITEM_SOURCES.MANUAL;
+  if (getInvoiceItemChemicalUsageId(item)) return INVOICE_ITEM_SOURCES.CHEMICAL;
+  if (getInvoiceItemTaskId(item)) return INVOICE_ITEM_SOURCES.TASK;
+  return INVOICE_ITEM_SOURCES.MANUAL;
+}
+
+function getForecastInvoiceRevenueData({ startDate, endDate, selectedPropertyId = "" } = {}) {
+  const eligibleInvoices = new Map(invoices
+    .map((invoice) => ({ invoice, category: getServicePnlInvoiceRevenueCategory(invoice.status) }))
+    .filter(({ category }) => Boolean(category))
+    .filter(({ invoice }) => {
+      const invoiceDate = normalizeDateKey(invoice.invoice_date || invoice.created_at);
+      return invoiceDate && invoiceDate >= startDate && invoiceDate <= endDate;
+    })
+    .map(({ invoice, category }) => [String(invoice.id), { invoice, category }]));
+  const representedTaskIds = new Set();
+  const representedSdsTaskIds = new Set();
+  const byProperty = new Map();
+  const auditRows = [];
+  const countedItemIds = new Set();
+  const countedSourceKeys = new Set();
+
+  invoiceItems
+    .map((item) => ({ item, invoiceRecord: eligibleInvoices.get(String(item?.invoice_id || "")) }))
+    .filter(({ invoiceRecord }) => Boolean(invoiceRecord))
+    .sort((a, b) => Number(b.invoiceRecord.category === "finalized") - Number(a.invoiceRecord.category === "finalized"))
+    .forEach(({ item, invoiceRecord }) => {
+    const itemId = String(item?.id || "").trim();
+    if (itemId && countedItemIds.has(itemId)) return;
+    if (itemId) countedItemIds.add(itemId);
+    const propertyId = getServicePnlInvoiceItemPropertyId(item);
+    if (selectedPropertyId && normalizePropertyId(propertyId) !== normalizePropertyId(selectedPropertyId)) return;
+    const source = getForecastInvoiceItemSource(item);
+    const taskId = normalizePropertyId(getInvoiceItemTaskId(item));
+    const chemicalUsageId = normalizePropertyId(getInvoiceItemChemicalUsageId(item));
+    const sourceKey = source === INVOICE_ITEM_SOURCES.SDS && taskId
+      ? `sds:${taskId}`
+      : source === INVOICE_ITEM_SOURCES.TASK && taskId
+        ? `task:${taskId}`
+        : source === INVOICE_ITEM_SOURCES.CHEMICAL && chemicalUsageId
+          ? `chemical:${chemicalUsageId}`
+          : `invoice-item:${itemId || String(item?.invoice_id || "")}:${auditRows.length + 1}`;
+    if (countedSourceKeys.has(sourceKey)) return;
+    countedSourceKeys.add(sourceKey);
+    if (source === INVOICE_ITEM_SOURCES.SDS && taskId) representedSdsTaskIds.add(taskId);
+    if (source === INVOICE_ITEM_SOURCES.TASK && taskId) representedTaskIds.add(taskId);
+    const amount = Number(item?.amount || 0);
+    const propertyKey = normalizePropertyId(propertyId) || SERVICE_PNL_UNASSIGNED_PROPERTY_ID;
+    if (!byProperty.has(propertyKey)) byProperty.set(propertyKey, { draftRevenue: 0, finalizedRevenue: 0 });
+    byProperty.get(propertyKey)[invoiceRecord.category === "draft" ? "draftRevenue" : "finalizedRevenue"] += amount;
+    auditRows.push({
+      sourceKey,
+      serviceDate: normalizeDateKey(item?.service_date) || normalizeDateKey(invoiceRecord.invoice.invoice_date),
+      propertyId: propertyKey,
+      propertyName: propertyKey === SERVICE_PNL_UNASSIGNED_PROPERTY_ID ? "Unassigned / No Source Property" : getPropertyName(propertyKey),
+      sourceType: source === INVOICE_ITEM_SOURCES.SDS ? "Same-Day Surcharge" : source === INVOICE_ITEM_SOURCES.TASK ? "Task" : source === INVOICE_ITEM_SOURCES.CHEMICAL ? "Chemical Charge" : "Manual Invoice Item",
+      description: item?.description || "Invoice item",
+      revenueStatus: invoiceRecord.category === "draft" ? "Draft Invoiced" : "Finalized Invoiced",
+      draftRevenue: invoiceRecord.category === "draft" ? amount : 0,
+      finalizedRevenue: invoiceRecord.category === "finalized" ? amount : 0,
+      remainingPotentialRevenue: 0,
+      remainingSdsRevenue: 0,
+    });
+  });
+
+  return { byProperty, representedTaskIds, representedSdsTaskIds, auditRows };
+}
+
+function getServicePnlForecastTaskRows({ startDate, endDate, selectedPropertyId = "", representedTaskIds = new Set(), representedSdsTaskIds = new Set() } = {}) {
+  return cleaningTasks
+    .filter((task) => isForecastTaskEligible(task, startDate, endDate, selectedPropertyId))
+    .map((task) => {
+      const property = properties.find((item) => normalizePropertyId(item.id) === normalizePropertyId(task.property_id));
+      const serviceDate = getForecastTaskDate(task);
+      const contractRate = getContractRateForDate(property, serviceDate);
+      const hasApplicableContract = contractRate.amount > 0 && contractRate.basis !== CONTRACT_RATE_BASIS_NONE;
+      const isContractStandard = task.service_type === "Weekly Standard" && hasApplicableContract;
+      const taskId = String(task?.id || "").trim();
+      const taskIsInvoiced = representedTaskIds.has(taskId);
+      const sdsIsInvoiced = representedSdsTaskIds.has(taskId);
+      const potentialTaskRevenue = isContractStandard || taskIsInvoiced ? 0 : Math.max(0, Number(getTaskBillingAmount(task) || 0));
+      const potentialSdsRevenue = !sdsIsInvoiced && isSameDayTurnoverTask(task) ? Math.max(0, Number(getSdsBillingAmount(task) || 0)) : 0;
+      const status = String(task?.status || "Scheduled").trim().toLowerCase();
+      const isKnownTask = status === "completed" || status === "in progress" || status === "in_progress";
+      const fullyStaffedLabor = getForecastTaskLaborAmount(task, property, isKnownTask);
+      const technician = isKnownTask ? null : getForecastAssignedTechnician(task);
+      const knownPayableStatus = isKnownTask ? getTaskLaborPayableStatus(task) : null;
+      const isAssigned = isKnownTask ? knownPayableStatus !== null : Boolean(technician);
+      const isPaidTechnician = isKnownTask ? knownPayableStatus === true : isAssigned && isTechnicianPaidLabor(technician);
+      const knownLabor = isKnownTask && isPaidTechnician ? fullyStaffedLabor : 0;
+      const projectedLabor = !isKnownTask && isPaidTechnician ? fullyStaffedLabor : 0;
+      const chemicalCost = getForecastTaskChemicalCost(task);
+      const partsCost = Math.max(0, Number(task?.parts_cost || 0));
+      return {
+        taskId,
+        propertyId: normalizePropertyId(task?.property_id),
+        propertyName: property?.property_name || getPropertyName(task?.property_id),
+        serviceDate,
+        serviceType: getLaborServiceTypeDisplay(task),
+        technicianName: isKnownTask ? getLaborTaskTechnicianSnapshot(task).technicianName : technician?.name || "Unassigned",
+        taskRevenueStatus: taskIsInvoiced ? "Invoiced" : potentialTaskRevenue > 0 ? "Potentially Billable" : isContractStandard ? "Covered by Contract" : "No Task Charge",
+        sdsRevenueStatus: sdsIsInvoiced ? "Invoiced" : potentialSdsRevenue > 0 ? "Potentially Billable" : "No SDS Charge",
+        potentialTaskRevenue,
+        potentialSdsRevenue,
+        knownLabor,
+        projectedLabor,
+        fullyStaffedLabor,
+        knownChemicalCost: isKnownTask ? chemicalCost : 0,
+        futureChemicalCost: isKnownTask ? 0 : chemicalCost,
+        knownPartsCost: isKnownTask ? partsCost : 0,
+        futurePartsCost: isKnownTask ? 0 : partsCost,
+        chemicalCost,
+        partsCost,
+        projectedContribution: potentialTaskRevenue + potentialSdsRevenue - knownLabor - projectedLabor - chemicalCost - partsCost,
+        ownerNoCostServices: isAssigned && !isPaidTechnician ? 1 : 0,
+        paidTechServices: isPaidTechnician ? 1 : 0,
+        unassignedServices: isAssigned ? 0 : 1,
+        isKnownTask,
+      };
+    })
+    .sort((a, b) => a.serviceDate.localeCompare(b.serviceDate) || a.propertyName.localeCompare(b.propertyName));
+}
+
+function getServicePnlForecastRows({ startDate, endDate, selectedPropertyId = "" } = {}) {
+  const rowsByProperty = new Map();
+  const ensureRow = (propertyId) => {
+    const normalizedId = normalizePropertyId(propertyId);
+    if (!normalizedId) return null;
+    if (!rowsByProperty.has(normalizedId)) {
+      rowsByProperty.set(normalizedId, {
+        propertyId: normalizedId,
+        propertyName: normalizedId === SERVICE_PNL_UNASSIGNED_PROPERTY_ID ? "Unassigned / No Source Property" : getPropertyName(normalizedId),
+        contractRevenue: 0,
+        partialMonthlyPeriods: [],
+        draftRevenue: 0,
+        finalizedRevenue: 0,
+        potentialTaskRevenue: 0,
+        potentialSdsRevenue: 0,
+        ownerNoCostServices: 0,
+        paidTechServices: 0,
+        unassignedServices: 0,
+        knownLabor: 0,
+        projectedLabor: 0,
+        fullyStaffedLabor: 0,
+        knownChemicalCost: 0,
+        futureChemicalCost: 0,
+        knownPartsCost: 0,
+        futurePartsCost: 0,
+        chemicalCost: 0,
+        partsCost: 0,
+        propertyOperatingExpenses: 0,
+      });
+    }
+    return rowsByProperty.get(normalizedId);
+  };
+
+  properties
+    .filter((property) => !selectedPropertyId || normalizePropertyId(property.id) === normalizePropertyId(selectedPropertyId))
+    .forEach((property) => {
+      const contract = getContractRevenueForProperty(property, startDate, endDate);
+      if (contract.contractRevenue <= 0 && contract.partialMonthlyPeriods.length === 0) return;
+      const row = ensureRow(property.id);
+      row.contractRevenue = contract.contractRevenue;
+      row.partialMonthlyPeriods.push(...contract.partialMonthlyPeriods);
+    });
+
+  const invoiceRevenue = getForecastInvoiceRevenueData({ startDate, endDate, selectedPropertyId });
+  invoiceRevenue.byProperty.forEach((invoiceTotals, propertyId) => {
+    const row = ensureRow(propertyId);
+    row.draftRevenue += invoiceTotals.draftRevenue;
+    row.finalizedRevenue += invoiceTotals.finalizedRevenue;
+  });
+
+  const taskRows = getServicePnlForecastTaskRows({
+    startDate,
+    endDate,
+    selectedPropertyId,
+    representedTaskIds: invoiceRevenue.representedTaskIds,
+    representedSdsTaskIds: invoiceRevenue.representedSdsTaskIds,
+  });
+  taskRows.forEach((taskRow) => {
+    const row = ensureRow(taskRow.propertyId);
+    if (!row) return;
+    row.potentialTaskRevenue += taskRow.potentialTaskRevenue;
+    row.potentialSdsRevenue += taskRow.potentialSdsRevenue;
+    row.ownerNoCostServices += taskRow.ownerNoCostServices;
+    row.paidTechServices += taskRow.paidTechServices;
+    row.unassignedServices += taskRow.unassignedServices;
+    row.knownLabor += taskRow.knownLabor;
+    row.projectedLabor += taskRow.projectedLabor;
+    row.fullyStaffedLabor += taskRow.fullyStaffedLabor;
+    row.knownChemicalCost += taskRow.knownChemicalCost;
+    row.futureChemicalCost += taskRow.futureChemicalCost;
+    row.knownPartsCost += taskRow.knownPartsCost;
+    row.futurePartsCost += taskRow.futurePartsCost;
+    row.chemicalCost += taskRow.chemicalCost;
+    row.partsCost += taskRow.partsCost;
+  });
+
+  const includedTaskIds = new Set(taskRows.map((row) => row.taskId).filter(Boolean));
+  const todayKey = formatDateValue(new Date());
+  chemicalUsageEntries
+    .filter((entry) => !entry?.task_id || !includedTaskIds.has(String(entry.task_id)))
+    .filter((entry) => !selectedPropertyId || normalizePropertyId(entry.property_id) === normalizePropertyId(selectedPropertyId))
+    .filter((entry) => {
+      const serviceDate = normalizeDateKey(entry.service_date);
+      return serviceDate && serviceDate >= startDate && serviceDate <= endDate;
+    })
+    .forEach((entry) => {
+      const row = ensureRow(entry.property_id);
+      if (!row) return;
+      const cost = getChemicalUsageCost(entry);
+      const isFuture = normalizeDateKey(entry.service_date) > todayKey;
+      row.chemicalCost += cost;
+      if (isFuture) row.futureChemicalCost += cost;
+      else row.knownChemicalCost += cost;
+    });
+
+  expenses
+    .filter((expense) => Boolean(expense.property_id))
+    .filter((expense) => !selectedPropertyId || normalizePropertyId(expense.property_id) === normalizePropertyId(selectedPropertyId))
+    .filter((expense) => {
+      const expenseDate = normalizeDateKey(expense.expense_date);
+      return expenseDate && expenseDate >= startDate && expenseDate <= endDate;
+    })
+    .forEach((expense) => {
+      const row = ensureRow(expense.property_id);
+      if (row) row.propertyOperatingExpenses += Math.max(0, Number(expense.amount || 0));
+    });
+
+  if (selectedPropertyId) ensureRow(selectedPropertyId);
+
+  const rows = Array.from(rowsByProperty.values()).map((row) => {
+    const revenue = row.contractRevenue + row.draftRevenue + row.finalizedRevenue + row.potentialTaskRevenue + row.potentialSdsRevenue;
+    const knownDirectCosts = row.knownLabor + row.knownChemicalCost + row.knownPartsCost;
+    const projectedFutureDirectCosts = row.projectedLabor + row.futureChemicalCost + row.futurePartsCost;
+    const expectedDirectCosts = knownDirectCosts + projectedFutureDirectCosts;
+    const projectedServiceProfit = revenue - expectedDirectCosts;
+    const fullyStaffedProfit = revenue - row.fullyStaffedLabor - row.chemicalCost - row.partsCost;
+    return {
+      ...row,
+      revenue,
+      knownDirectCosts,
+      projectedFutureDirectCosts,
+      expectedDirectCosts,
+      projectedServiceProfit,
+      fullyStaffedProfit,
+      propertyNetOperatingProfit: projectedServiceProfit - row.propertyOperatingExpenses,
+      projectedMargin: revenue !== 0 ? (projectedServiceProfit / revenue) * 100 : null,
+      fullyStaffedMargin: revenue !== 0 ? (fullyStaffedProfit / revenue) * 100 : null,
+    };
+  }).sort((a, b) => a.propertyName.localeCompare(b.propertyName));
+
+  const revenueAuditRows = invoiceRevenue.auditRows.slice();
+  rows.filter((row) => row.contractRevenue > 0).forEach((row) => revenueAuditRows.push({
+    sourceKey: `contract:${row.propertyId}`,
+    serviceDate: `${startDate} to ${endDate}`,
+    propertyId: row.propertyId,
+    propertyName: row.propertyName,
+    sourceType: "Contract",
+    description: "Effective contract revenue",
+    revenueStatus: "Contract Revenue",
+    draftRevenue: 0,
+    finalizedRevenue: 0,
+    remainingPotentialRevenue: 0,
+    remainingSdsRevenue: 0,
+    contractRevenue: row.contractRevenue,
+  }));
+  taskRows.forEach((taskRow) => {
+    if (!invoiceRevenue.representedTaskIds.has(taskRow.taskId)) {
+      revenueAuditRows.push({
+        sourceKey: `task:${taskRow.taskId}`,
+        serviceDate: taskRow.serviceDate,
+        propertyId: taskRow.propertyId,
+        propertyName: taskRow.propertyName,
+        sourceType: taskRow.serviceType,
+        description: "Task charge",
+        revenueStatus: taskRow.taskRevenueStatus,
+        contractRevenue: 0,
+        draftRevenue: 0,
+        finalizedRevenue: 0,
+        remainingPotentialRevenue: taskRow.potentialTaskRevenue,
+        remainingSdsRevenue: 0,
+      });
+    }
+    if (!invoiceRevenue.representedSdsTaskIds.has(taskRow.taskId) && taskRow.potentialSdsRevenue > 0) {
+      revenueAuditRows.push({
+        sourceKey: `sds:${taskRow.taskId}`,
+        serviceDate: taskRow.serviceDate,
+        propertyId: taskRow.propertyId,
+        propertyName: taskRow.propertyName,
+        sourceType: "Same-Day Surcharge",
+        description: taskRow.serviceType,
+        revenueStatus: taskRow.sdsRevenueStatus,
+        contractRevenue: 0,
+        draftRevenue: 0,
+        finalizedRevenue: 0,
+        remainingPotentialRevenue: 0,
+        remainingSdsRevenue: taskRow.potentialSdsRevenue,
+      });
+    }
+  });
+
+  return { rows, taskRows, revenueAuditRows };
+}
+
+function renderServicePnlForecastReport() {
+  if (!servicePnlContainer) return;
+  const startDate = servicePnlStartDate?.value || "";
+  const endDate = servicePnlEndDate?.value || "";
+  if (!startDate || !endDate) {
+    servicePnlContainer.innerHTML = '<div class="billing-report-sheet"><div class="empty">Select a start and end date.</div></div>';
+    return;
+  }
+  if (startDate > endDate) {
+    servicePnlContainer.innerHTML = '<div class="billing-report-sheet"><div class="empty">Start date must be on or before end date.</div></div>';
+    return;
+  }
+
+  const selectedPropertyId = servicePnlPropertySelect?.value || "";
+  const { rows, taskRows, revenueAuditRows } = getServicePnlForecastRows({ startDate, endDate, selectedPropertyId });
+  const operatingExpenseRows = getFilteredExpenses({ startDate, endDate, propertyId: selectedPropertyId })
+    .filter((expense) => !selectedPropertyId || Boolean(expense.property_id));
+  const todayKey = formatDateValue(new Date());
+  const knownOperatingExpenses = operatingExpenseRows
+    .filter((expense) => normalizeDateKey(expense.expense_date) <= todayKey)
+    .reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
+  const futureOperatingExpenses = operatingExpenseRows
+    .filter((expense) => normalizeDateKey(expense.expense_date) > todayKey)
+    .reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
+  const operatingExpenses = knownOperatingExpenses + futureOperatingExpenses;
+  const totals = rows.reduce((summary, row) => {
+    ["contractRevenue", "draftRevenue", "finalizedRevenue", "potentialTaskRevenue", "potentialSdsRevenue", "revenue", "ownerNoCostServices", "paidTechServices",
+      "unassignedServices", "knownLabor", "projectedLabor", "fullyStaffedLabor", "knownChemicalCost", "futureChemicalCost",
+      "knownPartsCost", "futurePartsCost", "chemicalCost", "partsCost", "knownDirectCosts", "projectedFutureDirectCosts", "expectedDirectCosts",
+      "projectedServiceProfit", "fullyStaffedProfit", "propertyOperatingExpenses"].forEach((key) => {
+      summary[key] += Number(row[key] || 0);
+    });
+    return summary;
+  }, {
+    contractRevenue: 0, draftRevenue: 0, finalizedRevenue: 0, potentialTaskRevenue: 0, potentialSdsRevenue: 0, revenue: 0,
+    ownerNoCostServices: 0, paidTechServices: 0, unassignedServices: 0, knownLabor: 0, projectedLabor: 0,
+    fullyStaffedLabor: 0, knownChemicalCost: 0, futureChemicalCost: 0, knownPartsCost: 0, futurePartsCost: 0,
+    chemicalCost: 0, partsCost: 0, knownDirectCosts: 0, projectedFutureDirectCosts: 0, expectedDirectCosts: 0,
+    projectedServiceProfit: 0, fullyStaffedProfit: 0, propertyOperatingExpenses: 0,
+  });
+  totals.knownOperatingExpenses = knownOperatingExpenses;
+  totals.futureOperatingExpenses = futureOperatingExpenses;
+  totals.operatingExpenses = operatingExpenses;
+  totals.netOperatingProfit = totals.projectedServiceProfit - operatingExpenses;
+  totals.projectedMargin = totals.revenue !== 0 ? (totals.projectedServiceProfit / totals.revenue) * 100 : null;
+  totals.operatingMargin = totals.revenue !== 0 ? (totals.netOperatingProfit / totals.revenue) * 100 : null;
+  totals.fullyStaffedMargin = totals.revenue !== 0 ? (totals.fullyStaffedProfit / totals.revenue) * 100 : null;
+
+  const partialMonthlyNotices = rows.flatMap((row) => row.partialMonthlyPeriods.map((period) => `${row.propertyName}: ${period}`));
+  const propertyTableRows = rows.length ? rows.map((row) => `<tr>
+    <td>${escapeHtml(row.propertyName)}</td><td class="route-frag-money">${toMoney(row.contractRevenue)}</td>
+    <td class="route-frag-money">${toMoney(row.draftRevenue)}</td><td class="route-frag-money">${toMoney(row.finalizedRevenue)}</td>
+    <td class="route-frag-money">${toMoney(row.potentialTaskRevenue)}</td><td class="route-frag-money">${toMoney(row.potentialSdsRevenue)}</td><td class="route-frag-money">${toMoney(row.revenue)}</td>
+    <td class="route-frag-money">${toMoney(row.knownLabor)}</td><td class="route-frag-money">${toMoney(row.projectedLabor)}</td><td class="route-frag-money">${toMoney(row.fullyStaffedLabor)}</td>
+    <td class="route-frag-money">${toMoney(row.chemicalCost)}</td><td class="route-frag-money">${toMoney(row.partsCost)}</td>
+    <td class="route-frag-money">${toMoney(row.projectedServiceProfit)}</td><td class="route-frag-money">${toMoney(row.propertyOperatingExpenses)}</td>
+    <td class="route-frag-money">${toMoney(row.propertyNetOperatingProfit)}</td><td class="route-frag-money">${toMoney(row.fullyStaffedProfit)}</td>
+    <td class="route-frag-money">${formatServicePnlMargin(row.projectedMargin)}</td><td class="route-frag-money">${formatServicePnlMargin(row.fullyStaffedMargin)}</td>
+  </tr>`).join("") : '<tr><td colspan="18">No invoiced revenue, scheduled work, contract revenue, or property expenses found for this forecast period.</td></tr>';
+  const revenueSourceRows = revenueAuditRows.length ? revenueAuditRows.map((row) => `<tr>
+    <td>${escapeHtml(row.serviceDate)}</td><td>${escapeHtml(row.propertyName)}</td><td>${escapeHtml(row.sourceType)}</td><td>${escapeHtml(row.description)}</td><td>${escapeHtml(row.revenueStatus)}</td>
+    <td class="route-frag-money">${toMoney(row.contractRevenue || 0)}</td><td class="route-frag-money">${toMoney(row.draftRevenue)}</td>
+    <td class="route-frag-money">${toMoney(row.finalizedRevenue)}</td><td class="route-frag-money">${toMoney(row.remainingPotentialRevenue)}</td>
+    <td class="route-frag-money">${toMoney(row.remainingSdsRevenue)}</td>
+  </tr>`).join("") : '<tr><td colspan="10">No revenue sources found for this forecast period.</td></tr>';
+  const costAuditRows = taskRows.length ? taskRows.map((row) => `<tr>
+    <td>${escapeHtml(row.serviceDate)}</td><td>${escapeHtml(row.propertyName)}</td><td>${escapeHtml(row.serviceType)}</td><td>${escapeHtml(row.technicianName)}</td>
+    <td>${row.isKnownTask ? "Known / Actual" : "Future Projected"}</td><td class="route-frag-money">${toMoney(row.knownLabor)}</td>
+    <td class="route-frag-money">${toMoney(row.projectedLabor)}</td><td class="route-frag-money">${toMoney(row.fullyStaffedLabor)}</td>
+    <td class="route-frag-money">${toMoney(row.knownChemicalCost)}</td><td class="route-frag-money">${toMoney(row.futureChemicalCost)}</td>
+    <td class="route-frag-money">${toMoney(row.knownPartsCost)}</td><td class="route-frag-money">${toMoney(row.futurePartsCost)}</td>
+    <td class="route-frag-money">${toMoney(row.projectedContribution)}</td>
+  </tr>`).join("") : '<tr><td colspan="13">No task costs found for this forecast period.</td></tr>';
+
+  servicePnlContainer.innerHTML = `<div class="billing-report-sheet service-pnl-sheet service-pnl-forecast-sheet">
+    ${renderBillingReportHeader()}
+    <h2 class="billing-report-title">Service P&amp;L Forecast</h2>
+    <div class="billing-report-meta">Date Range: ${escapeHtml(startDate)} to ${escapeHtml(endDate)}</div>
+    <div class="billing-report-notice">Forecast is read-only and uses current schedules, assignments, known costs, and entered expenses. Chemical forecast includes entered usage only.</div>
+    ${partialMonthlyNotices.length ? `<div class="billing-report-notice">Monthly contract revenue excluded for partial calendar period(s): ${escapeHtml(partialMonthlyNotices.join(", "))}. No proration was applied.</div>` : ""}
+    ${!propertyContractRevenueHistoryAvailable ? '<div class="billing-report-notice">Contract history is unavailable. Run the contract revenue migration before relying on forecast results.</div>' : ""}
+    <div class="service-pnl-summary-grid">
+      <article><span>Contract Revenue</span><strong>${toMoney(totals.contractRevenue)}</strong></article>
+      <article><span>Draft Revenue</span><strong>${toMoney(totals.draftRevenue)}</strong></article>
+      <article><span>Finalized Revenue</span><strong>${toMoney(totals.finalizedRevenue)}</strong></article>
+      <article><span>Remaining Potential Task Revenue</span><strong>${toMoney(totals.potentialTaskRevenue)}</strong></article>
+      <article><span>Remaining Potential SDS Revenue</span><strong>${toMoney(totals.potentialSdsRevenue)}</strong></article>
+      <article class="service-pnl-highlight"><span>Total Expected Revenue</span><strong>${toMoney(totals.revenue)}</strong></article>
+      <article><span>Known Direct Costs</span><strong>${toMoney(totals.knownDirectCosts)}</strong></article>
+      <article><span>Projected Future Direct Costs</span><strong>${toMoney(totals.projectedFutureDirectCosts)}</strong></article>
+      <article><span>Total Expected Direct Costs</span><strong>${toMoney(totals.expectedDirectCosts)}</strong></article>
+      <article class="service-pnl-highlight"><span>Expected Service Profit</span><strong>${toMoney(totals.projectedServiceProfit)}</strong></article>
+      <article><span>Expected Service Margin</span><strong>${formatServicePnlMargin(totals.projectedMargin)}</strong></article>
+      <article><span>Known Operating Expenses</span><strong>${toMoney(totals.knownOperatingExpenses)}</strong></article>
+      <article><span>Future Operating Expenses</span><strong>${toMoney(totals.futureOperatingExpenses)}</strong></article>
+      <article><span>Total Expected Operating Expenses</span><strong>${toMoney(totals.operatingExpenses)}</strong></article>
+      <article class="service-pnl-highlight"><span>Expected Net Operating Profit</span><strong>${toMoney(totals.netOperatingProfit)}</strong></article>
+      <article><span>Expected Operating Margin</span><strong>${formatServicePnlMargin(totals.operatingMargin)}</strong></article>
+      <article><span>Fully Staffed Labor</span><strong>${toMoney(totals.fullyStaffedLabor)}</strong></article>
+      <article class="service-pnl-highlight"><span>Fully Staffed Expected Profit</span><strong>${toMoney(totals.fullyStaffedProfit)}</strong></article>
+      <article><span>Fully Staffed Expected Margin</span><strong>${formatServicePnlMargin(totals.fullyStaffedMargin)}</strong></article>
+    </div>
+    <div class="service-pnl-staffing-summary">
+      <h3>Staffing Summary</h3>
+      <div class="service-pnl-staffing-grid"><span>Owner / No-Cost Assigned Services <strong>${totals.ownerNoCostServices}</strong></span><span>Paid-Tech Assigned Services <strong>${totals.paidTechServices}</strong></span><span>Unassigned Services <strong>${totals.unassignedServices}</strong></span></div>
+    </div>
+    <h3>Property Forecast</h3>
+    <div class="service-pnl-table-wrap"><table class="route-frag-table service-pnl-table forecast-property-table"><thead><tr>
+      <th>Property</th><th>Contract Revenue</th><th>Draft Revenue</th><th>Finalized Revenue</th><th>Remaining Potential Revenue</th><th>Remaining SDS Revenue</th><th>Total Expected Revenue</th>
+      <th>Known Labor</th><th>Projected Labor</th><th>Fully Staffed Labor</th><th>Known Chemical Cost</th><th>Known Parts Cost</th>
+      <th>Expected Service Profit</th><th>Property Operating Expenses</th><th>Expected Net Profit</th><th>Fully Staffed Profit</th><th>Expected Margin</th><th>Fully Staffed Margin</th>
+    </tr></thead><tbody>${propertyTableRows}</tbody></table></div>
+    <h3 class="forecast-audit-heading">Revenue Source Audit</h3>
+    <div class="service-pnl-table-wrap"><table class="route-frag-table forecast-revenue-audit-table"><thead><tr>
+      <th>Date / Period</th><th>Property</th><th>Source Type</th><th>Description</th><th>Classification</th><th>Contract Revenue</th><th>Draft Revenue</th>
+      <th>Finalized Revenue</th><th>Remaining Potential Revenue</th><th>Remaining SDS Revenue</th>
+    </tr></thead><tbody>${revenueSourceRows}</tbody></table></div>
+    <h3 class="forecast-audit-heading">Task Cost and Staffing Audit</h3>
+    <div class="service-pnl-table-wrap"><table class="route-frag-table forecast-audit-table"><thead><tr>
+      <th>Date</th><th>Property</th><th>Service Type</th><th>Technician</th><th>Cost Classification</th><th>Known Labor</th><th>Projected Labor</th>
+      <th>Fully Staffed Labor</th><th>Known Chemical Cost</th><th>Future Chemical Cost</th><th>Known Parts Cost</th><th>Future Parts Cost</th><th>Projected Contribution</th>
+    </tr></thead><tbody>${costAuditRows}</tbody></table></div>
+    ${renderBillingReportFooter()}
+  </div>`;
+}
+
 function formatServicePnlMargin(value) {
   return Number.isFinite(value) ? `${value.toFixed(2)}%` : "-";
 }
 
 function renderServicePnlReport() {
   if (!servicePnlContainer) return;
+
+  const mode = servicePnlModeInputs.find((input) => input.checked)?.value || "actual";
+  if (mode === "forecast") {
+    renderServicePnlForecastReport();
+    return;
+  }
 
   const startDate = servicePnlStartDate?.value || "";
   const endDate = servicePnlEndDate?.value || "";

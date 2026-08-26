@@ -403,6 +403,13 @@
     </div>
 
     <div class="billing-filters" id="servicePnlFilterPanel">
+      <fieldset class="filter-group service-pnl-mode-control">
+        <legend>Mode:</legend>
+        <div class="segmented-control" role="radiogroup" aria-label="Service P&L mode">
+          <label><input type="radio" name="servicePnlMode" value="actual" checked><span>Actual</span></label>
+          <label><input type="radio" name="servicePnlMode" value="forecast"><span>Forecast</span></label>
+        </div>
+      </fieldset>
       <div class="filter-group">
         <label for="servicePnlStartDate">Start Date:</label>
         <input id="servicePnlStartDate" type="date">

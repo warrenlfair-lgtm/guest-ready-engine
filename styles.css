@@ -1955,6 +1955,63 @@ textarea{
     margin: 18px 0;
 }
 
+.service-pnl-mode-control {
+    margin: 0;
+    padding: 0;
+    border: 0;
+}
+
+.service-pnl-mode-control legend {
+    margin-bottom: 5px;
+    color: #334155;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.segmented-control {
+    display: inline-grid;
+    grid-template-columns: repeat(2, minmax(88px, 1fr));
+    overflow: hidden;
+    border: 1px solid #94a3b8;
+    border-radius: 6px;
+    background: #ffffff;
+}
+
+.segmented-control label {
+    position: relative;
+    margin: 0;
+    cursor: pointer;
+}
+
+.segmented-control input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.segmented-control span {
+    display: block;
+    padding: 8px 12px;
+    color: #334155;
+    text-align: center;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.segmented-control label + label span {
+    border-left: 1px solid #94a3b8;
+}
+
+.segmented-control input:checked + span {
+    background: #0f766e;
+    color: #ffffff;
+}
+
+.segmented-control input:focus-visible + span {
+    outline: 2px solid #0f172a;
+    outline-offset: -3px;
+}
+
 .billing-report-notice {
     margin: 12px 0;
     padding: 10px 12px;
@@ -1997,6 +2054,53 @@ textarea{
 
 .service-pnl-table {
     min-width: 2020px;
+}
+
+.forecast-property-table {
+    min-width: 2180px;
+}
+
+.forecast-audit-table {
+    min-width: 1720px;
+}
+
+.forecast-revenue-audit-table {
+    min-width: 1540px;
+}
+
+.service-pnl-staffing-summary {
+    margin: 18px 0;
+    padding: 14px;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    background: #f8fafc;
+}
+
+.service-pnl-staffing-summary h3,
+.forecast-audit-heading {
+    margin: 0 0 10px;
+}
+
+.service-pnl-staffing-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(180px, 1fr));
+    gap: 12px;
+}
+
+.service-pnl-staffing-grid span {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    color: #475569;
+}
+
+.service-pnl-staffing-grid strong {
+    color: #0f172a;
+    font-size: 18px;
+}
+
+.forecast-audit-heading {
+    margin-top: 24px;
 }
 
 .service-pnl-operating-breakdown {
@@ -2088,6 +2192,15 @@ textarea{
     .service-pnl-expense-split {
         align-items: flex-start;
         flex-direction: column;
+    }
+
+    .service-pnl-mode-control,
+    .segmented-control {
+        width: 100%;
+    }
+
+    .service-pnl-staffing-grid {
+        grid-template-columns: 1fr;
     }
 }
 
