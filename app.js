@@ -28,10 +28,32 @@ const DEFAULT_COMPANY_PROFILE = {
 const COMPANY_BRANCH_GUEST_READY = "Guest Ready";
 const COMPANY_BRANCH_WEEKEND_READY = "Weekend Ready";
 const COMPANY_BRANCH_OPTIONS = [COMPANY_BRANCH_GUEST_READY, COMPANY_BRANCH_WEEKEND_READY];
+const SERVICE_BRANCH_POOL = "pool";
+const SERVICE_BRANCH_LAWN = "lawn";
+let activeServiceWorkspace = SERVICE_BRANCH_POOL;
 
 let companyProfile = { ...DEFAULT_COMPANY_PROFILE };
 let currentSessionUserId = null;
 let dataLoadPromise = null;
+
+function normalizeServiceBranch(value) {
+  return String(value || "").trim().toLowerCase() === SERVICE_BRANCH_LAWN
+    ? SERVICE_BRANCH_LAWN
+    : SERVICE_BRANCH_POOL;
+}
+
+function isLawnTask(task) {
+  return normalizeServiceBranch(task?.service_branch) === SERVICE_BRANCH_LAWN;
+}
+
+function taskMatchesActiveWorkspace(task) {
+  return normalizeServiceBranch(task?.service_branch) === activeServiceWorkspace;
+}
+
+function propertySupportsServiceBranch(property, branch = activeServiceWorkspace) {
+  if (branch === SERVICE_BRANCH_LAWN) return property?.lawn_service_active === true;
+  return property?.pool_service_active !== false;
+}
 
 let editingPropertyId = null;
 let selectedCleaningPropertyId = null;
@@ -159,10 +181,18 @@ const propertyPaymentTerms = document.getElementById("propertyPaymentTerms");
 const propertyInvoiceNotes = document.getElementById("propertyInvoiceNotes");
 const propertyCompanyBranch = document.getElementById("propertyCompanyBranch");
 const propertyStatus = document.getElementById("propertyStatus");
+const propertyPoolServiceActive = document.getElementById("propertyPoolServiceActive");
 const propertyServiceFrequency = document.getElementById("propertyServiceFrequency");
 const propertyBiweeklyAnchorDateRow = document.getElementById("propertyBiweeklyAnchorDateRow");
 const propertyBiweeklyAnchorDate = document.getElementById("propertyBiweeklyAnchorDate");
 const propertyFrequencyWarning = document.getElementById("propertyFrequencyWarning");
+const propertyLawnServiceActive = document.getElementById("propertyLawnServiceActive");
+const propertyLawnServiceFrequency = document.getElementById("propertyLawnServiceFrequency");
+const propertyLawnServiceDay = document.getElementById("propertyLawnServiceDay");
+const propertyLawnBiweeklyAnchorDateRow = document.getElementById("propertyLawnBiweeklyAnchorDateRow");
+const propertyLawnBiweeklyAnchorDate = document.getElementById("propertyLawnBiweeklyAnchorDate");
+const propertyLawnDefaultCharge = document.getElementById("propertyLawnDefaultCharge");
+const propertyLawnLaborAmount = document.getElementById("propertyLawnLaborAmount");
 
 const cleaningDate = document.getElementById("cleaningDate");
 const cleaningServiceType = document.getElementById("cleaningServiceType");
@@ -176,6 +206,7 @@ const cleaningPartsCost = document.getElementById("cleaningPartsCost");
 const cleaningWeeklyServiceLevelRow = document.getElementById("cleaningWeeklyServiceLevelRow");
 const cleaningWeeklyServiceLevel = document.getElementById("cleaningWeeklyServiceLevel");
 const cleaningNotes = document.getElementById("cleaningNotes");
+const serviceWorkspaceButtons = Array.from(document.querySelectorAll(".service-workspace-btn"));
 const addChemicalBtn = document.getElementById("addChemicalBtn");
 const chemicalUsageTaskHint = document.getElementById("chemicalUsageTaskHint");
 const chemicalUsageList = document.getElementById("chemicalUsageList");
@@ -432,6 +463,14 @@ if (propertyBiweeklyAnchorDate) {
   propertyBiweeklyAnchorDate.addEventListener("change", syncPropertyServiceFrequencyDependentFields);
 }
 
+if (propertyLawnServiceFrequency) {
+  propertyLawnServiceFrequency.addEventListener("change", syncLawnServiceFrequencyDependentFields);
+}
+
+serviceWorkspaceButtons.forEach((button) => {
+  button.addEventListener("click", () => setActiveServiceWorkspace(button.dataset.serviceWorkspace));
+});
+
 cancelReminderBtn.onclick = closeReminderModal;
 saveReminderBtn.onclick = saveReminder;
 closeAlertDetailBtn.onclick = closeAlertDetail;
@@ -460,6 +499,7 @@ propertyFilterSelect.addEventListener("change", (e) => {
 monthFilterSelect.addEventListener("change", async (e) => {
   selectedMonthFilter = e.target.value;
   await ensureWeeklyStandardTasksForMonth(selectedMonthFilter);
+  await ensureLawnTasksForMonth(selectedMonthFilter);
   renderProperties();
   renderTaskViews();
 });
@@ -962,6 +1002,27 @@ function initializeWeekViewMode() {
   });
 }
 
+function setActiveServiceWorkspace(branch) {
+  activeServiceWorkspace = normalizeServiceBranch(branch);
+  selectedPropertyFilter = "";
+  serviceWorkspaceButtons.forEach((button) => {
+    button.classList.toggle("active", button.dataset.serviceWorkspace === activeServiceWorkspace);
+  });
+
+  const isLawn = activeServiceWorkspace === SERVICE_BRANCH_LAWN;
+  const todayHeader = document.querySelector("#todayView .view-header");
+  const weekHeader = document.querySelector("#weekView .view-header");
+  const propertiesHeader = document.querySelector("#propertiesView .view-header");
+  if (todayHeader) todayHeader.innerHTML = `<h2>${isLawn ? "Lawn Service Today" : "Today View"}</h2><p>${isLawn ? "Lawn tasks due today for technicians." : "Cleaning tasks due today for technicians."}</p>`;
+  if (weekHeader) weekHeader.querySelector("h2").textContent = isLawn ? "Lawn Service Week" : "Week View";
+  if (weekHeader) weekHeader.querySelector("p").textContent = isLawn ? "Lawn tasks due in the next 7 days grouped by date." : "Cleaning tasks due in the next 7 days grouped by date.";
+  if (propertiesHeader) propertiesHeader.querySelector("p").textContent = isLawn ? "Manage lawn-enabled properties and lawn tasks." : "Manage properties and add manual cleanings.";
+
+  document.querySelector(".top-actions")?.classList.toggle("hidden", isLawn);
+  renderTaskViews();
+  renderProperties();
+}
+
 function showView(viewName) {
   document.querySelectorAll(".view-panel").forEach((panel) => {
     panel.classList.toggle("active", panel.id === `${viewName}View`);
@@ -1134,6 +1195,7 @@ function openSafetyCultureChecklistForCurrentCleaning() {
 }
 
 function getSafetyCultureTaskActionMarkup(task) {
+  if (isLawnTask(task)) return "";
   const checklistUrl = getTaskSafetyCultureUrl(task);
   if (checklistUrl) {
     return `<button type="button" class="checklist-link-btn" onclick="openSafetyCultureChecklistForTask('${task.id}')">Open SafetyCulture Checklist</button>`;
@@ -1143,6 +1205,11 @@ function getSafetyCultureTaskActionMarkup(task) {
 
 function renderCleaningSafetyCultureAccess() {
   if (!openSafetyCultureChecklistBtn || !cleaningChecklistHint) return;
+  const isLawn = activeServiceWorkspace === SERVICE_BRANCH_LAWN || isLawnTask(getCurrentCleaningTask());
+  cleaningModal?.querySelector(".task-checklist-access-row")?.classList.toggle("hidden", isLawn);
+  cleaningModal?.querySelector(".chemical-usage-section")?.classList.toggle("hidden", isLawn);
+  if (isLawn) return;
+
   const url = getPropertySafetyCultureUrl(selectedCleaningPropertyId);
   if (url) {
     openSafetyCultureChecklistBtn.classList.remove("hidden");
@@ -1793,6 +1860,10 @@ function downloadChemicalUsagePdf() {
 function openAddModal() {
   editingPropertyId = null;
   clearPropertyForm();
+  if (activeServiceWorkspace === SERVICE_BRANCH_LAWN) {
+    if (propertyPoolServiceActive) propertyPoolServiceActive.value = "no";
+    if (propertyLawnServiceActive) propertyLawnServiceActive.value = "yes";
+  }
   propertyModal.classList.remove("hidden");
 }
 
@@ -1832,11 +1903,19 @@ function openEditModal(id) {
   if (propertyInvoiceNotes) propertyInvoiceNotes.value = property.invoice_notes || "";
   if (propertyCompanyBranch) propertyCompanyBranch.value = normalizeCompanyBranch(property.company_branch);
   if (propertyStatus) propertyStatus.value = isPropertyActive(property) ? "active" : "inactive";
+  if (propertyPoolServiceActive) propertyPoolServiceActive.value = property.pool_service_active === false ? "no" : "yes";
   if (propertyServiceFrequency) propertyServiceFrequency.value = getPropertyFrequencyForScheduling(property);
   if (propertyBiweeklyAnchorDate) {
     propertyBiweeklyAnchorDate.value = getBiweeklyAnchorDateForScheduling(property);
   }
+  if (propertyLawnServiceActive) propertyLawnServiceActive.value = property.lawn_service_active === true ? "yes" : "no";
+  if (propertyLawnServiceFrequency) propertyLawnServiceFrequency.value = normalizeServiceFrequency(property.lawn_service_frequency);
+  if (propertyLawnServiceDay) propertyLawnServiceDay.value = property.lawn_service_day || "Wednesday";
+  if (propertyLawnBiweeklyAnchorDate) propertyLawnBiweeklyAnchorDate.value = normalizeBiweeklyAnchorDate(property.lawn_biweekly_anchor_date);
+  if (propertyLawnDefaultCharge) propertyLawnDefaultCharge.value = Number(property.lawn_default_charge || 0);
+  if (propertyLawnLaborAmount) propertyLawnLaborAmount.value = Number(property.lawn_labor_amount || 0);
   syncPropertyServiceFrequencyDependentFields();
+  syncLawnServiceFrequencyDependentFields();
 
   propertyModal.classList.remove("hidden");
 }
@@ -1936,7 +2015,14 @@ function syncPropertyServiceFrequencyDependentFields() {
   }
 }
 
+function syncLawnServiceFrequencyDependentFields() {
+  const isBiweekly = normalizeServiceFrequency(propertyLawnServiceFrequency?.value) === SERVICE_FREQUENCY_BIWEEKLY;
+  propertyLawnBiweeklyAnchorDateRow?.classList.toggle("hidden", !isBiweekly);
+  if (propertyLawnBiweeklyAnchorDate) propertyLawnBiweeklyAnchorDate.required = isBiweekly;
+}
+
 syncPropertyServiceFrequencyDependentFields();
+syncLawnServiceFrequencyDependentFields();
 
 function isDateOnBiweeklyCycle(taskDate, anchorDate) {
   const normalizedTaskDate = normalizeDateKey(taskDate);
@@ -2089,11 +2175,12 @@ function openCleaningModal(propertyId) {
   }
 
   cleaningDate.value = new Date().toISOString().split("T")[0];
-  cleaningServiceType.value = "Manual";
+  cleaningServiceType.value = activeServiceWorkspace === SERVICE_BRANCH_LAWN ? "Lawn Service" : "Manual";
+  cleaningServiceType.disabled = activeServiceWorkspace === SERVICE_BRANCH_LAWN;
   if (cleaningWeeklyServiceLevel) cleaningWeeklyServiceLevel.value = WEEKLY_SERVICE_LEVEL_FULL;
   cleaningStatus.value = "Scheduled";
   cleaningTechnician.value = "";
-  cleaningCharge.value = 0;
+  cleaningCharge.value = activeServiceWorkspace === SERVICE_BRANCH_LAWN ? Number(property.lawn_default_charge || 0) : 0;
   if (cleaningSdsAmount) {
     if (cleaningSdsAmountLabel) cleaningSdsAmountLabel.classList.add("hidden");
     cleaningSdsAmount.classList.add("hidden");
@@ -2123,6 +2210,7 @@ function openEditCleaning(taskId) {
 
   cleaningDate.value = task.scheduled_date || task.service_date || "";
   cleaningServiceType.value = task.service_type || "Manual";
+  cleaningServiceType.disabled = isLawnTask(task);
   if (cleaningWeeklyServiceLevel) {
     cleaningWeeklyServiceLevel.value = normalizeWeeklyServiceLevel(task.weekly_service_level);
   }
@@ -2428,7 +2516,8 @@ async function loadData() {
     ? selectedMonthFilter
     : "current";
   const generatedWeeklyCount = await ensureWeeklyStandardTasksForMonth(monthForAutoGeneration);
-  if (generatedWeeklyCount > 0) {
+  const generatedLawnCount = await ensureLawnTasksForMonth(monthForAutoGeneration);
+  if (generatedWeeklyCount > 0 || generatedLawnCount > 0) {
     await loadCleaningTasks();
   }
 
@@ -2675,6 +2764,7 @@ function formatMessageWeekRange(weekStartDate, weekEndDate) {
 function getMessageTasksForWeek(weekStart, weekEnd) {
   return cleaningTasks
     .filter((task) => {
+      if (!taskMatchesActiveWorkspace(task)) return false;
       const taskDate = task.service_date || task.scheduled_date;
       if (!taskDate) return false;
       if (shouldSuppressWeeklyStandardTaskDisplay(task)) return false;
@@ -2733,7 +2823,7 @@ function renderMessagesPreview() {
 
   const techCardsHtml = orderedTechs.map((techName, index) => {
     const lines = [];
-    lines.push(`Hey ${techName}, here is your pool schedule for ${weekLabel}:`);
+    lines.push(`Hey ${techName}, here is your ${activeServiceWorkspace === SERVICE_BRANCH_LAWN ? "lawn" : "pool"} schedule for ${weekLabel}:`);
     lines.push("");
 
     const groupedByDate = tasksByTech[techName].reduce((acc, task) => {
@@ -2771,7 +2861,7 @@ function renderMessagesPreview() {
         lines.push("");
       });
 
-    lines.push("Please mark each task complete after service and send photos after each pool.");
+    lines.push(`Please mark each task complete after service and send photos after each ${activeServiceWorkspace === SERVICE_BRANCH_LAWN ? "lawn" : "pool"}.`);
 
     const previewId = `messagePreviewTech${index}`;
     const copyStatusId = `messageCopyStatus${index}`;
@@ -2878,6 +2968,7 @@ async function ensureWeeklyStandardTasksForMonth(monthType) {
 
   const propertiesForGeneration = properties.filter((property) => {
     if (!isPropertyActive(property)) return false;
+    if (!propertySupportsServiceBranch(property, SERVICE_BRANCH_POOL)) return false;
     const frequency = getPropertyFrequencyForScheduling(property);
     if (frequency === SERVICE_FREQUENCY_BIWEEKLY) {
       return Boolean(getBiweeklyAnchorDateForScheduling(property));
@@ -2953,6 +3044,75 @@ async function ensureWeeklyStandardTasksForMonth(monthType) {
   }
 
   return filteredWeeklyTasks.length;
+}
+
+function getLawnGenerationServiceDatesForProperty(property, monthType) {
+  const frequency = normalizeServiceFrequency(property?.lawn_service_frequency);
+  if (frequency === SERVICE_FREQUENCY_BIWEEKLY) {
+    return getServiceDatesForMonthByBiweeklyAnchor(property?.lawn_biweekly_anchor_date, monthType);
+  }
+  return getServiceDatesForMonthByDay(property?.lawn_service_day || "Wednesday", monthType);
+}
+
+function hasExistingLawnTask(propertyId, serviceDate) {
+  const sourceKey = `lawn:${propertyId}:${serviceDate}`;
+  return cleaningTasks.some((task) => task.property_id === propertyId
+    && isLawnTask(task)
+    && (task.source_key === sourceKey || (!task.source_key && task.service_date === serviceDate)));
+}
+
+async function ensureLawnTasksForMonth(monthType) {
+  if (!["current", "next", "previous"].includes(monthType)) return 0;
+
+  const tasksToCreate = [];
+  properties
+    .filter((property) => isPropertyActive(property) && propertySupportsServiceBranch(property, SERVICE_BRANCH_LAWN))
+    .forEach((property) => {
+      const frequency = normalizeServiceFrequency(property.lawn_service_frequency);
+      const frequencyLabel = getServiceFrequencyLabel(frequency);
+      const serviceDay = property.lawn_service_day || "Wednesday";
+      if (frequency === SERVICE_FREQUENCY_BIWEEKLY && !normalizeBiweeklyAnchorDate(property.lawn_biweekly_anchor_date)) return;
+
+      getLawnGenerationServiceDatesForProperty(property, monthType).forEach((serviceDate) => {
+        if (hasExistingLawnTask(property.id, serviceDate)) return;
+        tasksToCreate.push({
+          property_id: property.id,
+          service_date: serviceDate,
+          scheduled_date: serviceDate,
+          suggested_date: serviceDate,
+          service_type: "Lawn Service",
+          service_branch: SERVICE_BRANCH_LAWN,
+          status: "Scheduled",
+          off_cycle: false,
+          guest_ready: false,
+          charge: 0,
+          notes: `Auto-created ${frequencyLabel} Lawn Service for ${serviceDay} in ${monthType} month view.`,
+          source_type: "lawn_recurring",
+          source_key: `lawn:${property.id}:${serviceDate}`,
+          manually_modified: false,
+        });
+      });
+    });
+
+  if (!tasksToCreate.length) return 0;
+
+  const sourceKeys = tasksToCreate.map((task) => task.source_key);
+  const duplicateCheck = await supabaseClient.from("cleaning_tasks").select("source_key").in("source_key", sourceKeys);
+  if (duplicateCheck.error) {
+    console.warn("Lawn generation duplicate check failed:", duplicateCheck.error.message);
+    return 0;
+  }
+
+  const existingKeys = new Set((duplicateCheck.data || []).map((row) => row.source_key));
+  const newTasks = tasksToCreate.filter((task) => !existingKeys.has(task.source_key));
+  if (!newTasks.length) return 0;
+
+  const { error } = await supabaseClient.from("cleaning_tasks").insert(newTasks);
+  if (error) {
+    console.warn("Lawn generation insert failed. Run the Lawn Service migration first:", error.message);
+    return 0;
+  }
+  return newTasks.length;
 }
 
 function getNormalizedCompanyProfile(raw) {
@@ -3950,10 +4110,21 @@ async function saveProperty() {
     ? normalizeBiweeklyAnchorDate(propertyBiweeklyAnchorDate?.value)
     : null;
   const selectedPropertyActive = String(propertyStatus?.value || "active") !== "inactive";
+  const selectedPoolServiceActive = String(propertyPoolServiceActive?.value || "yes") === "yes";
+  const selectedLawnServiceActive = String(propertyLawnServiceActive?.value || "no") === "yes";
+  const selectedLawnFrequency = normalizeServiceFrequency(propertyLawnServiceFrequency?.value);
+  const selectedLawnAnchorDate = selectedLawnFrequency === SERVICE_FREQUENCY_BIWEEKLY
+    ? normalizeBiweeklyAnchorDate(propertyLawnBiweeklyAnchorDate?.value)
+    : null;
   const taxable = String(propertyTaxable?.value || "yes") === "yes";
 
   if (selectedServiceFrequency === SERVICE_FREQUENCY_BIWEEKLY && !selectedBiweeklyAnchorDate) {
     alert("First / Next Cleaning Date is required when Service Frequency is Bi-Weekly.");
+    return;
+  }
+
+  if (selectedLawnServiceActive && selectedLawnFrequency === SERVICE_FREQUENCY_BIWEEKLY && !selectedLawnAnchorDate) {
+    alert("Lawn First / Next Service Date is required when Lawn Service Frequency is Bi-Weekly.");
     return;
   }
 
@@ -4019,6 +4190,13 @@ async function saveProperty() {
     company_branch: normalizeCompanyBranch(propertyCompanyBranch?.value),
     service_frequency: selectedServiceFrequency,
     biweekly_anchor_date: selectedBiweeklyAnchorDate,
+    pool_service_active: selectedPoolServiceActive,
+    lawn_service_active: selectedLawnServiceActive,
+    lawn_service_frequency: selectedLawnFrequency,
+    lawn_service_day: String(propertyLawnServiceDay?.value || "Wednesday"),
+    lawn_biweekly_anchor_date: selectedLawnAnchorDate,
+    lawn_default_charge: Math.max(0, Number(propertyLawnDefaultCharge?.value || 0)),
+    lawn_labor_amount: Math.max(0, Number(propertyLawnLaborAmount?.value || 0)),
     active: selectedPropertyActive
   };
 
@@ -4131,7 +4309,7 @@ async function deleteProperty(id) {
 
 async function syncAllIcal() {
   const allProperties = properties;
-  const icalProperties = allProperties.filter((p) => p.ical_url && isPropertyActive(p));
+  const icalProperties = allProperties.filter((p) => p.ical_url && isPropertyActive(p) && propertySupportsServiceBranch(p, SERVICE_BRANCH_POOL));
 
   if (icalProperties.length === 0) {
     syncAllStatus.textContent = "No active properties with an iCal URL configured.";
@@ -4154,6 +4332,10 @@ async function syncAllIcal() {
     if (!isPropertyActive(p)) {
       console.log(`[SyncAll] SKIP "${p.property_name}" — property is inactive`);
       results.push({ propertyName: p.property_name, skipped: true, skippedReason: "Property inactive" });
+      continue;
+    }
+    if (!propertySupportsServiceBranch(p, SERVICE_BRANCH_POOL)) {
+      results.push({ propertyName: p.property_name, skipped: true, skippedReason: "Pool Service inactive" });
     }
   }
 
@@ -4289,6 +4471,11 @@ async function syncPropertyIcal(propertyId) {
     return;
   }
 
+  if (!propertySupportsServiceBranch(property, SERVICE_BRANCH_POOL)) {
+    statusMessage.textContent = "Pool Service is inactive for this property.";
+    return;
+  }
+
   console.log("[SynciCal] Syncing property:", property.property_name, "ical_url:", property.ical_url);
   statusMessage.textContent = `Syncing iCal for ${property.property_name}...`;
 
@@ -4330,7 +4517,8 @@ async function saveCleaningTask() {
   if (!property) return;
 
   const serviceDate = cleaningDate.value;
-  const serviceType = cleaningServiceType.value;
+  const serviceType = activeServiceWorkspace === SERVICE_BRANCH_LAWN ? "Lawn Service" : cleaningServiceType.value;
+  const serviceBranch = activeServiceWorkspace === SERVICE_BRANCH_LAWN ? SERVICE_BRANCH_LAWN : SERVICE_BRANCH_POOL;
   const weeklyServiceLevel = serviceType === "Weekly Standard"
     ? normalizeWeeklyServiceLevel(cleaningWeeklyServiceLevel?.value)
     : null;
@@ -4439,6 +4627,7 @@ async function saveCleaningTask() {
           : getLaborAmountForTask(
               {
                 service_type: serviceType,
+                service_branch: serviceBranch,
                 weekly_service_level: weeklyServiceLevel,
                 property_id: selectedCleaningPropertyId,
                 service_date: serviceDate,
@@ -4457,6 +4646,7 @@ async function saveCleaningTask() {
     service_date: serviceDate,
     scheduled_date: serviceDate,
     service_type: serviceType,
+    service_branch: serviceBranch,
     weekly_service_level: weeklyServiceLevel,
     technician: completedByTechnician ? completedByTechnician.name : cleaningTechnician.value.trim(),
     technician_id: completedByTechnician?.id || null,
@@ -4810,9 +5000,17 @@ function clearPropertyForm() {
   if (propertyInvoiceNotes) propertyInvoiceNotes.value = "";
   if (propertyCompanyBranch) propertyCompanyBranch.value = COMPANY_BRANCH_GUEST_READY;
   if (propertyStatus) propertyStatus.value = "active";
+  if (propertyPoolServiceActive) propertyPoolServiceActive.value = "yes";
   if (propertyServiceFrequency) propertyServiceFrequency.value = SERVICE_FREQUENCY_WEEKLY;
   if (propertyBiweeklyAnchorDate) propertyBiweeklyAnchorDate.value = "";
+  if (propertyLawnServiceActive) propertyLawnServiceActive.value = "no";
+  if (propertyLawnServiceFrequency) propertyLawnServiceFrequency.value = SERVICE_FREQUENCY_WEEKLY;
+  if (propertyLawnServiceDay) propertyLawnServiceDay.value = "Wednesday";
+  if (propertyLawnBiweeklyAnchorDate) propertyLawnBiweeklyAnchorDate.value = "";
+  if (propertyLawnDefaultCharge) propertyLawnDefaultCharge.value = 0;
+  if (propertyLawnLaborAmount) propertyLawnLaborAmount.value = 0;
   syncPropertyServiceFrequencyDependentFields();
+  syncLawnServiceFrequencyDependentFields();
 }
 
 function toggleInvoiceMarker(taskId) {
@@ -4829,7 +5027,7 @@ function toggleInvoiceMarker(taskId) {
   const previousCharge = task.charge;
 
   // Reconciling locks in the effective charge (task charge, or property default fallback) so later rate changes don't alter this task's billed amount.
-  if (newInvoiced && task.service_type === "Weekly Standard" && !(Number(task.charge || 0) > 0)) {
+  if (newInvoiced && (task.service_type === "Weekly Standard" || isLawnTask(task)) && !(Number(task.charge || 0) > 0)) {
     const effectiveCharge = getTaskBillingAmount(task);
     if (effectiveCharge > 0) {
       updatePayload.charge = effectiveCharge;
@@ -5000,6 +5198,7 @@ function getTodayCleaningTasks() {
   console.log("[TodayView] Today date string:", todayString);
 
   const todayTasks = cleaningTasks.filter((task) => {
+    if (!taskMatchesActiveWorkspace(task)) return false;
     if (!task.service_date) return false;
     if (shouldSuppressWeeklyStandardTaskDisplay(task)) return false;
     return task.service_date === todayString;
@@ -5024,6 +5223,7 @@ function getUpcomingCleaningTasks() {
 
   const filteredTasks = cleaningTasks
     .filter((task) => {
+      if (!taskMatchesActiveWorkspace(task)) return false;
       if (!task.service_date) return false;
       if (shouldSuppressWeeklyStandardTaskDisplay(task)) return false;
 
@@ -5396,6 +5596,18 @@ function getEffectiveWeeklyStandardCharge(task, property) {
 }
 
 function getTaskBillingContext(task) {
+  if (isLawnTask(task)) {
+    const property = properties.find((item) => item.id === task.property_id);
+    const rawCharge = Number(task.charge || 0);
+    const defaultCharge = Number(property?.lawn_default_charge || 0);
+    const amount = rawCharge > 0 ? rawCharge : defaultCharge;
+    return {
+      billableAmount: amount,
+      isBillable: amount > 0,
+      billingReasonLabel: rawCharge > 0 ? "Lawn Charge" : "Default Lawn Charge",
+    };
+  }
+
   if (!isTaskGuestReady(task)) {
     if (task.service_type === "Weekly Standard") {
       const property = properties.find((p) => p.id === task.property_id);
@@ -5442,6 +5654,7 @@ function getPropertyLaborRules(property) {
     weeklyServiceLabor: Math.max(0, Number(property?.weekly_service_labor || 0)),
     guestReadyServiceLabor: Math.max(0, Number(property?.guest_ready_service_labor || 0)),
     additionalCleaningLabor: Math.max(0, Number(property?.additional_cleaning_labor || 0)),
+    lawnServiceLabor: Math.max(0, Number(property?.lawn_labor_amount || 0)),
   };
 }
 
@@ -5452,6 +5665,10 @@ function isManualTask(task) {
 function getLaborAmountForTask(task, property) {
   const rules = getPropertyLaborRules(property);
   const serviceType = String(task?.service_type || "").trim();
+
+  if (isLawnTask(task)) {
+    return rules.lawnServiceLabor;
+  }
 
   if (serviceType === "Weekly Standard") {
     const weeklyLevel = normalizeWeeklyServiceLevel(task?.weekly_service_level);
@@ -8573,7 +8790,9 @@ function getInvoiceCandidateTasks({ startDate, endDate, selectedPropertyId = "",
     propertyId: row.property_id,
     propertyName: row.propertyName || getPropertyName(row.property_id),
     clientName: row.clientName || "",
-    description: `${row.propertyName || getPropertyName(row.property_id)} - ${row.serviceLabel || row.service_type || "Cleaning Service"} (${row.billingReasonLabel || "Chargeable"})`,
+    description: isLawnTask(row)
+      ? `${row.propertyName || getPropertyName(row.property_id)} - ${normalizeServiceFrequency(getPropertyById(row.property_id)?.lawn_service_frequency) === SERVICE_FREQUENCY_BIWEEKLY ? "Biweekly Lawn Service" : "Lawn Service"}`
+      : `${row.propertyName || getPropertyName(row.property_id)} - ${row.serviceLabel || row.service_type || "Cleaning Service"} (${row.billingReasonLabel || "Chargeable"})`,
     serviceDate: row.serviceDate || row.service_date || row.scheduled_date || "",
     quantity: Number(row.quantity || 1),
     unit: row.unit || "service",
@@ -8581,6 +8800,7 @@ function getInvoiceCandidateTasks({ startDate, endDate, selectedPropertyId = "",
     amount: Number(row.billableAmount || 0),
     itemType: "cleaning",
     itemSource: INVOICE_ITEM_SOURCES.TASK,
+    serviceBranch: normalizeServiceBranch(row.service_branch),
     notes: stripManualBillingOverrideTag(row.notes || ""),
   }));
 
@@ -9561,6 +9781,7 @@ async function saveInvoiceDraft(options = {}) {
     amount: Number(item.amount || 0),
     item_type: item.itemType || "manual",
     item_source: item.itemSource || (item.taskId ? INVOICE_ITEM_SOURCES.TASK : item.chemicalUsageId ? INVOICE_ITEM_SOURCES.CHEMICAL : INVOICE_ITEM_SOURCES.MANUAL),
+    service_branch: item.serviceBranch || null,
     notes: item.notes || null,
   }));
 
@@ -9844,6 +10065,7 @@ async function openInvoiceDraft(invoiceId) {
       amount: Number(item.amount || 0),
       itemType: item.item_type || "manual",
       itemSource: item.item_source || (item.task_id ? INVOICE_ITEM_SOURCES.TASK : item.chemical_usage_id ? INVOICE_ITEM_SOURCES.CHEMICAL : INVOICE_ITEM_SOURCES.MANUAL),
+      serviceBranch: item.service_branch || null,
       notes: item.notes || "",
     })),
     subtotal: Number(invoice.subtotal || 0),
@@ -10532,6 +10754,12 @@ function shouldShowReconcileForTask(task) {
   if (!task) return false;
   if (isTaskReconciled(task)) return false;
 
+  if (isLawnTask(task)) {
+    return String(task.status || "").toLowerCase() === "completed"
+      && !isTaskLinkedToFinalizedInvoice(task)
+      && getTaskBillingAmount(task) > 0;
+  }
+
   if (task.service_type === "Weekly Standard") {
     const status = String(task.status || "").toLowerCase();
     if (status === "cancelled" || status === "void" || status === "deleted") return false;
@@ -10697,7 +10925,7 @@ function renderTaskCard(task) {
         ${showReconcile ? `
         <label class="invoice-marker ${invoiceMarkerClass}">
           <input type="checkbox" ${task.invoiced ? "checked" : ""} onchange="toggleInvoiceMarker('${task.id}')" />
-          <span>$</span>
+          <span>${isLawnTask(task) ? "Reconcile" : "$"}</span>
         </label>
         ` : ""}
         ${sdsReconcileControl}
@@ -10706,7 +10934,7 @@ function renderTaskCard(task) {
       <div class="task-card-details">
         <div><strong>Service Date:</strong> ${task.service_date || task.scheduled_date || "Not set"}</div>
         <div><strong>Task Type:</strong> ${task.service_type || "Manual"}</div>
-        <div><strong>Guest Ready:</strong> ${isTaskGuestReady(task) ? "Yes" : "No"}</div>
+        ${isLawnTask(task) ? `<div><strong>Service Branch:</strong> Lawn Service</div>` : `<div><strong>Guest Ready:</strong> ${isTaskGuestReady(task) ? "Yes" : "No"}</div>`}
         ${taskBillingAmount > 0 ? `<div><strong>Charge:</strong> $${taskBillingAmount}</div>` : ""}
         ${weeklyReconcileLine}
         ${sdsBillingLine}
@@ -10722,6 +10950,7 @@ function renderTaskCard(task) {
         <button onclick="openEditCleaning('${task.id}')">Edit</button>
         ${status !== "Completed" && status !== "In Progress" ? `<button onclick="startCleaningTask('${task.id}')">Start</button>` : ""}
         ${status !== "Completed" ? `<button onclick="markCleaningComplete('${task.id}')">Complete</button>` : ""}
+        ${isLawnTask(task) ? `<button class="delete-btn" onclick="deleteCleaningTask('${task.id}')">Delete</button>` : ""}
       </div>
     </div>
   `;
@@ -10800,6 +11029,11 @@ function getAlertBadgeForTask(task) {
 }
 
 function renderOperationsRemindersWidget() {
+  if (activeServiceWorkspace === SERVICE_BRANCH_LAWN) {
+    operationsRemindersWidget.innerHTML = "";
+    return;
+  }
+
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
@@ -10860,13 +11094,19 @@ function renderOperationsRemindersWidget() {
 }
 
 function renderTaskViews() {
-  renderGuestProtectionAlerts();
+  if (activeServiceWorkspace === SERVICE_BRANCH_POOL) {
+    renderGuestProtectionAlerts();
+    renderOperationsRemindersWidget();
+  } else {
+    guestProtectionAlertsContainer.innerHTML = "";
+    operationsRemindersWidget.innerHTML = "";
+  }
 
   const todayTasks = getTodayCleaningTasks();
   console.log("[TodayView] Rendering", todayTasks.length, "today tasks");
   todayTasksContainer.innerHTML = todayTasks.length
     ? todayTasks.map(renderTaskCard).join("")
-    : `<div class="empty">No cleaning tasks due today.</div>`;
+    : `<div class="empty">No ${activeServiceWorkspace === SERVICE_BRANCH_LAWN ? "lawn" : "cleaning"} tasks due today.</div>`;
 
   renderWeekView();
 }
@@ -10875,8 +11115,9 @@ function renderWeekView() {
   const weekTasks = getUpcomingCleaningTasks();
   
   if (!weekTasks.length) {
-    weekTasksContainer.innerHTML = `<div class="empty">No cleaning tasks scheduled in the next 7 days.</div>`;
-    weekTasksCalendarContainer.innerHTML = `<div class="empty">No cleaning tasks scheduled in the next 7 days.</div>`;
+    const taskLabel = activeServiceWorkspace === SERVICE_BRANCH_LAWN ? "lawn tasks" : "cleaning tasks";
+    weekTasksContainer.innerHTML = `<div class="empty">No ${taskLabel} scheduled in the next 7 days.</div>`;
+    weekTasksCalendarContainer.innerHTML = `<div class="empty">No ${taskLabel} scheduled in the next 7 days.</div>`;
     weekTasksContainer.classList.remove("hidden");
     weekTasksCalendarContainer.classList.add("hidden");
     return;
@@ -10975,7 +11216,7 @@ function renderWeekViewListTaskCard(task) {
       ${badge}
       ${sameDayBadge}
       <div class="task-line"><small>Task Type: ${task.service_type || "Manual"}</small></div>
-      <div class="task-line"><small>Guest Ready: ${isTaskGuestReady(task) ? "Yes" : "No"}</small></div>
+      ${isLawnTask(task) ? `<div class="task-line"><small>Service Branch: Lawn Service</small></div>` : `<div class="task-line"><small>Guest Ready: ${isTaskGuestReady(task) ? "Yes" : "No"}</small></div>`}
       ${taskBillingAmount > 0 ? `<div class="task-line">$${taskBillingAmount}</div>` : ""}
       ${billingLine}
       ${weeklyReconcileLine}
@@ -11192,7 +11433,8 @@ function renderPropertyChemicalHistory(property) {
 }
 
 function renderProperties() {
-  document.getElementById("propertyCount").textContent = properties.length;
+  const workspaceProperties = properties.filter((property) => propertySupportsServiceBranch(property));
+  document.getElementById("propertyCount").textContent = workspaceProperties.length;
 
   const now = new Date();
   const currentYear = now.getFullYear();
@@ -11208,15 +11450,15 @@ function renderProperties() {
   refreshBillingCard();
 
   const propertyOptions = propertyFilterSelect.innerHTML;
-  const newOptions = `<option value="">All Properties</option>${properties.map((p) => `<option value="${p.id}">${p.property_name}</option>`).join("")}`;
+  const newOptions = `<option value="">All Properties</option>${workspaceProperties.map((p) => `<option value="${p.id}">${p.property_name}</option>`).join("")}`;
   if (propertyOptions !== newOptions) {
     propertyFilterSelect.innerHTML = newOptions;
     propertyFilterSelect.value = selectedPropertyFilter;
   }
 
-  let filteredProperties = properties;
+  let filteredProperties = workspaceProperties;
   if (selectedPropertyFilter) {
-    filteredProperties = properties.filter((p) => p.id === selectedPropertyFilter);
+    filteredProperties = workspaceProperties.filter((p) => p.id === selectedPropertyFilter);
   }
 
   if (filteredProperties.length === 0) {
@@ -11225,7 +11467,7 @@ function renderProperties() {
   }
 
   propertyList.innerHTML = filteredProperties.map((property) => {
-    let tasks = cleaningTasks.filter((task) => task.property_id === property.id);
+    let tasks = cleaningTasks.filter((task) => task.property_id === property.id && taskMatchesActiveWorkspace(task));
     tasks = tasks.filter((task) => !shouldSuppressWeeklyStandardTaskDisplay(task));
     tasks = tasks.filter((task) => taskMatchesDateFilter(task, selectedMonthFilter));
     const serviceFrequency = getPropertyFrequencyForScheduling(property);
@@ -11236,10 +11478,10 @@ function renderProperties() {
     const hasSameDayGuestReady = tasks.some((task) => isSameDayCheckInGuestReadyTask(task));
     const isCollapsed = collapsedPropertyCards.has(property.id);
     const toggleButtonText = isCollapsed ? "Expand" : "Collapse";
-    const activeTab = getPropertyDetailTab(property.id);
+    const activeTab = activeServiceWorkspace === SERVICE_BRANCH_LAWN ? "tasks" : getPropertyDetailTab(property.id);
 
     const taskContent = tasks.length === 0
-      ? `<p>No cleanings scheduled.</p>`
+      ? `<p>No ${activeServiceWorkspace === SERVICE_BRANCH_LAWN ? "lawn tasks" : "cleanings"} scheduled.</p>`
       : tasks.map((task) => {
           const taskBillingAmount = getTaskBillingAmount(task);
           const billingContext = getTaskBillingContext(task);
@@ -11340,20 +11582,27 @@ function renderProperties() {
           <div><strong>Billing Email:</strong> ${property.billing_email || "Not entered"}</div>
           <div><strong>Account / Reference:</strong> ${property.billing_account_reference || "Not entered"}</div>
           <div><strong>Address:</strong> ${property.address || "Not entered"}</div>
-          <div><strong>SafetyCulture Checklist:</strong> ${property.safetyculture_checklist_url ? "Saved" : "Not entered"}</div>
-          <div><strong>Standard Service Day:</strong> ${property.standard_service_day || "Wednesday"}</div>
-          <div><strong>Service Frequency:</strong> ${getServiceFrequencyLabel(serviceFrequency)}</div>
-          ${serviceFrequency === SERVICE_FREQUENCY_BIWEEKLY
-            ? `<div><strong>Next/Anchor Cleaning:</strong> ${anchorCleaningDate ? formatInvoicePrintDateValue(anchorCleaningDate) : "Not set"}</div>`
-            : ""}
-          <div><strong>Guest Ready Coverage Rule:</strong> ${getCoverageRuleLabel(getCoverageRuleForProperty(property))}</div>
-          <div><strong>Billable Guest Ready Charge:</strong> $${Number(property.default_off_cycle_charge ?? 65).toFixed(2)}</div>
-          <div><strong>Standard Weekly Service Labor:</strong> $${Number(property.weekly_service_labor || 0).toFixed(2)}</div>
-          <div><strong>Contract Revenue:</strong> $${Number(property.contract_revenue_amount || 0).toFixed(2)} ${getContractRateBasisLabel(property.contract_rate_basis)}</div>
-          <div><strong>Guest Ready Service Labor:</strong> $${Number(property.guest_ready_service_labor || 0).toFixed(2)}</div>
-          <div><strong>Additional / Billable Cleaning Labor:</strong> $${Number(property.additional_cleaning_labor || 0).toFixed(2)}</div>
-          <div><strong>Default Cleaning Rate:</strong> $${Number(property.default_cleaning_rate ?? 0).toFixed(2)}</div>
-          <div><strong>Same-Day Surcharge:</strong> $${Number(property.same_day_surcharge ?? 0).toFixed(2)}</div>
+          ${activeServiceWorkspace === SERVICE_BRANCH_LAWN ? `
+            <div><strong>Lawn Service Day:</strong> ${property.lawn_service_day || "Wednesday"}</div>
+            <div><strong>Lawn Service Frequency:</strong> ${getServiceFrequencyLabel(property.lawn_service_frequency)}</div>
+            <div><strong>Lawn Default Charge:</strong> $${Number(property.lawn_default_charge || 0).toFixed(2)}</div>
+            <div><strong>Lawn Labor Amount:</strong> $${Number(property.lawn_labor_amount || 0).toFixed(2)}</div>
+          ` : `
+            <div><strong>SafetyCulture Checklist:</strong> ${property.safetyculture_checklist_url ? "Saved" : "Not entered"}</div>
+            <div><strong>Standard Service Day:</strong> ${property.standard_service_day || "Wednesday"}</div>
+            <div><strong>Service Frequency:</strong> ${getServiceFrequencyLabel(serviceFrequency)}</div>
+            ${serviceFrequency === SERVICE_FREQUENCY_BIWEEKLY
+              ? `<div><strong>Next/Anchor Cleaning:</strong> ${anchorCleaningDate ? formatInvoicePrintDateValue(anchorCleaningDate) : "Not set"}</div>`
+              : ""}
+            <div><strong>Guest Ready Coverage Rule:</strong> ${getCoverageRuleLabel(getCoverageRuleForProperty(property))}</div>
+            <div><strong>Billable Guest Ready Charge:</strong> $${Number(property.default_off_cycle_charge ?? 65).toFixed(2)}</div>
+            <div><strong>Standard Weekly Service Labor:</strong> $${Number(property.weekly_service_labor || 0).toFixed(2)}</div>
+            <div><strong>Contract Revenue:</strong> $${Number(property.contract_revenue_amount || 0).toFixed(2)} ${getContractRateBasisLabel(property.contract_rate_basis)}</div>
+            <div><strong>Guest Ready Service Labor:</strong> $${Number(property.guest_ready_service_labor || 0).toFixed(2)}</div>
+            <div><strong>Additional / Billable Cleaning Labor:</strong> $${Number(property.additional_cleaning_labor || 0).toFixed(2)}</div>
+            <div><strong>Default Cleaning Rate:</strong> $${Number(property.default_cleaning_rate ?? 0).toFixed(2)}</div>
+            <div><strong>Same-Day Surcharge:</strong> $${Number(property.same_day_surcharge ?? 0).toFixed(2)}</div>
+          `}
           <div><strong>Taxable:</strong> ${property.billing_taxable === false ? "No" : "Yes"}</div>
           <div><strong>Tax Rate:</strong> ${Number(property.billing_tax_rate || 0).toFixed(2)}%</div>
           <div><strong>Payment Terms:</strong> ${property.payment_terms || DEFAULT_INVOICE_TERMS}</div>
@@ -11361,12 +11610,12 @@ function renderProperties() {
         </div>
 
         <div class="card-actions">
-          <button onclick="openCleaningModal('${property.id}')">+ Cleaning</button>
+          <button onclick="openCleaningModal('${property.id}')">+ ${activeServiceWorkspace === SERVICE_BRANCH_LAWN ? "Lawn Task" : "Cleaning"}</button>
           <button onclick="openEditModal('${property.id}')">Edit</button>
           <button class="delete-btn" onclick="deleteProperty('${property.id}')">Delete</button>
         </div>
 
-        <div class="reminders-section">
+        <div class="reminders-section ${activeServiceWorkspace === SERVICE_BRANCH_LAWN ? "hidden" : ""}">
           <div class="reminders-header">
             <h4>Operations Reminders</h4>
             <button class="add-reminder-btn" onclick="openReminderModal('${property.id}')">+ Reminder</button>
@@ -11402,8 +11651,8 @@ function renderProperties() {
 
         <div class="task-list ${isCollapsed ? "collapsed" : ""}">
           <div class="property-detail-tabs">
-            <button type="button" class="property-detail-tab ${activeTab === "tasks" ? "active" : ""}" onclick="setPropertyDetailTab('${property.id}','tasks')">Scheduled Cleanings</button>
-            <button type="button" class="property-detail-tab ${activeTab === "history" ? "active" : ""}" onclick="setPropertyDetailTab('${property.id}','history')">Chemical History</button>
+            <button type="button" class="property-detail-tab ${activeTab === "tasks" ? "active" : ""}" onclick="setPropertyDetailTab('${property.id}','tasks')">${activeServiceWorkspace === SERVICE_BRANCH_LAWN ? "Scheduled Lawn Tasks" : "Scheduled Cleanings"}</button>
+            ${activeServiceWorkspace === SERVICE_BRANCH_POOL ? `<button type="button" class="property-detail-tab ${activeTab === "history" ? "active" : ""}" onclick="setPropertyDetailTab('${property.id}','history')">Chemical History</button>` : ""}
           </div>
           ${activeTab === "tasks" ? taskContent : renderPropertyChemicalHistory(property)}
         </div>

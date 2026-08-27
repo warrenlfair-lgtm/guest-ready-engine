@@ -253,6 +253,49 @@ h1 {
     margin-bottom: 20px;
 }
 
+.service-workspace-selector {
+    display: inline-flex;
+    gap: 4px;
+    padding: 4px;
+    margin-bottom: 16px;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    background: #ffffff;
+}
+
+.service-workspace-btn {
+    min-width: 120px;
+    box-shadow: none;
+}
+
+.service-workspace-btn[data-service-workspace="pool"] {
+    background: #dbeafe;
+    color: #1d4ed8;
+}
+
+.service-workspace-btn[data-service-workspace="pool"]:hover {
+    background: #bfdbfe;
+}
+
+.service-workspace-btn[data-service-workspace="pool"].active {
+    background: #2563eb;
+    color: #ffffff;
+}
+
+.service-workspace-btn[data-service-workspace="lawn"] {
+    background: #dcfce7;
+    color: #166534;
+}
+
+.service-workspace-btn[data-service-workspace="lawn"]:hover {
+    background: #bbf7d0;
+}
+
+.service-workspace-btn[data-service-workspace="lawn"].active {
+    background: #166534;
+    color: #ffffff;
+}
+
 .view-btn {
     background: #e2e8f0;
     color: #0f172a;
@@ -791,6 +834,18 @@ button:hover {
     overflow-y: auto;
     overscroll-behavior: contain;
     padding-right: 2px;
+}
+
+.property-service-section {
+    display: contents;
+}
+
+.property-service-section h3 {
+    grid-column: 1 / -1;
+    margin: 12px 0 0;
+    padding-top: 16px;
+    border-top: 1px solid #dbe2ea;
+    color: #166534;
 }
 
 .property-modal-footer {

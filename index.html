@@ -54,6 +54,11 @@
     </div>
   </div>
 
+  <div class="service-workspace-selector" role="group" aria-label="Service workspace">
+    <button type="button" class="service-workspace-btn active" data-service-workspace="pool">Pool Service</button>
+    <button type="button" class="service-workspace-btn" data-service-workspace="lawn">Lawn Service</button>
+  </div>
+
   <div class="top-actions">
     <button type="button" id="syncAllIcalBtn" class="sync-all-btn">&#8635; Sync All iCal</button>
     <span id="syncAllStatus" class="sync-all-status"></span>
@@ -799,6 +804,12 @@
         <option value="inactive">Inactive</option>
       </select>
 
+      <label>Pool Service Active</label>
+      <select id="propertyPoolServiceActive">
+        <option value="yes" selected>Yes</option>
+        <option value="no">No</option>
+      </select>
+
       <div id="propertyBiweeklyAnchorDateRow" class="hidden">
         <label>First / Next Cleaning Date</label>
         <input id="propertyBiweeklyAnchorDate" type="date">
@@ -842,6 +853,44 @@
 
       <label>Same-Day Surcharge (SDS)</label>
       <input id="propertySameDaySurcharge" type="number" min="0" step="0.01" value="0">
+
+      <div class="property-service-section">
+        <h3>Lawn Service</h3>
+
+        <label>Lawn Service Active</label>
+        <select id="propertyLawnServiceActive">
+          <option value="no" selected>No</option>
+          <option value="yes">Yes</option>
+        </select>
+
+        <label>Lawn Service Frequency</label>
+        <select id="propertyLawnServiceFrequency">
+          <option value="weekly" selected>Weekly</option>
+          <option value="bi_weekly">Bi-Weekly</option>
+        </select>
+
+        <label>Lawn Service Day</label>
+        <select id="propertyLawnServiceDay">
+          <option>Monday</option>
+          <option>Tuesday</option>
+          <option selected>Wednesday</option>
+          <option>Thursday</option>
+          <option>Friday</option>
+          <option>Saturday</option>
+          <option>Sunday</option>
+        </select>
+
+        <div id="propertyLawnBiweeklyAnchorDateRow" class="hidden">
+          <label>Lawn First / Next Service Date</label>
+          <input id="propertyLawnBiweeklyAnchorDate" type="date">
+        </div>
+
+        <label>Lawn Default Charge</label>
+        <input id="propertyLawnDefaultCharge" type="number" min="0" step="0.01" value="0">
+
+        <label>Lawn Labor Amount</label>
+        <input id="propertyLawnLaborAmount" type="number" min="0" step="0.01" value="0">
+      </div>
 
       <label>Taxable</label>
       <select id="propertyTaxable">
@@ -887,6 +936,7 @@
       <select id="cleaningServiceType">
         <option value="Weekly Standard">Weekly Standard</option>
         <option value="Guest Ready">Guest Ready</option>
+        <option value="Lawn Service">Lawn Service</option>
         <option value="Manual">Manual</option>
         <option value="Off-Cycle">Off-Cycle</option>
       </select>
