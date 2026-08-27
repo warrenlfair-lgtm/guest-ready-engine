@@ -78,6 +78,11 @@ function normalizeServiceBranch(value) {
     : SERVICE_BRANCH_POOL;
 }
 
+function getServiceTypeDisplayLabel(value) {
+  const serviceType = String(value || "").trim();
+  return serviceType === "Lawn Service" ? "Lawn / Gen Labor" : (serviceType || "Manual");
+}
+
 function isLawnTask(task) {
   return normalizeServiceBranch(task?.service_branch) === SERVICE_BRANCH_LAWN;
 }
@@ -1073,10 +1078,10 @@ function setActiveServiceWorkspace(branch) {
   const todayHeader = document.querySelector("#todayView .view-header");
   const weekHeader = document.querySelector("#weekView .view-header");
   const propertiesHeader = document.querySelector("#propertiesView .view-header");
-  if (todayHeader) todayHeader.innerHTML = `<h2>${isLawn ? "Lawn Service Today" : "Today View"}</h2><p>${isLawn ? "Lawn tasks due today for technicians." : "Cleaning tasks due today for technicians."}</p>`;
-  if (weekHeader) weekHeader.querySelector("h2").textContent = isLawn ? "Lawn Service Week" : "Week View";
-  if (weekHeader) weekHeader.querySelector("p").textContent = isLawn ? "Lawn tasks due in the next 7 days grouped by date." : "Cleaning tasks due in the next 7 days grouped by date.";
-  if (propertiesHeader) propertiesHeader.querySelector("p").textContent = isLawn ? "Manage lawn-enabled properties and lawn tasks." : "Manage properties and add manual cleanings.";
+  if (todayHeader) todayHeader.innerHTML = `<h2>${isLawn ? "Lawn / Gen Labor Today" : "Today View"}</h2><p>${isLawn ? "Lawn / Gen Labor tasks due today for technicians." : "Cleaning tasks due today for technicians."}</p>`;
+  if (weekHeader) weekHeader.querySelector("h2").textContent = isLawn ? "Lawn / Gen Labor Week" : "Week View";
+  if (weekHeader) weekHeader.querySelector("p").textContent = isLawn ? "Lawn / Gen Labor tasks due in the next 7 days grouped by date." : "Cleaning tasks due in the next 7 days grouped by date.";
+  if (propertiesHeader) propertiesHeader.querySelector("p").textContent = isLawn ? "Manage Lawn / Gen Labor properties and tasks." : "Manage properties and add manual cleanings.";
 
   document.querySelector(".top-actions")?.classList.toggle("hidden", isLawn);
   renderTaskViews();
@@ -2982,7 +2987,7 @@ function getMessageTaskType(task) {
   if (task.service_type === "Weekly Standard") {
     return "Weekly Standard";
   }
-  return task.service_type || "Manual";
+  return getServiceTypeDisplayLabel(task.service_type);
 }
 
 function renderMessagesPreview() {
@@ -6472,7 +6477,7 @@ function getBillingReportRowsForFilters({
         serviceDate: taskDate,
         propertyName: property?.property_name || getPropertyName(task.property_id),
         clientName: String(property?.client_name || "").trim(),
-        serviceLabel: task.service_type || "Manual",
+        serviceLabel: getServiceTypeDisplayLabel(task.service_type),
         billableAmount: amount,
         billingReasonLabel: billingContext.billingReasonLabel,
         quantity,
@@ -8755,7 +8760,7 @@ function renderBillingReport() {
 
     const rowsHtml = items.map((item) => {
       const dateLabel = item.service_date || item.scheduled_date || "-";
-      const serviceLabel = item.service_type || "Manual";
+      const serviceLabel = getServiceTypeDisplayLabel(item.service_type);
       const reasonLabel = item.billingReasonLabel || "Chargeable";
       return `
         <tr>
@@ -11241,8 +11246,8 @@ function renderTaskCard(task) {
       ${alertBadge}
       <div class="task-card-details">
         <div><strong>Service Date:</strong> ${task.service_date || task.scheduled_date || "Not set"}</div>
-        <div><strong>Task Type:</strong> ${task.service_type || "Manual"}</div>
-        ${isLawnTask(task) ? `<div><strong>Service Branch:</strong> Lawn Service</div>` : `<div><strong>Guest Ready:</strong> ${isTaskGuestReady(task) ? "Yes" : "No"}</div>`}
+        <div><strong>Task Type:</strong> ${getServiceTypeDisplayLabel(task.service_type)}</div>
+        ${isLawnTask(task) ? `<div><strong>Service Branch:</strong> Lawn / Gen Labor</div>` : `<div><strong>Guest Ready:</strong> ${isTaskGuestReady(task) ? "Yes" : "No"}</div>`}
         ${isAdminUser() && taskBillingAmount > 0 ? `<div><strong>Charge:</strong> $${taskBillingAmount}</div>` : ""}
         ${weeklyReconcileLine}
         ${sdsBillingLine}
@@ -11525,8 +11530,8 @@ function renderWeekViewListTaskCard(task) {
       </div>
       ${badge}
       ${sameDayBadge}
-      <div class="task-line"><small>Task Type: ${task.service_type || "Manual"}</small></div>
-      ${isLawnTask(task) ? `<div class="task-line"><small>Service Branch: Lawn Service</small></div>` : `<div class="task-line"><small>Guest Ready: ${isTaskGuestReady(task) ? "Yes" : "No"}</small></div>`}
+      <div class="task-line"><small>Task Type: ${getServiceTypeDisplayLabel(task.service_type)}</small></div>
+      ${isLawnTask(task) ? `<div class="task-line"><small>Service Branch: Lawn / Gen Labor</small></div>` : `<div class="task-line"><small>Guest Ready: ${isTaskGuestReady(task) ? "Yes" : "No"}</small></div>`}
       ${isAdminUser() && taskBillingAmount > 0 ? `<div class="task-line">$${taskBillingAmount}</div>` : ""}
       ${billingLine}
       ${weeklyReconcileLine}
@@ -11614,7 +11619,7 @@ function renderWeekViewCalendar(weekTasks) {
                         <div class="calendar-task-header">
                           <div class="calendar-task-property">${propertyName}</div>
                         </div>
-                        <div class="calendar-task-type">${task.service_type}</div>
+                        <div class="calendar-task-type">${getServiceTypeDisplayLabel(task.service_type)}</div>
                         ${guestReadyBadge}
                         ${alertBadge}
                         <div class="calendar-task-status">
@@ -11843,7 +11848,7 @@ function renderProperties() {
           return `
             <div class="${taskClass}">
               <div class="task-item-header">
-                <div class="task-title">${task.service_date} — ${task.service_type}</div>
+                <div class="task-title">${task.service_date} — ${getServiceTypeDisplayLabel(task.service_type)}</div>
                 ${showReconcile ? `
                 <label class="invoice-marker ${invoiceMarkerClass}">
                   <input type="checkbox" ${task.invoiced ? "checked" : ""} onchange="toggleInvoiceMarker('${task.id}')" />
@@ -11896,8 +11901,8 @@ function renderProperties() {
           <div><strong>Account / Reference:</strong> ${property.billing_account_reference || "Not entered"}</div>
           <div><strong>Address:</strong> ${property.address || "Not entered"}</div>
           ${activeServiceWorkspace === SERVICE_BRANCH_LAWN ? `
-            <div><strong>Lawn Service Day:</strong> ${property.lawn_service_day || "Wednesday"}</div>
-            <div><strong>Lawn Service Frequency:</strong> ${getServiceFrequencyLabel(property.lawn_service_frequency)}</div>
+            <div><strong>Lawn / Gen Labor Day:</strong> ${property.lawn_service_day || "Wednesday"}</div>
+            <div><strong>Lawn / Gen Labor Frequency:</strong> ${getServiceFrequencyLabel(property.lawn_service_frequency)}</div>
             <div><strong>Lawn Default Charge:</strong> $${Number(property.lawn_default_charge || 0).toFixed(2)}</div>
             <div><strong>Lawn Labor Amount:</strong> $${Number(property.lawn_labor_amount || 0).toFixed(2)}</div>
           ` : `
@@ -11923,7 +11928,7 @@ function renderProperties() {
         </div>
 
         <div class="card-actions">
-          <button onclick="openCleaningModal('${property.id}')">+ ${activeServiceWorkspace === SERVICE_BRANCH_LAWN ? "Lawn Task" : "Cleaning"}</button>
+          <button onclick="openCleaningModal('${property.id}')">+ ${activeServiceWorkspace === SERVICE_BRANCH_LAWN ? "Lawn / Gen Labor" : "Cleaning"}</button>
           <button onclick="openEditModal('${property.id}')">Edit</button>
           <button class="delete-btn" onclick="deleteProperty('${property.id}')">Delete</button>
         </div>
@@ -11964,7 +11969,7 @@ function renderProperties() {
 
         <div class="task-list ${isCollapsed ? "collapsed" : ""}">
           <div class="property-detail-tabs">
-            <button type="button" class="property-detail-tab ${activeTab === "tasks" ? "active" : ""}" onclick="setPropertyDetailTab('${property.id}','tasks')">${activeServiceWorkspace === SERVICE_BRANCH_LAWN ? "Scheduled Lawn Tasks" : "Scheduled Cleanings"}</button>
+            <button type="button" class="property-detail-tab ${activeTab === "tasks" ? "active" : ""}" onclick="setPropertyDetailTab('${property.id}','tasks')">${activeServiceWorkspace === SERVICE_BRANCH_LAWN ? "Scheduled Lawn / Gen Labor" : "Scheduled Cleanings"}</button>
             ${activeServiceWorkspace === SERVICE_BRANCH_POOL ? `<button type="button" class="property-detail-tab ${activeTab === "history" ? "active" : ""}" onclick="setPropertyDetailTab('${property.id}','history')">Chemical History</button>` : ""}
           </div>
           ${activeTab === "tasks" ? taskContent : renderPropertyChemicalHistory(property)}
