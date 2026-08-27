@@ -43,11 +43,11 @@
 
     <div class="header-actions">
       <button id="signOutBtn" type="button" class="secondary-btn hidden">Sign Out</button>
-      <button id="addPropertyBtn">+ Add Property</button>
+      <button id="addPropertyBtn" class="admin-only">+ Add Property</button>
     </div>
   </div>
 
-  <div class="summary">
+  <div class="summary admin-only">
     <div class="summary-card">
       <h2 id="propertyCount">0</h2>
       <p>Properties</p>
@@ -59,7 +59,7 @@
     <button type="button" class="service-workspace-btn" data-service-workspace="lawn">Lawn Service</button>
   </div>
 
-  <div class="top-actions">
+  <div class="top-actions admin-only">
     <button type="button" id="syncAllIcalBtn" class="sync-all-btn">&#8635; Sync All iCal</button>
     <span id="syncAllStatus" class="sync-all-status"></span>
   </div>
@@ -68,11 +68,11 @@
   <div class="view-toggle" role="tablist" aria-label="Task views">
     <button type="button" class="view-btn active" data-view="today">Today View</button>
     <button type="button" class="view-btn" data-view="week">Week View</button>
-    <button type="button" class="view-btn" data-view="properties">Properties</button>
-    <button type="button" class="view-btn" data-view="reports">Reports</button>
-    <button type="button" class="view-btn" data-view="expenses">Expenses</button>
-    <button type="button" class="view-btn" data-view="invoices">Invoices</button>
-    <button type="button" class="view-btn" data-view="settings">Settings</button>
+    <button type="button" class="view-btn admin-only" data-view="properties">Properties</button>
+    <button type="button" class="view-btn admin-only" data-view="reports">Reports</button>
+    <button type="button" class="view-btn admin-only" data-view="expenses">Expenses</button>
+    <button type="button" class="view-btn admin-only" data-view="invoices">Invoices</button>
+    <button type="button" class="view-btn admin-only" data-view="settings">Settings</button>
   </div>
 
   <section id="todayView" class="view-panel active">
@@ -90,7 +90,7 @@
       <h2>Week View</h2>
       <p>Cleaning tasks due in the next 7 days grouped by date.</p>
     </div>
-    <div class="debug-actions">
+    <div class="debug-actions admin-only">
       <button type="button" id="debugTasksBtn">Debug Tasks</button>
       <div id="debugTaskCount" class="debug-count">Total tasks found: 0</div>
     </div>
@@ -734,6 +734,29 @@
         </table>
       </div>
     </div>
+
+    <div class="view-header settings-subsection-header">
+      <h2>Authorized Users</h2>
+      <p>Assign application access to existing Supabase Auth users.</p>
+    </div>
+
+    <div class="settings-card chemical-settings-card">
+      <div id="appUsersStatus" class="settings-status"></div>
+      <div class="chemical-settings-table-wrap">
+        <table class="chemical-settings-table">
+          <thead>
+            <tr>
+              <th>User Email</th>
+              <th>Role</th>
+              <th>Active</th>
+              <th>Last Sign In</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="appUsersList"></tbody>
+        </table>
+      </div>
+    </div>
   </section>
 
   <footer class="app-brand-footer" aria-label="Application branding footer">
@@ -774,6 +797,15 @@
 
       <label>Address</label>
       <input id="propertyAddress">
+
+      <label>Gate / Access Instructions</label>
+      <textarea id="propertyGateAccessInstructions" rows="3" placeholder="Gate codes, parking, entry instructions"></textarea>
+
+      <label>Operational Service Notes</label>
+      <textarea id="propertyServiceNotes" rows="3" placeholder="Non-financial service instructions"></textarea>
+
+      <label>Equipment / Service Information</label>
+      <textarea id="propertyEquipmentServiceInfo" rows="3" placeholder="Operational equipment details"></textarea>
 
       <label>Hostaway iCal URL</label>
       <input id="propertyIcal">
@@ -929,11 +961,13 @@
     </div>
 
     <div class="edit-task-modal-body">
-      <label>Service Date</label>
-      <input id="cleaningDate" type="date">
+      <div id="staffTaskPropertyDetails" class="staff-only staff-task-property-details hidden"></div>
 
-      <label>Task Type</label>
-      <select id="cleaningServiceType">
+      <label class="staff-readonly-field">Service Date</label>
+      <input id="cleaningDate" class="staff-readonly-field" type="date">
+
+      <label class="staff-readonly-field">Task Type</label>
+      <select id="cleaningServiceType" class="staff-readonly-field">
         <option value="Weekly Standard">Weekly Standard</option>
         <option value="Guest Ready">Guest Ready</option>
         <option value="Lawn Service">Lawn Service</option>
@@ -949,29 +983,29 @@
         </select>
       </div>
 
-      <label>Status</label>
-      <select id="cleaningStatus">
+      <label class="staff-readonly-field">Status</label>
+      <select id="cleaningStatus" class="staff-readonly-field">
         <option value="Scheduled">Scheduled</option>
         <option value="In Progress">In Progress</option>
         <option value="Completed">Completed</option>
         <option value="Cancelled">Cancelled</option>
       </select>
 
-      <label>Technician</label>
-      <input id="cleaningTechnician" placeholder="Optional">
+      <label class="staff-readonly-field">Technician</label>
+      <input id="cleaningTechnician" class="staff-readonly-field" placeholder="Optional">
 
-      <label>Charge</label>
-      <input id="cleaningCharge" type="number" value="0">
+      <label class="admin-task-field">Charge</label>
+      <input id="cleaningCharge" class="admin-task-field" type="number" value="0">
 
-      <label id="cleaningSdsAmountLabel" class="hidden">Same-Day Surcharge (SDS)</label>
-      <input id="cleaningSdsAmount" class="hidden" type="number" min="0" step="0.01" placeholder="Uses property default if blank">
+      <label id="cleaningSdsAmountLabel" class="admin-task-field hidden">Same-Day Surcharge (SDS)</label>
+      <input id="cleaningSdsAmount" class="admin-task-field hidden" type="number" min="0" step="0.01" placeholder="Uses property default if blank">
 
-      <label>Labor Amount</label>
-      <input id="cleaningLaborAmount" type="number" min="0" step="0.01" placeholder="Manual tasks only">
-      <div class="field-hint">Manual tasks: enter labor amount to snapshot on completion. Weekly Standard and Guest Ready use property labor rules.</div>
+      <label class="admin-task-field">Labor Amount</label>
+      <input id="cleaningLaborAmount" class="admin-task-field" type="number" min="0" step="0.01" placeholder="Manual tasks only">
+      <div class="field-hint admin-task-field">Manual tasks: enter labor amount to snapshot on completion. Weekly Standard and Guest Ready use property labor rules.</div>
 
-      <label>Parts Cost</label>
-      <input id="cleaningPartsCost" type="number" min="0" step="0.01" value="0">
+      <label class="admin-task-field">Parts Cost</label>
+      <input id="cleaningPartsCost" class="admin-task-field" type="number" min="0" step="0.01" value="0">
 
       <label>Notes</label>
       <textarea id="cleaningNotes" rows="3"></textarea>
@@ -996,7 +1030,7 @@
 
     <div class="modal-actions edit-task-modal-footer">
       <button id="cancelCleaningBtn" type="button">Cancel</button>
-      <button id="saveCleaningBtn" type="button">Save Task</button>
+      <button id="saveCleaningBtn" class="admin-task-field" type="button">Save Task</button>
     </div>
   </div>
 </div>

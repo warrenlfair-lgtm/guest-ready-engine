@@ -314,6 +314,25 @@ h1 {
     display: block;
 }
 
+.role-restricted-hidden {
+    display: none !important;
+}
+
+.staff-task-property-details {
+    grid-column: 1 / -1;
+    padding: 12px;
+    border-left: 4px solid #2563eb;
+    background: #eff6ff;
+}
+
+.staff-task-property-details h3 {
+    margin: 0 0 8px;
+}
+
+.staff-task-property-details div + div {
+    margin-top: 6px;
+}
+
 .view-header {
     margin-bottom: 16px;
 }

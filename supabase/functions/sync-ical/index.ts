@@ -19,6 +19,31 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
+function createErrorResponse(message: string, status: number) {
+  return new Response(JSON.stringify({ success: false, error: message }), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
+
+async function isAuthorizedSyncCaller(req: Request) {
+  const authorization = req.headers.get("Authorization") || "";
+  const token = authorization.replace(/^Bearer\s+/i, "").trim();
+  if (!token) return false;
+  if (token === supabaseKey) return true;
+
+  const { data: userData, error: userError } = await supabase.auth.getUser(token);
+  if (userError || !userData.user?.id) return false;
+
+  const { data: roleRow, error: roleError } = await supabase
+    .from("app_user_roles")
+    .select("role, active")
+    .eq("user_id", userData.user.id)
+    .maybeSingle();
+
+  return !roleError && roleRow?.role === "admin" && roleRow?.active === true;
+}
+
 function createSuccessResponse(
   reservationsCreated = 0,
   tasksCreated = 0,
@@ -232,6 +257,10 @@ Deno.serve(async (req: Request) => {
   try {
     if (req.method !== "POST") {
       return createSuccessResponse(reservationsCreated, tasksCreated);
+    }
+
+    if (!(await isAuthorizedSyncCaller(req))) {
+      return createErrorResponse("Admin access required.", 403);
     }
 
     let body;

@@ -8,6 +8,7 @@ let technicians = [];
 let invoices = [];
 let invoiceItems = [];
 let expenses = [];
+let appUsers = [];
 let propertyContractRevenueHistory = [];
 let propertyContractRevenueHistoryAvailable = true;
 let invoicePropertyLabelById = new Map();
@@ -34,7 +35,42 @@ let activeServiceWorkspace = SERVICE_BRANCH_POOL;
 
 let companyProfile = { ...DEFAULT_COMPANY_PROFILE };
 let currentSessionUserId = null;
+let currentAppRole = null;
+let currentAppUserEmail = "";
 let dataLoadPromise = null;
+
+function isAdminUser() {
+  return currentAppRole === "admin";
+}
+
+function isStaffUser() {
+  return currentAppRole === "staff";
+}
+
+function requireAdminAccess() {
+  if (isAdminUser()) return true;
+  alert("Admin access required.");
+  return false;
+}
+
+function applyRoleBasedInterface() {
+  document.querySelectorAll(".admin-only").forEach((element) => {
+    element.classList.toggle("hidden", !isAdminUser());
+  });
+  document.querySelectorAll(".staff-only").forEach((element) => {
+    element.classList.toggle("hidden", !isStaffUser());
+  });
+  document.body.classList.toggle("staff-role", isStaffUser());
+}
+
+async function loadCurrentAppAccess() {
+  const { data, error } = await supabaseClient.rpc("get_current_app_access");
+  if (error) throw new Error("Role-based access is not configured. Run supabase_setup_role_based_access.sql.");
+  const access = Array.isArray(data) ? data[0] : data;
+  const role = String(access?.role || "").toLowerCase();
+  if (access?.active !== true || !["admin", "staff"].includes(role)) return null;
+  return { role, email: String(access?.email || "") };
+}
 
 function normalizeServiceBranch(value) {
   return String(value || "").trim().toLowerCase() === SERVICE_BRANCH_LAWN
@@ -162,7 +198,11 @@ const propertyBillingEmail = document.getElementById("propertyBillingEmail");
 const propertyBillingAddress = document.getElementById("propertyBillingAddress");
 const propertyAccountReference = document.getElementById("propertyAccountReference");
 const propertyAddress = document.getElementById("propertyAddress");
+const propertyGateAccessInstructions = document.getElementById("propertyGateAccessInstructions");
+const propertyServiceNotes = document.getElementById("propertyServiceNotes");
+const propertyEquipmentServiceInfo = document.getElementById("propertyEquipmentServiceInfo");
 const propertyIcal = document.getElementById("propertyIcal");
+const staffTaskPropertyDetails = document.getElementById("staffTaskPropertyDetails");
 const safetycultureChecklistUrl = document.getElementById("safetycultureChecklistUrl");
 const standardDay = document.getElementById("standardDay");
 const coverageDays = document.getElementById("coverageDays");
@@ -370,6 +410,8 @@ const saveTechnicianBtn = document.getElementById("saveTechnicianBtn");
 const cancelTechnicianEditBtn = document.getElementById("cancelTechnicianEditBtn");
 const technicianSettingsList = document.getElementById("technicianSettingsList");
 const technicianSettingsStatus = document.getElementById("technicianSettingsStatus");
+const appUsersList = document.getElementById("appUsersList");
+const appUsersStatus = document.getElementById("appUsersStatus");
 
 const COMPANY_LOGO_BUCKET = "company-logos";
 
@@ -883,10 +925,26 @@ async function ensureDataLoadedForUser(userId) {
 async function applySessionState(session) {
   if (!session?.user?.id) {
     currentSessionUserId = null;
+    currentAppRole = null;
+    currentAppUserEmail = "";
     showLoginScreen();
     return;
   }
 
+  const access = await loadCurrentAppAccess();
+  if (!access) {
+    currentSessionUserId = null;
+    currentAppRole = null;
+    currentAppUserEmail = "";
+    await supabaseClient.auth.signOut();
+    showLoginScreen();
+    setAuthMessage("Your account is not assigned an active Guest Ready Engine role. Contact an administrator.", "error");
+    return;
+  }
+
+  currentAppRole = access.role;
+  currentAppUserEmail = access.email;
+  applyRoleBasedInterface();
   showAppScreen();
   await ensureDataLoadedForUser(session.user.id);
 }
@@ -899,6 +957,8 @@ async function initializeAuthGate() {
   supabaseClient.auth.onAuthStateChange((event, session) => {
     if (event === "SIGNED_OUT") {
       currentSessionUserId = null;
+      currentAppRole = null;
+      currentAppUserEmail = "";
       if (loginPassword) loginPassword.value = "";
       setAuthLoading(false);
       setAuthMessage("");
@@ -1020,10 +1080,14 @@ function setActiveServiceWorkspace(branch) {
 
   document.querySelector(".top-actions")?.classList.toggle("hidden", isLawn);
   renderTaskViews();
-  renderProperties();
+  if (isAdminUser()) renderProperties();
 }
 
 function showView(viewName) {
+  if (isStaffUser() && !["today", "week"].includes(viewName)) {
+    viewName = "today";
+  }
+
   document.querySelectorAll(".view-panel").forEach((panel) => {
     panel.classList.toggle("active", panel.id === `${viewName}View`);
   });
@@ -1201,6 +1265,42 @@ function getSafetyCultureTaskActionMarkup(task) {
     return `<button type="button" class="checklist-link-btn" onclick="openSafetyCultureChecklistForTask('${task.id}')">Open SafetyCulture Checklist</button>`;
   }
   return `<div class="task-checklist-hint">No checklist link assigned.</div>`;
+}
+
+function getStaffOperationalTaskMarkup(task) {
+  if (!isStaffUser()) return "";
+  const property = getPropertyById(task.property_id);
+  return `
+    <div class="task-line"><strong>Address:</strong> ${escapeHtml(property?.address || "Not entered")}</div>
+    ${property?.gate_access_instructions ? `<div class="task-line"><strong>Access:</strong> ${escapeHtml(property.gate_access_instructions)}</div>` : ""}
+    ${property?.service_notes ? `<div class="task-line"><strong>Service Notes:</strong> ${escapeHtml(property.service_notes)}</div>` : ""}
+    ${property?.equipment_service_info ? `<div class="task-line"><strong>Equipment:</strong> ${escapeHtml(property.equipment_service_info)}</div>` : ""}
+    ${task?.notes ? `<div class="task-line"><strong>Task Notes:</strong> ${escapeHtml(stripManualBillingOverrideTag(task.notes))}</div>` : ""}
+  `;
+}
+
+function applyTaskModalRole(task) {
+  const staffMode = isStaffUser();
+  document.querySelectorAll("#cleaningModal .admin-task-field").forEach((element) => {
+    element.classList.toggle("role-restricted-hidden", staffMode);
+  });
+  document.querySelectorAll("#cleaningModal .staff-readonly-field").forEach((element) => {
+    if ("disabled" in element) element.disabled = staffMode;
+  });
+  if (cleaningWeeklyServiceLevel) cleaningWeeklyServiceLevel.disabled = staffMode;
+  if (cleaningNotes) cleaningNotes.disabled = staffMode;
+
+  if (staffTaskPropertyDetails) {
+    const property = getPropertyById(task?.property_id);
+    staffTaskPropertyDetails.classList.toggle("hidden", !staffMode);
+    staffTaskPropertyDetails.innerHTML = staffMode ? `
+      <h3>${escapeHtml(property?.property_name || "Property")}</h3>
+      <div><strong>Address:</strong> ${escapeHtml(property?.address || "Not entered")}</div>
+      ${property?.gate_access_instructions ? `<div><strong>Gate / Access:</strong> ${escapeHtml(property.gate_access_instructions)}</div>` : ""}
+      ${property?.service_notes ? `<div><strong>Service Notes:</strong> ${escapeHtml(property.service_notes)}</div>` : ""}
+      ${property?.equipment_service_info ? `<div><strong>Equipment / Service:</strong> ${escapeHtml(property.equipment_service_info)}</div>` : ""}
+    ` : "";
+  }
 }
 
 function renderCleaningSafetyCultureAccess() {
@@ -1639,6 +1739,7 @@ function closeExpenseModal() {
 }
 
 async function saveExpense() {
+  if (!requireAdminAccess()) return;
   const amount = Number(expenseAmountInput?.value || 0);
   const expenseDateValue = normalizeDateKey(expenseDateInput?.value);
   const description = String(expenseDescriptionInput?.value || "").trim();
@@ -1675,6 +1776,7 @@ async function saveExpense() {
 }
 
 async function deleteExpense(expenseId) {
+  if (!requireAdminAccess()) return;
   const expense = expenses.find((item) => String(item.id) === String(expenseId));
   if (!expense || !window.confirm(`Delete ${expense.description} for ${toMoney(expense.amount)}?`)) return;
   const { error } = await supabaseClient.from("expenses").delete().eq("id", expenseId);
@@ -1880,6 +1982,9 @@ function openEditModal(id) {
   if (propertyBillingAddress) propertyBillingAddress.value = property.billing_address || "";
   if (propertyAccountReference) propertyAccountReference.value = property.billing_account_reference || "";
   propertyAddress.value = property.address || "";
+  if (propertyGateAccessInstructions) propertyGateAccessInstructions.value = property.gate_access_instructions || "";
+  if (propertyServiceNotes) propertyServiceNotes.value = property.service_notes || "";
+  if (propertyEquipmentServiceInfo) propertyEquipmentServiceInfo.value = property.equipment_service_info || "";
   propertyIcal.value = property.ical_url || "";
   if (safetycultureChecklistUrl) {
     safetycultureChecklistUrl.value = property.safetyculture_checklist_url || "";
@@ -2165,6 +2270,7 @@ function syncCleaningServiceTypeDependentFields() {
 }
 
 function openCleaningModal(propertyId) {
+  if (!requireAdminAccess()) return;
   const property = properties.find(p => p.id === propertyId);
   if (!property) return;
 
@@ -2193,6 +2299,7 @@ function openCleaningModal(propertyId) {
   renderCleaningSafetyCultureAccess();
   clearChemicalUsageForm();
   renderChemicalUsageForCurrentTask();
+  applyTaskModalRole(null);
 
   cleaningModal.classList.remove("hidden");
   cleaningModalInitialState = getCleaningModalStateSnapshot();
@@ -2235,6 +2342,7 @@ function openEditCleaning(taskId) {
   renderCleaningSafetyCultureAccess();
   clearChemicalUsageForm();
   renderChemicalUsageForCurrentTask();
+  applyTaskModalRole(task);
 
   cleaningModal.classList.remove("hidden");
   cleaningModalInitialState = getCleaningModalStateSnapshot();
@@ -2497,6 +2605,11 @@ async function deleteReminder(reminderId) {
 async function loadData() {
   statusMessage.textContent = "Loading...";
 
+  if (isStaffUser()) {
+    await loadStaffOperationalData();
+    return;
+  }
+
   await loadCompanyProfile();
   await initializeCompanyLogoUploadSupport();
   await loadProperties();
@@ -2506,6 +2619,7 @@ async function loadData() {
   await loadOperationsReminders();
   await loadChemicals();
   await loadTechnicians();
+  await loadAppUsers();
   await loadChemicalUsageEntries();
   await loadInvoices();
   await loadExpenses();
@@ -2541,6 +2655,41 @@ async function loadData() {
     renderChemicalUsageReport();
   }
   renderMessagesPreview();
+}
+
+async function loadStaffOperationalData() {
+  const [profileResult, propertiesResult, tasksResult, reservationsResult, techniciansResult, chemicalsResult, usageResult] = await Promise.all([
+    supabaseClient.from("staff_company_profile").select("*").limit(1).maybeSingle(),
+    supabaseClient.from("staff_properties").select("*").order("property_name", { ascending: true }),
+    supabaseClient.from("staff_cleaning_tasks").select("*").order("service_date", { ascending: true }),
+    supabaseClient.from("staff_reservations").select("*").order("check_in", { ascending: true }),
+    supabaseClient.from("staff_technicians").select("*").order("name", { ascending: true }),
+    supabaseClient.from("staff_chemicals").select("*").order("name", { ascending: true }),
+    supabaseClient.from("staff_chemical_usage").select("*").order("created_at", { ascending: false }),
+  ]);
+
+  const failed = [profileResult, propertiesResult, tasksResult, reservationsResult, techniciansResult, chemicalsResult, usageResult]
+    .find((result) => result.error);
+  if (failed?.error) throw new Error(`Could not load staff workspace: ${failed.error.message}`);
+
+  companyProfile = getNormalizedCompanyProfile(profileResult.data || DEFAULT_COMPANY_PROFILE);
+  properties = (propertiesResult.data || []).map((property) => ({ ...property, active: property.active !== false }));
+  cleaningTasks = tasksResult.data || [];
+  reservations = (reservationsResult.data || []).filter(isReservationActive);
+  technicians = techniciansResult.data || [];
+  chemicals = chemicalsResult.data || [];
+  chemicalUsageEntries = usageResult.data || [];
+  operationsReminders = [];
+  invoices = [];
+  invoiceItems = [];
+  expenses = [];
+  propertyContractRevenueHistory = [];
+
+  applyCompanyProfileToApp();
+  initializeChemicalUsageOptions();
+  statusMessage.textContent = "";
+  showView("today");
+  renderTaskViews();
 }
 
 async function ensureDefaultChemicalsSeeded() {
@@ -2666,6 +2815,34 @@ async function saveChemicalUsageEntry() {
   const serviceDate = cleaningDate?.value || task.service_date || task.scheduled_date;
   const selectedChemical = getChemicalByName(chemicalName);
 
+  if (isStaffUser()) {
+    if (!selectedChemical?.id) {
+      alert("Select an active chemical.");
+      return;
+    }
+    const { error: staffSaveError } = await supabaseClient.rpc("staff_save_chemical_usage", {
+      target_entry_id: editingChemicalUsageId || null,
+      target_task_id: task.id,
+      selected_chemical_id: selectedChemical.id,
+      entered_quantity: quantity,
+      entered_unit: unit,
+      entered_notes: notes || null,
+    });
+    if (staffSaveError) {
+      alert("Error saving chemical usage: " + staffSaveError.message);
+      return;
+    }
+    closeChemicalUsageModal();
+    const usageResult = await supabaseClient.from("staff_chemical_usage").select("*").order("created_at", { ascending: false });
+    if (usageResult.error) {
+      alert("Chemical usage saved, but the list could not be refreshed: " + usageResult.error.message);
+      return;
+    }
+    chemicalUsageEntries = usageResult.data || [];
+    renderChemicalUsageForCurrentTask();
+    return;
+  }
+
   const payload = {
     task_id: task.id,
     property_id: task.property_id,
@@ -2723,6 +2900,19 @@ async function saveChemicalUsageEntry() {
 async function deleteChemicalUsageEntry(entryId) {
   if (!canEditChemicalEntries()) return;
   if (!confirm("Delete this chemical entry?")) return;
+
+  if (isStaffUser()) {
+    const { error: staffDeleteError } = await supabaseClient.rpc("staff_delete_chemical_usage", {
+      target_entry_id: entryId,
+    });
+    if (staffDeleteError) {
+      alert("Error deleting chemical entry: " + staffDeleteError.message);
+      return;
+    }
+    chemicalUsageEntries = chemicalUsageEntries.filter((entry) => entry.id !== entryId);
+    renderChemicalUsageForCurrentTask();
+    return;
+  }
 
   const { error } = await supabaseClient
     .from("chemical_usage")
@@ -3990,6 +4180,70 @@ async function loadTechnicians() {
   );
 }
 
+async function loadAppUsers() {
+  if (!isAdminUser() || !appUsersList) return;
+  const { data, error } = await supabaseClient.rpc("admin_list_app_users");
+  if (error) {
+    appUsers = [];
+    appUsersList.innerHTML = `<tr><td colspan="5">Could not load users: ${escapeHtml(error.message)}</td></tr>`;
+    return;
+  }
+  appUsers = data || [];
+  renderAppUsers();
+}
+
+function renderAppUsers() {
+  if (!appUsersList) return;
+  if (!appUsers.length) {
+    appUsersList.innerHTML = '<tr><td colspan="5">No Supabase Auth users found.</td></tr>';
+    return;
+  }
+
+  appUsersList.innerHTML = appUsers.map((user) => {
+    const assignedRole = ["admin", "staff"].includes(user.role) ? user.role : "staff";
+    const active = user.active === true;
+    const isCurrentUser = String(user.user_id) === String(currentSessionUserId);
+    return `
+      <tr>
+        <td>${escapeHtml(user.email || "")}${isCurrentUser ? " (You)" : ""}</td>
+        <td>
+          <select id="appUserRole-${user.user_id}" ${isCurrentUser ? "disabled" : ""}>
+            <option value="admin" ${assignedRole === "admin" ? "selected" : ""}>Admin</option>
+            <option value="staff" ${assignedRole === "staff" ? "selected" : ""}>Staff</option>
+          </select>
+        </td>
+        <td><input id="appUserActive-${user.user_id}" type="checkbox" ${active ? "checked" : ""} ${isCurrentUser ? "disabled" : ""}></td>
+        <td>${user.last_sign_in_at ? new Date(user.last_sign_in_at).toLocaleString() : "Never"}</td>
+        <td><button type="button" onclick="saveAppUserAccess('${user.user_id}')" ${isCurrentUser ? "disabled" : ""}>Save</button></td>
+      </tr>
+    `;
+  }).join("");
+}
+
+async function saveAppUserAccess(userId) {
+  if (!isAdminUser()) return;
+  const roleInput = document.getElementById(`appUserRole-${userId}`);
+  const activeInput = document.getElementById(`appUserActive-${userId}`);
+  if (!roleInput || !activeInput) return;
+  if (appUsersStatus) appUsersStatus.textContent = "Saving...";
+
+  const { error } = await supabaseClient.rpc("admin_set_app_user_role", {
+    target_user_id: userId,
+    next_role: roleInput.value,
+    next_active: activeInput.checked,
+  });
+  if (error) {
+    if (appUsersStatus) appUsersStatus.textContent = "";
+    alert("Could not update user access: " + error.message);
+    return;
+  }
+
+  if (appUsersStatus) appUsersStatus.textContent = "User access saved.";
+  await loadAppUsers();
+}
+
+window.saveAppUserAccess = saveAppUserAccess;
+
 async function loadProperties() {
   const { data, error } = await supabaseClient
     .from("properties")
@@ -4104,6 +4358,7 @@ async function loadOperationsReminders() {
 }
 
 async function saveProperty() {
+  if (!requireAdminAccess()) return;
   const selectedCoverageRule = coverageRule ? coverageRule.value : "both";
   const selectedServiceFrequency = normalizeServiceFrequency(propertyServiceFrequency?.value);
   const selectedBiweeklyAnchorDate = selectedServiceFrequency === SERVICE_FREQUENCY_BIWEEKLY
@@ -4170,6 +4425,9 @@ async function saveProperty() {
     billing_address: String(propertyBillingAddress?.value || "").trim() || null,
     billing_account_reference: String(propertyAccountReference?.value || "").trim() || null,
     address: propertyAddress.value.trim(),
+    gate_access_instructions: String(propertyGateAccessInstructions?.value || "").trim() || null,
+    service_notes: String(propertyServiceNotes?.value || "").trim() || null,
+    equipment_service_info: String(propertyEquipmentServiceInfo?.value || "").trim() || null,
     ical_url: propertyIcal.value.trim(),
     safetyculture_checklist_url: normalizeSafetyCultureUrl(safetycultureChecklistUrl?.value || "") || null,
     standard_service_day: standardDay.value,
@@ -4288,6 +4546,7 @@ async function saveProperty() {
 }
 
 async function deleteProperty(id) {
+  if (!requireAdminAccess()) return;
   const property = properties.find(p => p.id === id);
   if (!property) return;
 
@@ -4308,6 +4567,7 @@ async function deleteProperty(id) {
 }
 
 async function syncAllIcal() {
+  if (!requireAdminAccess()) return;
   const allProperties = properties;
   const icalProperties = allProperties.filter((p) => p.ical_url && isPropertyActive(p) && propertySupportsServiceBranch(p, SERVICE_BRANCH_POOL));
 
@@ -4454,6 +4714,7 @@ function renderSyncReport(results) {
 }
 
 async function syncPropertyIcal(propertyId) {
+  if (!requireAdminAccess()) return;
   console.log("[SynciCal] Sync button clicked, propertyId:", propertyId);
 
   const property = properties.find((p) => p.id === propertyId);
@@ -4749,6 +5010,7 @@ async function saveCleaningTask() {
 }
 
 async function deleteCleaningTask(id) {
+  if (!requireAdminAccess()) return;
   const task = cleaningTasks.find((item) => item.id === id);
   if (!task) {
     alert("Cleaning task not found.");
@@ -4853,6 +5115,16 @@ async function backfillSourceKeys() {
 }
 
 async function startCleaningTask(id) {
+  if (isStaffUser()) {
+    const { error: staffStartError } = await supabaseClient.rpc("staff_start_task", { target_task_id: id });
+    if (staffStartError) {
+      alert("Error starting task: " + staffStartError.message);
+      return;
+    }
+    await loadStaffOperationalData();
+    return;
+  }
+
   const { error } = await supabaseClient
     .from("cleaning_tasks")
     .update({
@@ -4876,6 +5148,20 @@ async function markCleaningComplete(id) {
   }
 
   const selectedTechnician = getSelectedTechnicianForTask(task);
+
+  if (isStaffUser()) {
+    const { error: staffCompleteError } = await supabaseClient.rpc("staff_complete_task", {
+      target_task_id: id,
+      selected_technician_id: selectedTechnician?.id || null,
+    });
+    if (staffCompleteError) {
+      alert("Error completing task: " + staffCompleteError.message);
+      return;
+    }
+    taskTechnicianSelections.delete(id);
+    await loadStaffOperationalData();
+    return;
+  }
 
   const property = getPropertyById(task.property_id);
   const weeklyServiceLevel = String(task?.service_type || "") === "Weekly Standard"
@@ -4977,6 +5263,9 @@ function clearPropertyForm() {
   if (propertyBillingAddress) propertyBillingAddress.value = "";
   if (propertyAccountReference) propertyAccountReference.value = "";
   propertyAddress.value = "";
+  if (propertyGateAccessInstructions) propertyGateAccessInstructions.value = "";
+  if (propertyServiceNotes) propertyServiceNotes.value = "";
+  if (propertyEquipmentServiceInfo) propertyEquipmentServiceInfo.value = "";
   propertyIcal.value = "";
   if (safetycultureChecklistUrl) {
     safetycultureChecklistUrl.value = "";
@@ -5014,6 +5303,7 @@ function clearPropertyForm() {
 }
 
 function toggleInvoiceMarker(taskId) {
+  if (!requireAdminAccess()) return;
   const task = cleaningTasks.find(t => t.id === taskId);
   if (!task) return;
 
@@ -5766,6 +6056,9 @@ function renderTaskWeeklyServiceLevelSelector(task, options = {}) {
   const compact = options.compact === true;
   const isCompleted = String(task?.status || "") === "Completed";
   const selectedLevel = getWeeklyServiceLevelForTask(task);
+  if (isStaffUser()) {
+    return `<div class="task-line"><small>Service Level: ${getWeeklyServiceLevelLabel(selectedLevel)}</small></div>`;
+  }
   const selectClass = compact ? "task-tech-select task-tech-select-compact" : "task-tech-select";
 
   const selectMarkup = `
@@ -6044,6 +6337,9 @@ function renderTaskTechnicianSelector(task, options = {}) {
   const status = String(task?.status || "");
   const isCompleted = status === "Completed";
   const technicianName = getTaskTechnicianDisplayName(task);
+  if (isStaffUser() && isCompleted) {
+    return `<div class="task-line"><small>Assigned Technician: ${escapeHtml(technicianName || "Unassigned")}</small></div>`;
+  }
   if (isCompleted) {
     const selectedTechnicianId = String(taskTechnicianSelections.get(task.id) || task.completed_by_technician_id || task.technician_id || "").trim();
     const completedLabel = technicianName
@@ -6074,6 +6370,7 @@ function renderTaskTechnicianSelector(task, options = {}) {
 }
 
 function renderTaskLaborSnapshot(task) {
+  if (!isAdminUser()) return "";
   if (String(task?.status || "") !== "Completed") return "";
   const hasTech = hasTechnicianSnapshot(task);
   const hasKnownLabor = task?.labor_amount !== null && task?.labor_amount !== undefined && String(task?.labor_amount).trim() !== "";
@@ -6104,6 +6401,7 @@ function renderTaskLaborSnapshot(task) {
 }
 
 function renderTaskPartsCost(task) {
+  if (!isAdminUser()) return "";
   const partsCost = Number(task?.parts_cost || 0);
   if (!Number.isFinite(partsCost) || partsCost <= 0) return "";
   return `<div class="task-line"><small>Parts Cost: ${toMoney(partsCost)}</small></div>`;
@@ -8362,6 +8660,7 @@ function hasInvoiceCandidatesForBillingFilters() {
 }
 
 async function createInvoiceFromBillingReport() {
+  if (!requireAdminAccess()) return;
   hideBillingInvoiceHandoffMessage();
 
   syncClientSelectToPropertySelection(billingReportClientSelect, billingReportPropertySelect);
@@ -9713,6 +10012,7 @@ function buildInvoiceNumber() {
 }
 
 async function saveInvoiceDraft(options = {}) {
+  if (!requireAdminAccess()) return false;
   const silent = options?.silent === true;
   if (!currentInvoiceDraft) return;
   if (!currentInvoiceDraft.propertyId) {
@@ -9806,6 +10106,7 @@ async function saveInvoiceDraft(options = {}) {
 }
 
 async function finalizeInvoiceDraft() {
+  if (!requireAdminAccess()) return;
   if (!currentInvoiceDraft) return;
 
   const saved = await saveInvoiceDraft();
@@ -9944,6 +10245,7 @@ async function finalizeInvoiceDraft() {
 }
 
 async function updateInvoiceStatus(invoiceId, status) {
+  if (!requireAdminAccess()) return;
   const normalizedStatus = String(status || "").toLowerCase();
   if (!INVOICE_STATUSES.includes(normalizedStatus)) {
     alert("Invalid invoice status.");
@@ -10752,6 +11054,7 @@ function renderRouteFragmentationAnalytics() {
 
 function shouldShowReconcileForTask(task) {
   if (!task) return false;
+  if (!isAdminUser()) return false;
   if (isTaskReconciled(task)) return false;
 
   if (isLawnTask(task)) {
@@ -10808,6 +11111,7 @@ function isSdsLinkedToFinalizedInvoice(task) {
 
 function shouldShowSdsReconcileForTask(task) {
   if (!task) return false;
+  if (!isAdminUser()) return false;
   if (!isSameDayTurnoverTask(task)) return false;
   if (isSdsReconciled(task)) return false;
   if (isSdsLinkedToFinalizedInvoice(task)) return false;
@@ -10815,6 +11119,7 @@ function shouldShowSdsReconcileForTask(task) {
 }
 
 function getSdsBillingLine(task) {
+  if (!isAdminUser()) return "";
   if (!isSameDayTurnoverTask(task)) return "";
   const amount = getSdsBillingAmount(task);
   if (amount <= 0) return "";
@@ -10834,6 +11139,7 @@ function renderSdsReconcileControl(task) {
 }
 
 function toggleSdsInvoiceMarker(taskId) {
+  if (!requireAdminAccess()) return;
   const task = cleaningTasks.find((t) => t.id === taskId);
   if (!task) return;
 
@@ -10887,6 +11193,7 @@ function toggleSdsInvoiceMarker(taskId) {
 }
 
 function getWeeklyReconciliationBillingLine(task, taskBillingAmount) {
+  if (!isAdminUser()) return "";
   if (!task || task.service_type !== "Weekly Standard") return "";
   if (Number(taskBillingAmount || 0) <= 0) return "";
   return isTaskReconciled(task) || isTaskLinkedToFinalizedInvoice(task)
@@ -10917,6 +11224,7 @@ function renderTaskCard(task) {
   const technicianMarkup = renderTaskTechnicianSelector(task);
   const laborSnapshotLine = renderTaskLaborSnapshot(task);
   const partsCostLine = renderTaskPartsCost(task);
+  const staffOperationalMarkup = getStaffOperationalTaskMarkup(task);
 
   return `
     <div class="${cardClass}">
@@ -10935,22 +11243,23 @@ function renderTaskCard(task) {
         <div><strong>Service Date:</strong> ${task.service_date || task.scheduled_date || "Not set"}</div>
         <div><strong>Task Type:</strong> ${task.service_type || "Manual"}</div>
         ${isLawnTask(task) ? `<div><strong>Service Branch:</strong> Lawn Service</div>` : `<div><strong>Guest Ready:</strong> ${isTaskGuestReady(task) ? "Yes" : "No"}</div>`}
-        ${taskBillingAmount > 0 ? `<div><strong>Charge:</strong> $${taskBillingAmount}</div>` : ""}
+        ${isAdminUser() && taskBillingAmount > 0 ? `<div><strong>Charge:</strong> $${taskBillingAmount}</div>` : ""}
         ${weeklyReconcileLine}
         ${sdsBillingLine}
         ${weeklyServiceLevelMarkup}
         ${technicianMarkup}
         ${laborSnapshotLine}
         ${partsCostLine}
+        ${staffOperationalMarkup}
         ${task.check_in_date ? `<div><strong>Check-In:</strong> ${task.check_in_date}</div>` : ""}
         <div><strong>Status:</strong> <span class="status-badge ${badgeClass}">${status}</span></div>
       </div>
       <div class="task-card-actions">
         ${getSafetyCultureTaskActionMarkup(task)}
-        <button onclick="openEditCleaning('${task.id}')">Edit</button>
+        <button onclick="openEditCleaning('${task.id}')">${isStaffUser() ? "Details / Chemicals" : "Edit"}</button>
         ${status !== "Completed" && status !== "In Progress" ? `<button onclick="startCleaningTask('${task.id}')">Start</button>` : ""}
         ${status !== "Completed" ? `<button onclick="markCleaningComplete('${task.id}')">Complete</button>` : ""}
-        ${isLawnTask(task) ? `<button class="delete-btn" onclick="deleteCleaningTask('${task.id}')">Delete</button>` : ""}
+        ${isAdminUser() && isLawnTask(task) ? `<button class="delete-btn" onclick="deleteCleaningTask('${task.id}')">Delete</button>` : ""}
       </div>
     </div>
   `;
@@ -11180,7 +11489,7 @@ function renderWeekViewListTaskCard(task) {
           ? `<span class="status-badge badge-purple">${task.service_type === "Weekly Standard" ? "WEEKLY STANDARD" : "OFF CYCLE"}</span>`
           : `<span class="status-badge badge-blue">SCHEDULED</span>`;
 
-  const billingLine = guestReadyBilling
+  const billingLine = !isAdminUser() ? "" : guestReadyBilling
     ? guestReadyBilling.isManualOverride
       ? `<div class="task-line"><small>Billing: Manual Override (entered charge; rule: ${guestReadyBilling.coverageRuleLabel}; included days: ${guestReadyBilling.includedDaysLabel})</small></div>`
       : guestReadyBilling.isIncluded
@@ -11200,6 +11509,7 @@ function renderWeekViewListTaskCard(task) {
   const technicianMarkup = renderTaskTechnicianSelector(task);
   const laborSnapshotLine = renderTaskLaborSnapshot(task);
   const partsCostLine = renderTaskPartsCost(task);
+  const staffOperationalMarkup = getStaffOperationalTaskMarkup(task);
 
   return `
     <div class="${taskClass}">
@@ -11217,7 +11527,7 @@ function renderWeekViewListTaskCard(task) {
       ${sameDayBadge}
       <div class="task-line"><small>Task Type: ${task.service_type || "Manual"}</small></div>
       ${isLawnTask(task) ? `<div class="task-line"><small>Service Branch: Lawn Service</small></div>` : `<div class="task-line"><small>Guest Ready: ${isTaskGuestReady(task) ? "Yes" : "No"}</small></div>`}
-      ${taskBillingAmount > 0 ? `<div class="task-line">$${taskBillingAmount}</div>` : ""}
+      ${isAdminUser() && taskBillingAmount > 0 ? `<div class="task-line">$${taskBillingAmount}</div>` : ""}
       ${billingLine}
       ${weeklyReconcileLine}
       ${sdsBillingLine}
@@ -11225,16 +11535,17 @@ function renderWeekViewListTaskCard(task) {
       ${technicianMarkup}
       ${laborSnapshotLine}
       ${partsCostLine}
+      ${staffOperationalMarkup}
       ${task.check_in_date ? `<div class="task-line"><small>Prior to check-in: ${task.check_in_date}</small></div>` : ""}
       <div class="task-line"><small>Status: ${status}</small></div>
-      ${task.notes ? `<div class="task-line"><small>Notes: ${stripManualBillingOverrideTag(task.notes)}</small></div>` : ""}
+      ${!isStaffUser() && task.notes ? `<div class="task-line"><small>Notes: ${stripManualBillingOverrideTag(task.notes)}</small></div>` : ""}
       ${task.completed_at ? `<div class="task-line"><small>Completed: ${new Date(task.completed_at).toLocaleString()}</small></div>` : ""}
       <div class="task-buttons">
         ${getSafetyCultureTaskActionMarkup(task)}
-        <button onclick="openEditCleaning('${task.id}')">Edit</button>
+        <button onclick="openEditCleaning('${task.id}')">${isStaffUser() ? "Details / Chemicals" : "Edit"}</button>
         ${!isCompleted && !isInProgress ? `<button onclick="startCleaningTask('${task.id}')">Start</button>` : ""}
         ${!isCompleted ? `<button onclick="markCleaningComplete('${task.id}')">Complete</button>` : ""}
-        <button class="delete-btn" onclick="deleteCleaningTask('${task.id}')">Delete</button>
+        ${isAdminUser() ? `<button class="delete-btn" onclick="deleteCleaningTask('${task.id}')">Delete</button>` : ""}
       </div>
     </div>
   `;
@@ -11296,6 +11607,7 @@ function renderWeekViewCalendar(weekTasks) {
                     const technicianMarkup = renderTaskTechnicianSelector(task, { compact: true });
                     const laborSnapshotLine = renderTaskLaborSnapshot(task);
                     const partsCostLine = renderTaskPartsCost(task);
+                    const staffOperationalMarkup = getStaffOperationalTaskMarkup(task);
                     
                     return `
                       <div class="calendar-task-card">
@@ -11313,6 +11625,7 @@ function renderWeekViewCalendar(weekTasks) {
                         ${technicianMarkup}
                         ${laborSnapshotLine}
                         ${partsCostLine}
+                        ${staffOperationalMarkup}
                         ${showBilling ? `
                         <div class="calendar-task-billing-section">
                           <div class="calendar-task-section-label">Billing:</div>
@@ -11326,9 +11639,9 @@ function renderWeekViewCalendar(weekTasks) {
                         </div>
                         ` : ""}
                         <div class="calendar-task-action-section">
-                          <button class="calendar-task-btn edit-btn" onclick="openEditCleaning('${task.id}')">Edit</button>
+                          <button class="calendar-task-btn edit-btn" onclick="openEditCleaning('${task.id}')">${isStaffUser() ? "Details" : "Edit"}</button>
                           ${task.status !== "Completed" ? `<button class="calendar-task-btn complete-btn" onclick="markCleaningComplete('${task.id}')">Complete</button>` : '<div class="calendar-task-btn-placeholder"></div>'}
-                          <button class="calendar-task-btn delete-btn" onclick="deleteCleaningTask('${task.id}')">Delete</button>
+                          ${isAdminUser() ? `<button class="calendar-task-btn delete-btn" onclick="deleteCleaningTask('${task.id}')">Delete</button>` : ""}
                         </div>
                       </div>
                     `;
@@ -11663,6 +11976,11 @@ function renderProperties() {
 
 async function navigateToView(viewName) {
   if (!viewName) return;
+
+  if (isStaffUser() && !["today", "week"].includes(viewName)) {
+    showView("today");
+    return;
+  }
 
   if (PROTECTED_VIEWS.has(viewName) && !isProtectedAccessUnlocked) {
     const unlocked = await promptForProtectedViewPin();
