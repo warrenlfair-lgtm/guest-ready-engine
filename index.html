@@ -68,7 +68,7 @@
   <div class="view-toggle" role="tablist" aria-label="Task views">
     <button type="button" class="view-btn active" data-view="today">Today View</button>
     <button type="button" class="view-btn" data-view="week">Week View</button>
-    <button type="button" class="view-btn admin-only" data-view="properties">Properties</button>
+    <button type="button" class="view-btn admin-manager-only" data-view="properties">Properties</button>
     <button type="button" class="view-btn admin-only" data-view="reports">Reports</button>
     <button type="button" class="view-btn admin-only" data-view="expenses">Expenses</button>
     <button type="button" class="view-btn admin-only" data-view="invoices">Invoices</button>
@@ -125,8 +125,8 @@
         <select id="monthFilterSelect">
           <option value="current">Current Month</option>
           <option value="next">Next Month</option>
-          <option value="previous">Previous Month</option>
-          <option value="all">All</option>
+          <option value="previous" class="admin-only">Previous Month</option>
+          <option value="all" class="admin-only">All</option>
         </select>
       </div>
     </div>
@@ -1030,7 +1030,7 @@
 
     <div class="modal-actions edit-task-modal-footer">
       <button id="cancelCleaningBtn" type="button">Cancel</button>
-      <button id="saveCleaningBtn" class="admin-task-field" type="button">Save Task</button>
+      <button id="saveCleaningBtn" class="manager-task-save" type="button">Save Task</button>
     </div>
   </div>
 </div>

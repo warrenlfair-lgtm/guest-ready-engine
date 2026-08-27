@@ -47,6 +47,14 @@ function isStaffUser() {
   return currentAppRole === "staff";
 }
 
+function isManagerUser() {
+  return currentAppRole === "manager";
+}
+
+function isOperationalRole() {
+  return isStaffUser() || isManagerUser();
+}
+
 function requireAdminAccess() {
   if (isAdminUser()) return true;
   alert("Admin access required.");
@@ -57,10 +65,23 @@ function applyRoleBasedInterface() {
   document.querySelectorAll(".admin-only").forEach((element) => {
     element.classList.toggle("hidden", !isAdminUser());
   });
+  document.querySelectorAll(".admin-manager-only").forEach((element) => {
+    element.classList.toggle("hidden", !(isAdminUser() || isManagerUser()));
+  });
   document.querySelectorAll(".staff-only").forEach((element) => {
     element.classList.toggle("hidden", !isStaffUser());
   });
   document.body.classList.toggle("staff-role", isStaffUser());
+  document.body.classList.toggle("manager-role", isManagerUser());
+
+  if (isManagerUser() && !["current", "next"].includes(selectedMonthFilter)) {
+    selectedMonthFilter = "current";
+    if (monthFilterSelect) monthFilterSelect.value = selectedMonthFilter;
+  }
+  monthFilterSelect?.querySelectorAll('option[value="previous"], option[value="all"]').forEach((option) => {
+    option.disabled = isManagerUser();
+    option.hidden = isManagerUser();
+  });
 }
 
 async function loadCurrentAppAccess() {
@@ -68,7 +89,7 @@ async function loadCurrentAppAccess() {
   if (error) throw new Error("Role-based access is not configured. Run supabase_setup_role_based_access.sql.");
   const access = Array.isArray(data) ? data[0] : data;
   const role = String(access?.role || "").toLowerCase();
-  if (access?.active !== true || !["admin", "staff"].includes(role)) return null;
+  if (access?.active !== true || !["admin", "manager", "staff"].includes(role)) return null;
   return { role, email: String(access?.email || "") };
 }
 
@@ -544,9 +565,13 @@ propertyFilterSelect.addEventListener("change", (e) => {
 });
 
 monthFilterSelect.addEventListener("change", async (e) => {
-  selectedMonthFilter = e.target.value;
-  await ensureWeeklyStandardTasksForMonth(selectedMonthFilter);
-  await ensureLawnTasksForMonth(selectedMonthFilter);
+  selectedMonthFilter = isManagerUser() && !["current", "next"].includes(e.target.value)
+    ? "current"
+    : e.target.value;
+  if (isAdminUser()) {
+    await ensureWeeklyStandardTasksForMonth(selectedMonthFilter);
+    await ensureLawnTasksForMonth(selectedMonthFilter);
+  }
   renderProperties();
   renderTaskViews();
 });
@@ -1092,6 +1117,9 @@ function showView(viewName) {
   if (isStaffUser() && !["today", "week"].includes(viewName)) {
     viewName = "today";
   }
+  if (isManagerUser() && !["today", "week", "properties"].includes(viewName)) {
+    viewName = "today";
+  }
 
   document.querySelectorAll(".view-panel").forEach((panel) => {
     panel.classList.toggle("active", panel.id === `${viewName}View`);
@@ -1273,7 +1301,7 @@ function getSafetyCultureTaskActionMarkup(task) {
 }
 
 function getStaffOperationalTaskMarkup(task) {
-  if (!isStaffUser()) return "";
+  if (!isOperationalRole()) return "";
   const property = getPropertyById(task.property_id);
   return `
     <div class="task-line"><strong>Address:</strong> ${escapeHtml(property?.address || "Not entered")}</div>
@@ -1286,19 +1314,24 @@ function getStaffOperationalTaskMarkup(task) {
 
 function applyTaskModalRole(task) {
   const staffMode = isStaffUser();
+  const managerMode = isManagerUser();
   document.querySelectorAll("#cleaningModal .admin-task-field").forEach((element) => {
-    element.classList.toggle("role-restricted-hidden", staffMode);
+    element.classList.toggle("role-restricted-hidden", staffMode || managerMode);
   });
   document.querySelectorAll("#cleaningModal .staff-readonly-field").forEach((element) => {
-    if ("disabled" in element) element.disabled = staffMode;
+    if ("disabled" in element) element.disabled = staffMode || managerMode;
   });
   if (cleaningWeeklyServiceLevel) cleaningWeeklyServiceLevel.disabled = staffMode;
   if (cleaningNotes) cleaningNotes.disabled = staffMode;
+  if (cleaningTechnician) cleaningTechnician.disabled = staffMode;
+  if (saveCleaningBtn) saveCleaningBtn.classList.toggle("role-restricted-hidden", staffMode);
+  cleaningModal?.querySelector(".chemical-usage-section")?.classList.toggle("role-restricted-hidden", managerMode);
 
   if (staffTaskPropertyDetails) {
     const property = getPropertyById(task?.property_id);
-    staffTaskPropertyDetails.classList.toggle("hidden", !staffMode);
-    staffTaskPropertyDetails.innerHTML = staffMode ? `
+    const operationalMode = staffMode || managerMode;
+    staffTaskPropertyDetails.classList.toggle("hidden", !operationalMode);
+    staffTaskPropertyDetails.innerHTML = operationalMode ? `
       <h3>${escapeHtml(property?.property_name || "Property")}</h3>
       <div><strong>Address:</strong> ${escapeHtml(property?.address || "Not entered")}</div>
       ${property?.gate_access_instructions ? `<div><strong>Gate / Access:</strong> ${escapeHtml(property.gate_access_instructions)}</div>` : ""}
@@ -2614,6 +2647,10 @@ async function loadData() {
     await loadStaffOperationalData();
     return;
   }
+  if (isManagerUser()) {
+    await loadManagerOperationalData();
+    return;
+  }
 
   await loadCompanyProfile();
   await initializeCompanyLogoUploadSupport();
@@ -2695,6 +2732,40 @@ async function loadStaffOperationalData() {
   statusMessage.textContent = "";
   showView("today");
   renderTaskViews();
+}
+
+async function loadManagerOperationalData() {
+  const [profileResult, propertiesResult, tasksResult, reservationsResult, techniciansResult, remindersResult] = await Promise.all([
+    supabaseClient.from("manager_company_profile").select("*").limit(1).maybeSingle(),
+    supabaseClient.from("manager_properties").select("*").order("property_name", { ascending: true }),
+    supabaseClient.from("manager_cleaning_tasks").select("*").order("service_date", { ascending: true }),
+    supabaseClient.from("manager_reservations").select("*").order("check_in", { ascending: true }),
+    supabaseClient.from("manager_technicians").select("*").order("name", { ascending: true }),
+    supabaseClient.from("manager_operations_reminders").select("*").order("due_date", { ascending: true }),
+  ]);
+
+  const failed = [profileResult, propertiesResult, tasksResult, reservationsResult, techniciansResult, remindersResult]
+    .find((result) => result.error);
+  if (failed?.error) throw new Error(`Could not load manager workspace: ${failed.error.message}`);
+
+  companyProfile = getNormalizedCompanyProfile(profileResult.data || DEFAULT_COMPANY_PROFILE);
+  properties = propertiesResult.data || [];
+  cleaningTasks = tasksResult.data || [];
+  reservations = (reservationsResult.data || []).filter(isReservationActive);
+  technicians = techniciansResult.data || [];
+  operationsReminders = remindersResult.data || [];
+  chemicals = [];
+  chemicalUsageEntries = [];
+  invoices = [];
+  invoiceItems = [];
+  expenses = [];
+  propertyContractRevenueHistory = [];
+
+  applyCompanyProfileToApp();
+  statusMessage.textContent = "";
+  showView("today");
+  renderTaskViews();
+  renderProperties();
 }
 
 async function ensureDefaultChemicalsSeeded() {
@@ -4205,7 +4276,7 @@ function renderAppUsers() {
   }
 
   appUsersList.innerHTML = appUsers.map((user) => {
-    const assignedRole = ["admin", "staff"].includes(user.role) ? user.role : "staff";
+    const assignedRole = ["admin", "manager", "staff"].includes(user.role) ? user.role : "staff";
     const active = user.active === true;
     const isCurrentUser = String(user.user_id) === String(currentSessionUserId);
     return `
@@ -4214,6 +4285,7 @@ function renderAppUsers() {
         <td>
           <select id="appUserRole-${user.user_id}" ${isCurrentUser ? "disabled" : ""}>
             <option value="admin" ${assignedRole === "admin" ? "selected" : ""}>Admin</option>
+            <option value="manager" ${assignedRole === "manager" ? "selected" : ""}>Manager</option>
             <option value="staff" ${assignedRole === "staff" ? "selected" : ""}>Staff</option>
           </select>
         </td>
@@ -4782,6 +4854,28 @@ async function saveCleaningTask() {
   const property = properties.find((p) => p.id === selectedCleaningPropertyId);
   if (!property) return;
 
+  if (isManagerUser()) {
+    if (!editingCleaningId) return;
+    const selectedTechnician = findActiveTechnicianByName(cleaningTechnician.value.trim());
+    const existingTask = cleaningTasks.find((task) => task.id === editingCleaningId);
+    const serviceLevel = existingTask?.service_type === "Weekly Standard"
+      ? normalizeWeeklyServiceLevel(cleaningWeeklyServiceLevel?.value)
+      : null;
+    const { error } = await supabaseClient.rpc("manager_update_task_operations", {
+      target_task_id: editingCleaningId,
+      selected_technician_id: selectedTechnician?.id || null,
+      selected_service_level: serviceLevel,
+      entered_notes: applyManualBillingOverrideTag(cleaningNotes.value.trim(), hasManualBillingOverride(existingTask)),
+    });
+    if (error) {
+      alert("Could not save operational task details: " + error.message);
+      return;
+    }
+    closeCleaningModal({ force: true });
+    await loadManagerOperationalData();
+    return;
+  }
+
   const serviceDate = cleaningDate.value;
   const serviceType = activeServiceWorkspace === SERVICE_BRANCH_LAWN ? "Lawn Service" : cleaningServiceType.value;
   const serviceBranch = activeServiceWorkspace === SERVICE_BRANCH_LAWN ? SERVICE_BRANCH_LAWN : SERVICE_BRANCH_POOL;
@@ -5129,6 +5223,15 @@ async function startCleaningTask(id) {
     await loadStaffOperationalData();
     return;
   }
+  if (isManagerUser()) {
+    const { error } = await supabaseClient.rpc("manager_start_task", { target_task_id: id });
+    if (error) {
+      alert("Error starting task: " + error.message);
+      return;
+    }
+    await loadManagerOperationalData();
+    return;
+  }
 
   const { error } = await supabaseClient
     .from("cleaning_tasks")
@@ -5165,6 +5268,32 @@ async function markCleaningComplete(id) {
     }
     taskTechnicianSelections.delete(id);
     await loadStaffOperationalData();
+    return;
+  }
+  if (isManagerUser()) {
+    const serviceLevel = task.service_type === "Weekly Standard"
+      ? getWeeklyServiceLevelForTask(task)
+      : null;
+    const { error: updateError } = await supabaseClient.rpc("manager_update_task_operations", {
+      target_task_id: id,
+      selected_technician_id: selectedTechnician?.id || null,
+      selected_service_level: serviceLevel,
+      entered_notes: task.notes || "",
+    });
+    if (updateError) {
+      alert("Error saving task operations before completion: " + updateError.message);
+      return;
+    }
+    const { error } = await supabaseClient.rpc("manager_complete_task", {
+      target_task_id: id,
+      selected_technician_id: selectedTechnician?.id || null,
+    });
+    if (error) {
+      alert("Error completing task: " + error.message);
+      return;
+    }
+    taskTechnicianSelections.delete(id);
+    await loadManagerOperationalData();
     return;
   }
 
@@ -6119,6 +6248,23 @@ async function saveCompletedTaskWeeklyServiceLevel(taskId, serviceLevel = "") {
     return;
   }
 
+  if (isManagerUser()) {
+    const selectedTechnician = getSelectedTechnicianForTask(task);
+    const { error } = await supabaseClient.rpc("manager_update_task_operations", {
+      target_task_id: normalizedTaskId,
+      selected_technician_id: selectedTechnician?.id || null,
+      selected_service_level: nextLevel,
+      entered_notes: task.notes || "",
+    });
+    if (error) {
+      alert("Could not save service level: " + error.message);
+      return;
+    }
+    taskWeeklyServiceLevelSelections.delete(normalizedTaskId);
+    await loadManagerOperationalData();
+    return;
+  }
+
   if (isLaborTaskMarkedPaid(task)) {
     const warning = "This labor has already been marked paid. Changing the service level will change the recorded labor amount. Continue?";
     if (!window.confirm(warning)) {
@@ -6213,6 +6359,24 @@ async function saveCompletedTaskTechnician(taskId, technicianId = "") {
   const selectedTechnician = findTechnicianById(selectedTechnicianId);
   if (!selectedTechnician) {
     alert("Selected technician could not be found.");
+    return;
+  }
+
+  if (isManagerUser()) {
+    const { error } = await supabaseClient.rpc("manager_update_task_operations", {
+      target_task_id: normalizedTaskId,
+      selected_technician_id: selectedTechnician.id,
+      selected_service_level: task.service_type === "Weekly Standard"
+        ? getWeeklyServiceLevelForTask(task)
+        : null,
+      entered_notes: task.notes || "",
+    });
+    if (error) {
+      alert("Could not save technician assignment: " + error.message);
+      return;
+    }
+    taskTechnicianSelections.delete(normalizedTaskId);
+    await loadManagerOperationalData();
     return;
   }
 
@@ -11396,7 +11560,7 @@ function renderOperationsRemindersWidget() {
               <div class="widget-reminder-title">${reminder.title}</div>
               <div class="widget-reminder-date">Due: ${reminder.due_date}${isOverdue ? " (OVERDUE)" : ""}</div>
               ${reminder.notes ? `<div class="widget-reminder-notes">${reminder.notes}</div>` : ""}
-              <button class="complete-reminder-btn-small" onclick="completeReminder('${reminder.id}')">✓ Complete</button>
+              ${isAdminUser() ? `<button class="complete-reminder-btn-small" onclick="completeReminder('${reminder.id}')">✓ Complete</button>` : ""}
             </div>
           `;
         }).join("")}
@@ -11751,6 +11915,11 @@ function renderPropertyChemicalHistory(property) {
 }
 
 function renderProperties() {
+  if (isManagerUser()) {
+    renderManagerProperties();
+    return;
+  }
+
   const workspaceProperties = properties.filter((property) => propertySupportsServiceBranch(property));
   document.getElementById("propertyCount").textContent = workspaceProperties.length;
 
@@ -11986,6 +12155,10 @@ async function navigateToView(viewName) {
     showView("today");
     return;
   }
+  if (isManagerUser() && !["today", "week", "properties"].includes(viewName)) {
+    showView("today");
+    return;
+  }
 
   if (PROTECTED_VIEWS.has(viewName) && !isProtectedAccessUnlocked) {
     const unlocked = await promptForProtectedViewPin();
@@ -12135,4 +12308,103 @@ function updateInvoiceDraftField(field, rawValue) {
 
   recalculateInvoiceDraftTotals();
   renderInvoicePreview();
+}
+
+function renderManagerProperties() {
+  const propertiesHeader = document.querySelector("#propertiesView .view-header");
+  if (propertiesHeader) {
+    propertiesHeader.innerHTML = `<h2>Properties</h2><p>Review ${activeServiceWorkspace === SERVICE_BRANCH_LAWN ? "Lawn / Gen Labor" : "Pool Service"} operations for the current or next month.</p>`;
+  }
+  const workspaceProperties = properties.filter((property) => propertySupportsServiceBranch(property));
+  const propertyCount = document.getElementById("propertyCount");
+  if (propertyCount) propertyCount.textContent = workspaceProperties.length;
+
+  const newOptions = `<option value="">All Properties</option>${workspaceProperties
+    .map((property) => `<option value="${property.id}">${escapeHtml(property.property_name)}</option>`)
+    .join("")}`;
+  if (propertyFilterSelect.innerHTML !== newOptions) {
+    propertyFilterSelect.innerHTML = newOptions;
+    propertyFilterSelect.value = selectedPropertyFilter;
+  }
+
+  const filteredProperties = selectedPropertyFilter
+    ? workspaceProperties.filter((property) => property.id === selectedPropertyFilter)
+    : workspaceProperties;
+  if (!filteredProperties.length) {
+    propertyList.innerHTML = '<div class="empty">No properties available.</div>';
+    return;
+  }
+
+  propertyList.innerHTML = filteredProperties.map((property) => {
+    const tasks = cleaningTasks
+      .filter((task) => task.property_id === property.id && taskMatchesActiveWorkspace(task))
+      .filter((task) => !shouldSuppressWeeklyStandardTaskDisplay(task))
+      .filter((task) => taskMatchesDateFilter(task, selectedMonthFilter));
+    const reminders = operationsReminders.filter((reminder) =>
+      reminder.property_id === property.id && reminder.status === "Open"
+    );
+    const propertyIsActive = isPropertyActive(property);
+    const checklistUrl = normalizeSafetyCultureUrl(property.safetyculture_checklist_url || "");
+
+    const taskMarkup = tasks.length
+      ? tasks.map((task) => `
+          <div class="task-item ${task.status === "Completed" ? "completed" : ""}">
+            <div class="task-title">${escapeHtml(task.service_date || task.scheduled_date || "Not set")} - ${escapeHtml(getServiceTypeDisplayLabel(task.service_type))}</div>
+            ${isSameDayCheckInGuestReadyTask(task) ? '<span class="task-alert-badge badge-alert-red">Same-Day Check-In</span>' : ""}
+            <div class="task-line"><small>Status: ${escapeHtml(task.status || "Scheduled")}</small></div>
+            ${task.service_type === "Weekly Standard" ? `<div class="task-line"><small>Service Level: ${escapeHtml(getWeeklyServiceLevelLabel(getWeeklyServiceLevelForTask(task)))}</small></div>` : ""}
+            <div class="task-line"><small>Technician: ${escapeHtml(getTaskTechnicianDisplayName(task) || "Unassigned")}</small></div>
+            ${task.notes ? `<div class="task-line"><small>Notes: ${escapeHtml(stripManualBillingOverrideTag(task.notes))}</small></div>` : ""}
+            <div class="task-buttons">
+              ${getSafetyCultureTaskActionMarkup(task)}
+              <button type="button" onclick="openEditCleaning('${task.id}')">Edit Operations</button>
+              ${task.status !== "Completed" && task.status !== "In Progress" ? `<button type="button" onclick="startCleaningTask('${task.id}')">Start</button>` : ""}
+              ${task.status !== "Completed" ? `<button type="button" onclick="markCleaningComplete('${task.id}')">Complete</button>` : ""}
+            </div>
+          </div>
+        `).join("")
+      : `<p>No ${activeServiceWorkspace === SERVICE_BRANCH_LAWN ? "Lawn / Gen Labor" : "Pool Service"} tasks in the selected month.</p>`;
+
+    const reminderMarkup = reminders.length
+      ? reminders.map((reminder) => `
+          <div class="reminder-item">
+            <div class="reminder-title">${escapeHtml(reminder.title || "Reminder")}</div>
+            ${reminder.notes ? `<div class="reminder-notes">${escapeHtml(reminder.notes)}</div>` : ""}
+            <div class="reminder-due">Due: ${escapeHtml(reminder.due_date || "Not set")}</div>
+          </div>
+        `).join("")
+      : '<p class="no-reminders">No open reminders.</p>';
+
+    return `
+      <div class="property-card ${propertyIsActive ? "property-card-active" : "property-card-inactive"}">
+        <div class="property-card-header">
+          <h3>${escapeHtml(property.property_name || "Property")}</h3>
+          <span class="property-status-badge ${propertyIsActive ? "status-active" : "status-inactive"}">Status: ${escapeHtml(getPropertyStatusLabel(property))}</span>
+        </div>
+        <div class="property-meta">
+          <div><strong>Company Branch:</strong> ${escapeHtml(normalizeCompanyBranch(property.company_branch))}</div>
+          <div><strong>Client Name:</strong> ${escapeHtml(property.client_name || "Not entered")}</div>
+          <div><strong>Address:</strong> ${escapeHtml(property.address || "Not entered")}</div>
+          <div><strong>Access / Gate:</strong> ${escapeHtml(property.gate_access_instructions || "Not entered")}</div>
+          <div><strong>Service Notes:</strong> ${escapeHtml(property.service_notes || "Not entered")}</div>
+          <div><strong>Equipment / Service:</strong> ${escapeHtml(property.equipment_service_info || "Not entered")}</div>
+          <div><strong>SafetyCulture Checklist:</strong> ${checklistUrl ? `<a href="${escapeHtml(checklistUrl)}" target="_blank" rel="noopener noreferrer">Open Checklist</a>` : "Not entered"}</div>
+          <div><strong>Standard Service Day:</strong> ${escapeHtml(property.standard_service_day || "Wednesday")}</div>
+          <div><strong>Service Frequency:</strong> ${escapeHtml(getServiceFrequencyLabel(property.service_frequency))}</div>
+          <div><strong>Guest Ready Coverage Rule:</strong> ${escapeHtml(getCoverageRuleLabel(getCoverageRuleForProperty(property)))}</div>
+          <div><strong>Lawn / Gen Labor Day:</strong> ${escapeHtml(property.lawn_service_day || "Wednesday")}</div>
+          <div><strong>Lawn / Gen Labor Frequency:</strong> ${escapeHtml(getServiceFrequencyLabel(property.lawn_service_frequency))}</div>
+          <div><strong>iCal:</strong> ${property.ical_url ? "Configured" : "Not configured"}</div>
+        </div>
+        <div class="reminders-section">
+          <div class="reminders-header"><h4>Operational Reminders</h4></div>
+          ${reminderMarkup}
+        </div>
+        <div class="task-list">
+          <h4>${activeServiceWorkspace === SERVICE_BRANCH_LAWN ? "Scheduled Lawn / Gen Labor" : "Scheduled Pool Service"}</h4>
+          ${taskMarkup}
+        </div>
+      </div>
+    `;
+  }).join("");
 }
