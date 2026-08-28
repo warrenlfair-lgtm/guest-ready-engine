@@ -5501,6 +5501,10 @@ function clearPropertyForm() {
 }
 
 function toggleInvoiceMarker(taskId) {
+  if (isManagerUser()) {
+    reconcileManagerTask(taskId, "task");
+    return;
+  }
   if (!requireAdminAccess()) return;
   const task = cleaningTasks.find(t => t.id === taskId);
   if (!task) return;
@@ -11287,6 +11291,7 @@ function renderRouteFragmentationAnalytics() {
 
 function shouldShowReconcileForTask(task) {
   if (!task) return false;
+  if (isManagerUser()) return task.manager_reconcile_eligible === true;
   if (!isAdminUser()) return false;
   if (isTaskReconciled(task)) return false;
 
@@ -11344,6 +11349,7 @@ function isSdsLinkedToFinalizedInvoice(task) {
 
 function shouldShowSdsReconcileForTask(task) {
   if (!task) return false;
+  if (isManagerUser()) return task.manager_sds_reconcile_eligible === true;
   if (!isAdminUser()) return false;
   if (!isSameDayTurnoverTask(task)) return false;
   if (isSdsReconciled(task)) return false;
@@ -11366,12 +11372,16 @@ function renderSdsReconcileControl(task) {
   return `
     <label class="invoice-marker ${invoiceMarkerClass}">
       <input type="checkbox" ${task.same_day_surcharge_reconciled ? "checked" : ""} onchange="toggleSdsInvoiceMarker('${task.id}')" />
-      <span>SDS Reconcile</span>
+      <span>${isManagerUser() ? "Reconcile SDS" : "SDS Reconcile"}</span>
     </label>
   `;
 }
 
 function toggleSdsInvoiceMarker(taskId) {
+  if (isManagerUser()) {
+    reconcileManagerTask(taskId, "sds");
+    return;
+  }
   if (!requireAdminAccess()) return;
   const task = cleaningTasks.find((t) => t.id === taskId);
   if (!task) return;
@@ -11425,6 +11435,39 @@ function toggleSdsInvoiceMarker(taskId) {
     });
 }
 
+async function reconcileManagerTask(taskId, reconciliationType) {
+  if (!isManagerUser()) return;
+  const task = cleaningTasks.find((item) => item.id === taskId);
+  if (!task) return;
+
+  const eligibilityField = reconciliationType === "sds"
+    ? "manager_sds_reconcile_eligible"
+    : "manager_reconcile_eligible";
+  if (task[eligibilityField] !== true) return;
+
+  task[eligibilityField] = false;
+  renderTaskViews();
+  if (document.getElementById("propertiesView")?.classList.contains("hidden") === false) renderManagerProperties();
+
+  const { error } = await supabaseClient.rpc("manager_reconcile_task", {
+    target_task_id: taskId,
+    reconciliation_type: reconciliationType,
+  });
+  if (error) {
+    task[eligibilityField] = true;
+    renderTaskViews();
+    if (document.getElementById("propertiesView")?.classList.contains("hidden") === false) renderManagerProperties();
+    alert(`Could not reconcile ${reconciliationType === "sds" ? "Same-Day Surcharge" : "task"}: ${error.message}`);
+    return;
+  }
+
+  if (reconciliationType === "sds") {
+    task.same_day_surcharge_reconciled = true;
+  } else {
+    task.invoiced = true;
+  }
+}
+
 function getWeeklyReconciliationBillingLine(task, taskBillingAmount) {
   if (!isAdminUser()) return "";
   if (!task || task.service_type !== "Weekly Standard") return "";
@@ -11466,7 +11509,7 @@ function renderTaskCard(task) {
         ${showReconcile ? `
         <label class="invoice-marker ${invoiceMarkerClass}">
           <input type="checkbox" ${task.invoiced ? "checked" : ""} onchange="toggleInvoiceMarker('${task.id}')" />
-          <span>${isLawnTask(task) ? "Reconcile" : "$"}</span>
+          <span>${isManagerUser() ? "Reconcile" : isLawnTask(task) ? "Reconcile" : "$"}</span>
         </label>
         ` : ""}
         ${sdsReconcileControl}
@@ -11751,7 +11794,7 @@ function renderWeekViewListTaskCard(task) {
         ${showReconcile ? `
         <label class="invoice-marker ${invoiceMarkerClass}">
           <input type="checkbox" ${task.invoiced ? "checked" : ""} onchange="toggleInvoiceMarker('${task.id}')" />
-          <span>$ Reconcile</span>
+          <span>${isManagerUser() ? "Reconcile" : "$ Reconcile"}</span>
         </label>
         ` : ""}
         ${sdsReconcileControl}
@@ -12413,7 +12456,16 @@ function renderManagerProperties() {
     const taskMarkup = tasks.length
       ? tasks.map((task) => `
           <div class="task-item ${task.status === "Completed" ? "completed" : ""}">
-            <div class="task-title">${escapeHtml(task.service_date || task.scheduled_date || "Not set")} - ${escapeHtml(getServiceTypeDisplayLabel(task.service_type))}</div>
+            <div class="task-item-header">
+              <div class="task-title">${escapeHtml(task.service_date || task.scheduled_date || "Not set")} - ${escapeHtml(getServiceTypeDisplayLabel(task.service_type))}</div>
+              ${shouldShowReconcileForTask(task) ? `
+                <label class="invoice-marker invoice-marker-unchecked">
+                  <input type="checkbox" onchange="toggleInvoiceMarker('${task.id}')" />
+                  <span>Reconcile</span>
+                </label>
+              ` : ""}
+              ${renderSdsReconcileControl(task)}
+            </div>
             ${isSameDayCheckInGuestReadyTask(task) ? '<span class="task-alert-badge badge-alert-red">Same-Day Check-In</span>' : ""}
             <div class="task-line"><small>Status: ${escapeHtml(task.status || "Scheduled")}</small></div>
             ${task.service_type === "Weekly Standard" ? `<div class="task-line"><small>Service Level: ${escapeHtml(getWeeklyServiceLevelLabel(getWeeklyServiceLevelForTask(task)))}</small></div>` : ""}
