@@ -38,6 +38,7 @@ let currentSessionUserId = null;
 let currentAppRole = null;
 let currentAppUserEmail = "";
 let dataLoadPromise = null;
+let isPasswordRecoveryFlow = false;
 
 function isAdminUser() {
   return currentAppRole === "admin";
@@ -202,6 +203,11 @@ const loginPassword = document.getElementById("loginPassword");
 const signInBtn = document.getElementById("signInBtn");
 const forgotPasswordBtn = document.getElementById("forgotPasswordBtn");
 const authMessage = document.getElementById("authMessage");
+const passwordRecoveryForm = document.getElementById("passwordRecoveryForm");
+const newPasswordInput = document.getElementById("newPassword");
+const confirmNewPasswordInput = document.getElementById("confirmNewPassword");
+const updatePasswordBtn = document.getElementById("updatePasswordBtn");
+const passwordRecoveryMessage = document.getElementById("passwordRecoveryMessage");
 const signOutBtn = document.getElementById("signOutBtn");
 
 const addPropertyBtn = document.getElementById("addPropertyBtn");
@@ -886,6 +892,10 @@ if (forgotPasswordBtn) {
   forgotPasswordBtn.addEventListener("click", handleForgotPasswordClick);
 }
 
+if (passwordRecoveryForm) {
+  passwordRecoveryForm.addEventListener("submit", handlePasswordRecoverySubmit);
+}
+
 if (signOutBtn) {
   signOutBtn.addEventListener("click", handleSignOutClick);
 }
@@ -922,10 +932,43 @@ function setAuthMessage(message, type = "error") {
   authMessage.classList.add(type === "success" ? "success" : "error");
 }
 
+function setPasswordRecoveryMessage(message, type = "error") {
+  if (!passwordRecoveryMessage) return;
+  const normalized = String(message || "").trim();
+  passwordRecoveryMessage.textContent = normalized;
+  passwordRecoveryMessage.classList.toggle("hidden", !normalized);
+  passwordRecoveryMessage.classList.remove("error", "success");
+  if (normalized) passwordRecoveryMessage.classList.add(type === "success" ? "success" : "error");
+}
+
+function setPasswordRecoveryLoading(isLoading) {
+  if (!updatePasswordBtn) return;
+  updatePasswordBtn.disabled = isLoading;
+  updatePasswordBtn.textContent = isLoading ? "Updating Password..." : "Update Password";
+}
+
 function showLoginScreen() {
+  isPasswordRecoveryFlow = false;
   if (authGate) authGate.classList.remove("hidden");
   if (appShell) appShell.classList.add("hidden");
   if (signOutBtn) signOutBtn.classList.add("hidden");
+  loginForm?.classList.remove("hidden");
+  passwordRecoveryForm?.classList.add("hidden");
+}
+
+function showPasswordRecoveryScreen() {
+  isPasswordRecoveryFlow = true;
+  if (authGate) authGate.classList.remove("hidden");
+  if (appShell) appShell.classList.add("hidden");
+  if (signOutBtn) signOutBtn.classList.add("hidden");
+  loginForm?.classList.add("hidden");
+  passwordRecoveryForm?.classList.remove("hidden");
+  setAuthMessage("");
+  setPasswordRecoveryMessage("");
+  setPasswordRecoveryLoading(false);
+  if (newPasswordInput) newPasswordInput.value = "";
+  if (confirmNewPasswordInput) confirmNewPasswordInput.value = "";
+  newPasswordInput?.focus();
 }
 
 function showAppScreen() {
@@ -984,31 +1027,23 @@ async function initializeAuthGate() {
   setAuthLoading(false);
   setAuthMessage("");
 
-  supabaseClient.auth.onAuthStateChange((event, session) => {
-    if (event === "SIGNED_OUT") {
-      currentSessionUserId = null;
-      currentAppRole = null;
-      currentAppUserEmail = "";
-      if (loginPassword) loginPassword.value = "";
-      setAuthLoading(false);
-      setAuthMessage("");
-      showLoginScreen();
-      return;
-    }
-
-    if (session?.user?.id) {
-      setAuthLoading(false);
-      setAuthMessage("");
-      applySessionState(session).catch((error) => {
-        setAuthMessage(error?.message || "Could not load application data.", "error");
-        showLoginScreen();
-      });
-    }
-  });
+  supabaseClient.auth.onAuthStateChange(handleAuthStateChange);
 
   const { data, error } = await supabaseClient.auth.getSession();
   if (error) {
     setAuthMessage(error.message || "Could not restore your session.", "error");
+    showLoginScreen();
+    return;
+  }
+
+  if (isPasswordRecoveryFlow) return;
+
+  const queryParams = new URLSearchParams(window.location.search);
+  const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+  const callbackError = queryParams.get("error_description") || hashParams.get("error_description")
+    || queryParams.get("error") || hashParams.get("error");
+  if (callbackError) {
+    setAuthMessage(`Password reset link is invalid or expired. ${callbackError.replace(/\+/g, " ")}`, "error");
     showLoginScreen();
     return;
   }
@@ -1018,6 +1053,35 @@ async function initializeAuthGate() {
   } catch (applyError) {
     setAuthMessage(applyError?.message || "Could not load application data.", "error");
     showLoginScreen();
+  }
+}
+
+function handleAuthStateChange(event, session) {
+  if (event === "PASSWORD_RECOVERY") {
+    showPasswordRecoveryScreen();
+    return;
+  }
+
+  if (event === "SIGNED_OUT") {
+    currentSessionUserId = null;
+    currentAppRole = null;
+    currentAppUserEmail = "";
+    if (loginPassword) loginPassword.value = "";
+    setAuthLoading(false);
+    setAuthMessage("");
+    showLoginScreen();
+    return;
+  }
+
+  if (isPasswordRecoveryFlow) return;
+
+  if (session?.user?.id) {
+    setAuthLoading(false);
+    setAuthMessage("");
+    applySessionState(session).catch((error) => {
+      setAuthMessage(error?.message || "Could not load application data.", "error");
+      showLoginScreen();
+    });
   }
 }
 
@@ -12407,4 +12471,46 @@ function renderManagerProperties() {
       </div>
     `;
   }).join("");
+}
+
+async function handlePasswordRecoverySubmit(event) {
+  event.preventDefault();
+
+  const newPassword = String(newPasswordInput?.value || "");
+  const confirmedPassword = String(confirmNewPasswordInput?.value || "");
+  if (!newPassword || !confirmedPassword) {
+    setPasswordRecoveryMessage("Enter and confirm your new password.", "error");
+    return;
+  }
+  if (newPassword !== confirmedPassword) {
+    setPasswordRecoveryMessage("Passwords do not match.", "error");
+    return;
+  }
+  if (newPassword.length < 6) {
+    setPasswordRecoveryMessage("Password must be at least 6 characters.", "error");
+    return;
+  }
+
+  setPasswordRecoveryMessage("");
+  setPasswordRecoveryLoading(true);
+  const { error } = await supabaseClient.auth.updateUser({ password: newPassword });
+  if (error) {
+    setPasswordRecoveryLoading(false);
+    const message = /session|expired|token/i.test(String(error.message || ""))
+      ? "This password reset link is invalid or expired. Request a new reset email."
+      : (error.message || "Could not update password.");
+    setPasswordRecoveryMessage(message, "error");
+    return;
+  }
+
+  setPasswordRecoveryMessage("Password updated successfully.", "success");
+  const signOutResult = await supabaseClient.auth.signOut();
+  setPasswordRecoveryLoading(false);
+  if (signOutResult.error) {
+    setPasswordRecoveryMessage("Password updated successfully. Sign out and sign in again with your new password.", "success");
+    return;
+  }
+
+  showLoginScreen();
+  setAuthMessage("Password updated successfully. Sign in with your new password.", "success");
 }

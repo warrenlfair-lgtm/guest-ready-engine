@@ -27,6 +27,19 @@
       <button id="forgotPasswordBtn" type="button" class="auth-link-btn">Forgot Password?</button>
       <div id="authMessage" class="auth-message hidden" role="status" aria-live="polite"></div>
     </form>
+
+    <form id="passwordRecoveryForm" class="auth-form hidden" novalidate>
+      <h2>Set New Password</h2>
+
+      <label for="newPassword">New Password</label>
+      <input id="newPassword" type="password" autocomplete="new-password" minlength="6" required placeholder="Enter a new password">
+
+      <label for="confirmNewPassword">Confirm New Password</label>
+      <input id="confirmNewPassword" type="password" autocomplete="new-password" minlength="6" required placeholder="Confirm your new password">
+
+      <button id="updatePasswordBtn" type="submit">Update Password</button>
+      <div id="passwordRecoveryMessage" class="auth-message hidden" role="status" aria-live="polite"></div>
+    </form>
   </div>
 </div>
 
