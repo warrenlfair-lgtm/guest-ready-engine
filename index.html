@@ -81,6 +81,7 @@
   <div class="view-toggle" role="tablist" aria-label="Task views">
     <button type="button" class="view-btn active" data-view="today">Today View</button>
     <button type="button" class="view-btn" data-view="week">Week View</button>
+    <button type="button" class="view-btn admin-manager-only" data-view="month">Month View</button>
     <button type="button" class="view-btn admin-manager-only" data-view="properties">Properties</button>
     <button type="button" class="view-btn admin-only" data-view="reports">Reports</button>
     <button type="button" class="view-btn admin-only" data-view="expenses">Expenses</button>
@@ -117,6 +118,34 @@
     </div>
     <div id="weekTasks"></div>
     <div id="weekTasksCalendar" class="hidden"></div>
+  </section>
+
+  <section id="monthView" class="view-panel">
+    <div class="view-header month-view-header">
+      <div>
+        <h2>Month View</h2>
+        <p>Operational schedule calendar for all tasks across all properties.</p>
+      </div>
+      <div class="month-header-controls">
+        <div class="month-nav-group">
+          <button type="button" id="prevMonthBtn" class="secondary-btn">&laquo; Prev Month</button>
+          <button type="button" id="currentMonthBtn" class="secondary-btn">Current Month</button>
+          <button type="button" id="nextMonthBtn" class="secondary-btn">Next Month &raquo;</button>
+          <span id="monthCalendarTitle" class="month-calendar-title">August 2026</span>
+        </div>
+        <div class="month-filter-group">
+          <label for="monthBranchFilterSelect">Tasks:</label>
+          <select id="monthBranchFilterSelect">
+            <option value="all">All Tasks</option>
+            <option value="pool">Pool Service</option>
+            <option value="lawn">Lawn / Gen Labor</option>
+          </select>
+        </div>
+        <button type="button" id="monthAddTaskBtn" class="admin-manager-only primary-btn">+ Add Task</button>
+      </div>
+    </div>
+
+    <div id="monthTasksCalendar" class="month-calendar-grid-wrap"></div>
   </section>
 
   <section id="propertiesView" class="view-panel">
@@ -975,6 +1004,11 @@
 
     <div class="edit-task-modal-body">
       <div id="staffTaskPropertyDetails" class="staff-only staff-task-property-details hidden"></div>
+
+      <div id="cleaningPropertySelectGroup">
+        <label for="cleaningPropertySelect" class="staff-readonly-field">Property</label>
+        <select id="cleaningPropertySelect" class="staff-readonly-field"></select>
+      </div>
 
       <label class="staff-readonly-field">Service Date</label>
       <input id="cleaningDate" class="staff-readonly-field" type="date">

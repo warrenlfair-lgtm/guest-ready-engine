@@ -3003,19 +3003,299 @@ textarea{
     }
 }
 
-@media (prefers-color-scheme: dark) {
-    .app-brand-footer {
-        border-top-color: #334155;
-        color: #94a3b8;
+/* Month View Calendar Styles */
+.month-view-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 16px;
+    margin-bottom: 20px;
+}
+
+.month-header-controls {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+
+.month-nav-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.month-calendar-title {
+    font-size: 18px;
+    font-weight: 700;
+    color: #1f2937;
+    margin-left: 8px;
+    min-width: 140px;
+}
+
+.month-filter-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.month-filter-group select {
+    padding: 8px 12px;
+    border-radius: 8px;
+    border: 1px solid #d1d5db;
+    font-size: 14px;
+}
+
+.month-calendar-grid-wrap {
+    overflow-x: auto;
+    background: white;
+    border-radius: 12px;
+    padding: 16px;
+    box-shadow: 0 3px 10px rgba(0,0,0,.08);
+}
+
+.month-calendar-table {
+    width: 100%;
+    border-collapse: collapse;
+    min-width: 840px;
+    table-layout: fixed;
+}
+
+.month-calendar-table th {
+    background: #f8fafc;
+    color: #475569;
+    font-weight: 700;
+    padding: 12px 8px;
+    text-align: center;
+    border: 1px solid #e2e8f0;
+    font-size: 14px;
+}
+
+.month-day-cell {
+    border: 1px solid #e2e8f0;
+    vertical-align: top;
+    height: 140px;
+    padding: 6px;
+    background: #ffffff;
+    transition: background-color 0.15s;
+    cursor: pointer;
+}
+
+.month-day-cell:hover {
+    background: #f8fafc;
+}
+
+.month-day-cell.other-month {
+    background: #f8fafc;
+    opacity: 0.6;
+}
+
+.month-day-cell.today-cell {
+    background: #eff6ff;
+    border: 2px solid #2563eb;
+}
+
+.month-day-header-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+}
+
+.month-day-number {
+    font-weight: 700;
+    font-size: 14px;
+    color: #1e293b;
+}
+
+.month-day-header-right {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.month-day-count-badge {
+    font-size: 11px;
+    font-weight: 600;
+    background: #e2e8f0;
+    color: #334155;
+    padding: 2px 6px;
+    border-radius: 4px;
+}
+
+.month-day-add-btn {
+    font-size: 11px;
+    padding: 3px 8px;
+    background: #2563eb;
+    color: white;
+    border-radius: 4px;
+    border: none;
+    cursor: pointer;
+    line-height: 1;
+    font-weight: 600;
+}
+
+.month-day-add-btn:hover {
+    background: #1d4ed8;
+}
+
+.month-day-tasks-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 105px;
+    overflow-y: auto;
+}
+
+.month-task-card {
+    font-size: 12px;
+    border-radius: 6px;
+    padding: 5px 7px;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    transition: transform 0.1s, box-shadow 0.1s;
+}
+
+.month-task-card:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+}
+
+.month-task-card.month-task-pool {
+    border-left: 4px solid #2563eb;
+    background: #f0f7ff;
+}
+
+.month-task-card.month-task-lawn {
+    border-left: 4px solid #16a34a;
+    background: #f0fdf4;
+}
+
+.month-task-property-name {
+    font-weight: 700;
+    color: #0f172a;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.month-task-meta-line {
+    font-size: 11px;
+    color: #475569;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 4px;
+}
+
+.month-task-alert-pill {
+    background: #fef2f2;
+    color: #dc2626;
+    border: 1px solid #fecaca;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 1px 4px;
+    border-radius: 3px;
+    white-space: nowrap;
+}
+
+.month-task-gr-pill {
+    background: #fef3c7;
+    color: #92400e;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 1px 4px;
+    border-radius: 3px;
+}
+
+.month-task-status-pill {
+    font-size: 10px;
+    padding: 1px 4px;
+    border-radius: 3px;
+    font-weight: 600;
+}
+
+.month-task-status-pill.status-scheduled {
+    background: #dbeafe;
+    color: #1e40af;
+}
+
+.month-task-status-pill.status-in-progress {
+    background: #fef3c7;
+    color: #92400e;
+}
+
+.month-task-status-pill.status-completed {
+    background: #dcfce7;
+    color: #166534;
+}
+
+.month-task-status-pill.status-cancelled {
+    background: #f1f5f9;
+    color: #64748b;
+    text-decoration: line-through;
+}
+
+@media (max-width: 720px) {
+    .month-view-header,
+    .month-header-controls,
+    .month-nav-group {
+        align-items: stretch;
+        width: 100%;
     }
 
-    .app-brand-footer-title,
-    .app-brand-footer-tagline {
-        color: #cbd5e1;
+    .month-header-controls,
+    .month-nav-group {
+        gap: 8px;
     }
 
-    .app-brand-footer-copy {
-        color: #94a3b8;
+    .month-nav-group {
+        flex-wrap: wrap;
+    }
+
+    .month-nav-group button {
+        flex: 1 1 30%;
+        min-width: 96px;
+    }
+
+    .month-calendar-title {
+        flex-basis: 100%;
+        margin: 4px 0 0;
+        min-width: 0;
+        text-align: center;
+    }
+
+    .month-filter-group {
+        flex: 1 1 auto;
+    }
+
+    .month-filter-group select {
+        flex: 1 1 auto;
+        min-width: 0;
+    }
+
+    .month-calendar-grid-wrap {
+        margin: 0 -12px;
+        padding: 8px;
+        border-radius: 0;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .month-calendar-table {
+        min-width: 980px;
+    }
+
+    .month-day-cell {
+        height: 156px;
+    }
+
+    .month-day-tasks-list {
+        max-height: 118px;
     }
 }
 

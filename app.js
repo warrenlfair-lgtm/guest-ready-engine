@@ -1,5 +1,6 @@
 let properties = [];
 let cleaningTasks = [];
+let monthCleaningTasks = [];
 let reservations = [];
 let operationsReminders = [];
 let chemicalUsageEntries = [];
@@ -32,6 +33,10 @@ const COMPANY_BRANCH_OPTIONS = [COMPANY_BRANCH_GUEST_READY, COMPANY_BRANCH_WEEKE
 const SERVICE_BRANCH_POOL = "pool";
 const SERVICE_BRANCH_LAWN = "lawn";
 let activeServiceWorkspace = SERVICE_BRANCH_POOL;
+let currentMonthViewYear = new Date().getFullYear();
+let currentMonthViewMonth = new Date().getMonth();
+let monthBranchFilter = "all";
+let monthTasksRequestId = 0;
 
 let companyProfile = { ...DEFAULT_COMPANY_PROFILE };
 let currentSessionUserId = null;
@@ -317,6 +322,14 @@ const deleteCleaningSyncWarning = document.getElementById("deleteCleaningSyncWar
 const weekTasksContainer = document.getElementById("weekTasks");
 const weekTasksCalendarContainer = document.getElementById("weekTasksCalendar");
 const weekViewToggleButtons = Array.from(document.querySelectorAll(".week-view-btn"));
+const prevMonthBtn = document.getElementById("prevMonthBtn");
+const currentMonthBtn = document.getElementById("currentMonthBtn");
+const nextMonthBtn = document.getElementById("nextMonthBtn");
+const monthCalendarTitle = document.getElementById("monthCalendarTitle");
+const monthBranchFilterSelect = document.getElementById("monthBranchFilterSelect");
+const monthAddTaskBtn = document.getElementById("monthAddTaskBtn");
+const monthTasksCalendarContainer = document.getElementById("monthTasksCalendar");
+const cleaningPropertySelect = document.getElementById("cleaningPropertySelect");
 const debugTasksBtn = document.getElementById("debugTasksBtn");
 const debugTaskCount = document.getElementById("debugTaskCount");
 const propertyFilterSelect = document.getElementById("propertyFilterSelect");
@@ -593,6 +606,50 @@ weekViewToggleButtons.forEach((button) => {
     renderWeekView();
   });
 });
+
+if (prevMonthBtn) {
+  prevMonthBtn.addEventListener("click", async () => {
+    currentMonthViewMonth--;
+    if (currentMonthViewMonth < 0) {
+      currentMonthViewMonth = 11;
+      currentMonthViewYear--;
+    }
+    await loadMonthTasks();
+  });
+}
+
+if (currentMonthBtn) {
+  currentMonthBtn.addEventListener("click", async () => {
+    const today = new Date();
+    currentMonthViewYear = today.getFullYear();
+    currentMonthViewMonth = today.getMonth();
+    await loadMonthTasks();
+  });
+}
+
+if (nextMonthBtn) {
+  nextMonthBtn.addEventListener("click", async () => {
+    currentMonthViewMonth++;
+    if (currentMonthViewMonth > 11) {
+      currentMonthViewMonth = 0;
+      currentMonthViewYear++;
+    }
+    await loadMonthTasks();
+  });
+}
+
+if (monthBranchFilterSelect) {
+  monthBranchFilterSelect.addEventListener("change", (e) => {
+    monthBranchFilter = e.target.value;
+    renderMonthView();
+  });
+}
+
+if (monthAddTaskBtn) {
+  monthAddTaskBtn.addEventListener("click", () => {
+    openAddCleaningTaskForDate();
+  });
+}
 
 if (debugTasksBtn) {
   debugTasksBtn.addEventListener("click", debugCleaningTasks);
@@ -1181,7 +1238,7 @@ function showView(viewName) {
   if (isStaffUser() && !["today", "week"].includes(viewName)) {
     viewName = "today";
   }
-  if (isManagerUser() && !["today", "week", "properties"].includes(viewName)) {
+  if (isManagerUser() && !["today", "week", "month", "properties"].includes(viewName)) {
     viewName = "today";
   }
 
@@ -1192,6 +1249,10 @@ function showView(viewName) {
   document.querySelectorAll(".view-btn").forEach((button) => {
     button.classList.toggle("active", button.dataset.view === viewName);
   });
+
+  if (viewName === "month") {
+    renderMonthView();
+  }
 
   if (viewName === "billing") {
     renderBillingReport();
@@ -1383,7 +1444,7 @@ function applyTaskModalRole(task) {
     element.classList.toggle("role-restricted-hidden", staffMode || managerMode);
   });
   document.querySelectorAll("#cleaningModal .staff-readonly-field").forEach((element) => {
-    if ("disabled" in element) element.disabled = staffMode || managerMode;
+    if ("disabled" in element) element.disabled = staffMode || (managerMode && Boolean(task));
   });
   if (cleaningWeeklyServiceLevel) cleaningWeeklyServiceLevel.disabled = staffMode;
   if (cleaningNotes) cleaningNotes.disabled = staffMode;
@@ -1503,7 +1564,9 @@ function initializeChemicalSettingsForm() {
 
 function getCurrentCleaningTask() {
   if (!editingCleaningId) return null;
-  return cleaningTasks.find((task) => task.id === editingCleaningId) || null;
+  return cleaningTasks.find((task) => task.id === editingCleaningId)
+    || monthCleaningTasks.find((task) => task.id === editingCleaningId)
+    || null;
 }
 
 function canEditChemicalEntries() {
@@ -2371,24 +2434,45 @@ function syncCleaningServiceTypeDependentFields() {
   }
 }
 
-function openCleaningModal(propertyId) {
-  if (!requireAdminAccess()) return;
-  const property = properties.find(p => p.id === propertyId);
-  if (!property) return;
+function populateCleaningPropertySelect(selectedPropertyId = null) {
+  if (!cleaningPropertySelect) return;
+  const activeProps = properties
+    .filter((p) => isPropertyActive(p))
+    .sort((a, b) => (a.property_name || "").localeCompare(b.property_name || ""));
 
-  selectedCleaningPropertyId = propertyId;
+  cleaningPropertySelect.innerHTML = activeProps
+    .map((p) => `<option value="${p.id}">${escapeHtml(p.property_name)}</option>`)
+    .join("");
+
+  if (selectedPropertyId && activeProps.some((p) => p.id === selectedPropertyId)) {
+    cleaningPropertySelect.value = selectedPropertyId;
+  } else if (activeProps.length > 0) {
+    cleaningPropertySelect.value = activeProps[0].id;
+  }
+}
+
+function openCleaningModal(propertyId = null, prefilledDate = null) {
+  if (isStaffUser()) return;
+  const activeProps = properties.filter((p) => isPropertyActive(p));
+  const fallbackPropertyId = activeProps.length > 0 ? activeProps[0].id : (properties.length > 0 ? properties[0].id : null);
+
+  selectedCleaningPropertyId = propertyId || fallbackPropertyId;
   editingCleaningId = null;
   if (cleaningModalTitle) {
     cleaningModalTitle.textContent = "Add Task";
   }
 
-  cleaningDate.value = new Date().toISOString().split("T")[0];
+  populateCleaningPropertySelect(selectedCleaningPropertyId);
+
+  cleaningDate.value = prefilledDate || new Date().toISOString().split("T")[0];
   cleaningServiceType.value = activeServiceWorkspace === SERVICE_BRANCH_LAWN ? "Lawn Service" : "Manual";
   cleaningServiceType.disabled = activeServiceWorkspace === SERVICE_BRANCH_LAWN;
   if (cleaningWeeklyServiceLevel) cleaningWeeklyServiceLevel.value = WEEKLY_SERVICE_LEVEL_FULL;
   cleaningStatus.value = "Scheduled";
   cleaningTechnician.value = "";
-  cleaningCharge.value = activeServiceWorkspace === SERVICE_BRANCH_LAWN ? Number(property.lawn_default_charge || 0) : 0;
+
+  const property = selectedCleaningPropertyId ? properties.find(p => p.id === selectedCleaningPropertyId) : null;
+  cleaningCharge.value = (activeServiceWorkspace === SERVICE_BRANCH_LAWN && property) ? Number(property.lawn_default_charge || 0) : 0;
   if (cleaningSdsAmount) {
     if (cleaningSdsAmountLabel) cleaningSdsAmountLabel.classList.add("hidden");
     cleaningSdsAmount.classList.add("hidden");
@@ -2407,8 +2491,14 @@ function openCleaningModal(propertyId) {
   cleaningModalInitialState = getCleaningModalStateSnapshot();
 }
 
+function openAddCleaningTaskForDate(dateString = "") {
+  if (isStaffUser()) return;
+  openCleaningModal(null, dateString || formatDateValue(new Date()));
+}
+
 function openEditCleaning(taskId) {
-  const task = cleaningTasks.find((t) => t.id === taskId);
+  const task = cleaningTasks.find((t) => t.id === taskId)
+    || monthCleaningTasks.find((t) => t.id === taskId);
   if (!task) return;
 
   editingCleaningId = task.id;
@@ -2416,6 +2506,8 @@ function openEditCleaning(taskId) {
   if (cleaningModalTitle) {
     cleaningModalTitle.textContent = "Edit Task";
   }
+
+  populateCleaningPropertySelect(task.property_id);
 
   cleaningDate.value = task.scheduled_date || task.service_date || "";
   cleaningServiceType.value = task.service_type || "Manual";
@@ -4915,34 +5007,73 @@ async function syncPropertyIcal(propertyId) {
 }
 
 async function saveCleaningTask() {
-  const property = properties.find((p) => p.id === selectedCleaningPropertyId);
-  if (!property) return;
+  const returnToMonthView = document.getElementById("monthView")?.classList.contains("active") === true;
+  const selectedPropId = cleaningPropertySelect?.value || selectedCleaningPropertyId;
+  const property = properties.find((p) => p.id === selectedPropId);
+  if (!property) {
+    alert("Please select a valid property.");
+    return;
+  }
+  selectedCleaningPropertyId = property.id;
 
   if (isManagerUser()) {
-    if (!editingCleaningId) return;
-    const selectedTechnician = findActiveTechnicianByName(cleaningTechnician.value.trim());
-    const existingTask = cleaningTasks.find((task) => task.id === editingCleaningId);
-    const serviceLevel = existingTask?.service_type === "Weekly Standard"
-      ? normalizeWeeklyServiceLevel(cleaningWeeklyServiceLevel?.value)
-      : null;
-    const { error } = await supabaseClient.rpc("manager_update_task_operations", {
-      target_task_id: editingCleaningId,
-      selected_technician_id: selectedTechnician?.id || null,
-      selected_service_level: serviceLevel,
-      entered_notes: applyManualBillingOverrideTag(cleaningNotes.value.trim(), hasManualBillingOverride(existingTask)),
-    });
-    if (error) {
-      alert("Could not save operational task details: " + error.message);
+    if (editingCleaningId) {
+      const selectedTechnician = findActiveTechnicianByName(cleaningTechnician.value.trim());
+      const existingTask = cleaningTasks.find((task) => task.id === editingCleaningId)
+        || monthCleaningTasks.find((task) => task.id === editingCleaningId);
+      const serviceLevel = existingTask?.service_type === "Weekly Standard"
+        ? normalizeWeeklyServiceLevel(cleaningWeeklyServiceLevel?.value)
+        : null;
+      const { error } = await supabaseClient.rpc("manager_update_task_operations", {
+        target_task_id: editingCleaningId,
+        selected_technician_id: selectedTechnician?.id || null,
+        selected_service_level: serviceLevel,
+        entered_notes: applyManualBillingOverrideTag(cleaningNotes.value.trim(), hasManualBillingOverride(existingTask)),
+      });
+      if (error) {
+        alert("Could not save operational task details: " + error.message);
+        return;
+      }
+      closeCleaningModal({ force: true });
+      await loadManagerOperationalData();
+      if (returnToMonthView) {
+        showView("month");
+        await loadMonthTasks();
+      }
+      return;
+    } else {
+      const selectedTechnician = findActiveTechnicianByName(cleaningTechnician.value.trim());
+      const serviceType = cleaningServiceType.value || "Manual";
+      const serviceBranch = serviceType === "Lawn Service" ? SERVICE_BRANCH_LAWN : SERVICE_BRANCH_POOL;
+      const serviceLevel = serviceType === "Weekly Standard"
+        ? normalizeWeeklyServiceLevel(cleaningWeeklyServiceLevel?.value)
+        : null;
+      const { error } = await supabaseClient.rpc("manager_create_task", {
+        selected_property_id: selectedCleaningPropertyId,
+        selected_service_date: cleaningDate.value,
+        selected_service_type: serviceType,
+        selected_service_branch: serviceBranch,
+        selected_weekly_service_level: serviceLevel,
+        selected_technician_id: selectedTechnician?.id || null,
+        entered_notes: cleaningNotes.value.trim() || null,
+      });
+      if (error) {
+        alert("Could not create task: " + error.message);
+        return;
+      }
+      closeCleaningModal({ force: true });
+      await loadManagerOperationalData();
+      if (returnToMonthView) {
+        showView("month");
+        await loadMonthTasks();
+      }
       return;
     }
-    closeCleaningModal({ force: true });
-    await loadManagerOperationalData();
-    return;
   }
 
   const serviceDate = cleaningDate.value;
   const serviceType = activeServiceWorkspace === SERVICE_BRANCH_LAWN ? "Lawn Service" : cleaningServiceType.value;
-  const serviceBranch = activeServiceWorkspace === SERVICE_BRANCH_LAWN ? SERVICE_BRANCH_LAWN : SERVICE_BRANCH_POOL;
+  const serviceBranch = serviceType === "Lawn Service" ? SERVICE_BRANCH_LAWN : SERVICE_BRANCH_POOL;
   const weeklyServiceLevel = serviceType === "Weekly Standard"
     ? normalizeWeeklyServiceLevel(cleaningWeeklyServiceLevel?.value)
     : null;
@@ -4969,7 +5100,10 @@ async function saveCleaningTask() {
     return;
   }
 
-  const existingTask = editingCleaningId ? cleaningTasks.find((task) => task.id === editingCleaningId) : null;
+  const existingTask = editingCleaningId
+    ? cleaningTasks.find((task) => task.id === editingCleaningId)
+      || monthCleaningTasks.find((task) => task.id === editingCleaningId)
+    : null;
   const existingCharge = Number(existingTask?.charge || 0);
   const wasCompleted = String(existingTask?.status || "") === "Completed";
   const completedAt = taskStatus === "Completed"
@@ -5170,6 +5304,10 @@ async function saveCleaningTask() {
   editingCleaningId = null;
   closeCleaningModal({ force: true });
   await loadData();
+  if (returnToMonthView) {
+    showView("month");
+    await loadMonthTasks();
+  }
 }
 
 async function deleteCleaningTask(id) {
@@ -11694,6 +11832,171 @@ function renderTaskViews() {
     : `<div class="empty">No ${activeServiceWorkspace === SERVICE_BRANCH_LAWN ? "lawn" : "cleaning"} tasks due today.</div>`;
 
   renderWeekView();
+  renderMonthView();
+}
+
+function getMonthCalendarDateRange() {
+  const firstDayOfMonth = new Date(Date.UTC(currentMonthViewYear, currentMonthViewMonth, 1));
+  const startDate = new Date(firstDayOfMonth);
+  startDate.setUTCDate(startDate.getUTCDate() - firstDayOfMonth.getUTCDay());
+  const endDate = new Date(startDate);
+  endDate.setUTCDate(endDate.getUTCDate() + 41);
+  return {
+    startDate: formatIsoDateUtc(startDate),
+    endDate: formatIsoDateUtc(endDate),
+  };
+}
+
+async function loadMonthTasks() {
+  if (isStaffUser() || !monthTasksCalendarContainer) return;
+
+  const requestId = ++monthTasksRequestId;
+  const { startDate, endDate } = getMonthCalendarDateRange();
+  const source = isManagerUser() ? "manager_cleaning_tasks" : "cleaning_tasks";
+  monthTasksCalendarContainer.innerHTML = `<div class="empty">Loading month schedule...</div>`;
+
+  const { data, error } = await supabaseClient
+    .from(source)
+    .select("*")
+    .or(`and(service_date.gte.${startDate},service_date.lte.${endDate}),and(service_date.is.null,scheduled_date.gte.${startDate},scheduled_date.lte.${endDate})`)
+    .order("service_date", { ascending: true });
+
+  if (requestId !== monthTasksRequestId) return;
+  if (error) {
+    monthCleaningTasks = [];
+    monthTasksCalendarContainer.innerHTML = `<div class="empty">Could not load month schedule: ${escapeHtml(error.message)}</div>`;
+    return;
+  }
+
+  monthCleaningTasks = data || [];
+  renderMonthView();
+}
+
+function renderMonthView() {
+  if (!monthTasksCalendarContainer) return;
+
+  const monthNames = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December"
+  ];
+  if (monthCalendarTitle) {
+    monthCalendarTitle.textContent = `${monthNames[currentMonthViewMonth]} ${currentMonthViewYear}`;
+  }
+
+  const today = new Date();
+  const todayString = formatDateValue(today);
+
+  const firstDayOfMonth = new Date(Date.UTC(currentMonthViewYear, currentMonthViewMonth, 1));
+  const startDayOfWeek = firstDayOfMonth.getUTCDay();
+  const gridStartDate = new Date(firstDayOfMonth);
+  gridStartDate.setUTCDate(gridStartDate.getUTCDate() - startDayOfWeek);
+
+  const calendarDays = [];
+  const cursorDate = new Date(gridStartDate);
+  for (let i = 0; i < 42; i++) {
+    calendarDays.push(new Date(cursorDate));
+    cursorDate.setUTCDate(cursorDate.getUTCDate() + 1);
+  }
+
+  const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  const headerHtml = dayNames.map(name => `<th>${name}</th>`).join("");
+
+  const tasksByDateKey = new Map();
+  monthCleaningTasks.forEach((task) => {
+    const taskDate = task.service_date || task.scheduled_date;
+    if (!taskDate) return;
+
+    if (monthBranchFilter === "pool" && isLawnTask(task)) return;
+    if (monthBranchFilter === "lawn" && !isLawnTask(task)) return;
+
+    if (!tasksByDateKey.has(taskDate)) {
+      tasksByDateKey.set(taskDate, []);
+    }
+    tasksByDateKey.get(taskDate).push(task);
+  });
+
+  const canAddTask = isAdminUser() || isManagerUser();
+
+  const cellsHtml = calendarDays.map((dateObj) => {
+    const dateString = formatIsoDateUtc(dateObj);
+    const dayNumber = dateObj.getUTCDate();
+    const isCurrentMonth = dateObj.getUTCMonth() === currentMonthViewMonth;
+    const isToday = dateString === todayString;
+    const dayTasks = tasksByDateKey.get(dateString) || [];
+
+    const cellClasses = [
+      "month-day-cell",
+      isCurrentMonth ? "in-month" : "other-month",
+      isToday ? "today-cell" : ""
+    ].filter(Boolean).join(" ");
+
+    const taskCardsHtml = dayTasks.map((task) => {
+      const propertyName = getPropertyName(task.property_id);
+      const isLawn = isLawnTask(task);
+      const branchClass = isLawn ? "month-task-lawn" : "month-task-pool";
+      const techName = getTaskTechnicianDisplayName(task) || "Unassigned";
+      const status = task.status || "Scheduled";
+      const statusClass = status === "Completed" ? "status-completed" : status === "In Progress" ? "status-in-progress" : status === "Cancelled" ? "status-cancelled" : "status-scheduled";
+
+      const sameDayBadge = isSameDayCheckInGuestReadyTask(task)
+        ? `<span class="month-task-alert-pill" title="Same-Day Turnover Alert">🚨 Turnover</span>`
+        : "";
+      const guestReadyBadge = isTaskGuestReady(task)
+        ? `<span class="month-task-gr-pill" title="Guest Ready">GR</span>`
+        : "";
+
+      return `
+        <div class="month-task-card ${branchClass}" onclick="event.stopPropagation(); openEditCleaning('${task.id}')">
+          <div class="month-task-property-name">${escapeHtml(propertyName)}</div>
+          <div class="month-task-meta-line">
+            <span>${escapeHtml(getServiceTypeDisplayLabel(task.service_type))}</span>
+            ${sameDayBadge || guestReadyBadge}
+          </div>
+          <div class="month-task-meta-line">
+            <span>Tech: ${escapeHtml(techName)}</span>
+            <span class="month-task-status-pill ${statusClass}">${escapeHtml(status)}</span>
+          </div>
+        </div>
+      `;
+    }).join("");
+
+    const addBtnHtml = canAddTask
+      ? `<button type="button" class="month-day-add-btn" onclick="event.stopPropagation(); openAddCleaningTaskForDate('${dateString}')" title="Add task for ${dateString}">+ Add</button>`
+      : "";
+
+    const cellClickAttr = canAddTask ? `onclick="openAddCleaningTaskForDate('${dateString}')"` : "";
+
+    return `
+      <td class="${cellClasses}" ${cellClickAttr}>
+        <div class="month-day-header-row">
+          <span class="month-day-number">${dayNumber}</span>
+          <div class="month-day-header-right">
+            ${dayTasks.length > 0 ? `<span class="month-day-count-badge">${dayTasks.length} task${dayTasks.length === 1 ? "" : "s"}</span>` : ""}
+            ${addBtnHtml}
+          </div>
+        </div>
+        <div class="month-day-tasks-list">
+          ${taskCardsHtml}
+        </div>
+      </td>
+    `;
+  });
+
+  const rowsHtml = [];
+  for (let i = 0; i < cellsHtml.length; i += 7) {
+    rowsHtml.push(`<tr>${cellsHtml.slice(i, i + 7).join("")}</tr>`);
+  }
+
+  monthTasksCalendarContainer.innerHTML = `
+    <table class="month-calendar-table">
+      <thead>
+        <tr>${headerHtml}</tr>
+      </thead>
+      <tbody>
+        ${rowsHtml.join("")}
+      </tbody>
+    </table>
+  `;
 }
 
 function renderWeekView() {
@@ -12262,7 +12565,7 @@ async function navigateToView(viewName) {
     showView("today");
     return;
   }
-  if (isManagerUser() && !["today", "week", "properties"].includes(viewName)) {
+  if (isManagerUser() && !["today", "week", "month", "properties"].includes(viewName)) {
     showView("today");
     return;
   }
@@ -12274,6 +12577,9 @@ async function navigateToView(viewName) {
   }
 
   showView(viewName);
+  if (viewName === "month") {
+    await loadMonthTasks();
+  }
 }
 
 function openPinModal() {
