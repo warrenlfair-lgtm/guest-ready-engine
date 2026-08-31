@@ -81,7 +81,7 @@
   <div class="view-toggle" role="tablist" aria-label="Task views">
     <button type="button" class="view-btn active" data-view="today">Today View</button>
     <button type="button" class="view-btn" data-view="week">Week View</button>
-    <button type="button" class="view-btn admin-manager-only" data-view="month">Month View</button>
+    <button type="button" class="view-btn" data-view="month">Month View</button>
     <button type="button" class="view-btn admin-manager-only" data-view="properties">Properties</button>
     <button type="button" class="view-btn admin-only" data-view="reports">Reports</button>
     <button type="button" class="view-btn admin-only" data-view="expenses">Expenses</button>
@@ -1012,6 +1012,14 @@
 
       <label class="staff-readonly-field">Service Date</label>
       <input id="cleaningDate" class="staff-readonly-field" type="date">
+
+      <div id="cleaningServiceBranchRow" class="hidden">
+        <label for="cleaningServiceBranch">Service Branch</label>
+        <select id="cleaningServiceBranch">
+          <option value="pool">Pool Service</option>
+          <option value="lawn">Lawn / Gen Labor</option>
+        </select>
+      </div>
 
       <label class="staff-readonly-field">Task Type</label>
       <select id="cleaningServiceType" class="staff-readonly-field">

@@ -272,6 +272,8 @@ const propertyLawnDefaultCharge = document.getElementById("propertyLawnDefaultCh
 const propertyLawnLaborAmount = document.getElementById("propertyLawnLaborAmount");
 
 const cleaningDate = document.getElementById("cleaningDate");
+const cleaningServiceBranchRow = document.getElementById("cleaningServiceBranchRow");
+const cleaningServiceBranch = document.getElementById("cleaningServiceBranch");
 const cleaningServiceType = document.getElementById("cleaningServiceType");
 const cleaningStatus = document.getElementById("cleaningStatus");
 const cleaningTechnician = document.getElementById("cleaningTechnician");
@@ -1235,7 +1237,7 @@ function setActiveServiceWorkspace(branch) {
 }
 
 function showView(viewName) {
-  if (isStaffUser() && !["today", "week"].includes(viewName)) {
+  if (isStaffUser() && !["today", "week", "month"].includes(viewName)) {
     viewName = "today";
   }
   if (isManagerUser() && !["today", "week", "month", "properties"].includes(viewName)) {
@@ -1449,11 +1451,13 @@ function applyTaskModalRole(task) {
   if (cleaningWeeklyServiceLevel) cleaningWeeklyServiceLevel.disabled = staffMode;
   if (cleaningNotes) cleaningNotes.disabled = staffMode;
   if (cleaningTechnician) cleaningTechnician.disabled = staffMode;
+  if (cleaningStatus) cleaningStatus.disabled = staffMode || managerMode;
+  if (cleaningServiceBranchRow) cleaningServiceBranchRow.classList.toggle("hidden", !managerMode || Boolean(task));
   if (saveCleaningBtn) saveCleaningBtn.classList.toggle("role-restricted-hidden", staffMode);
   cleaningModal?.querySelector(".chemical-usage-section")?.classList.toggle("role-restricted-hidden", managerMode);
 
   if (staffTaskPropertyDetails) {
-    const property = getPropertyById(task?.property_id);
+    const property = getPropertyById(task?.property_id || selectedCleaningPropertyId);
     const operationalMode = staffMode || managerMode;
     staffTaskPropertyDetails.classList.toggle("hidden", !operationalMode);
     staffTaskPropertyDetails.innerHTML = operationalMode ? `
@@ -2465,6 +2469,7 @@ function openCleaningModal(propertyId = null, prefilledDate = null) {
   populateCleaningPropertySelect(selectedCleaningPropertyId);
 
   cleaningDate.value = prefilledDate || new Date().toISOString().split("T")[0];
+  if (cleaningServiceBranch) cleaningServiceBranch.value = activeServiceWorkspace;
   cleaningServiceType.value = activeServiceWorkspace === SERVICE_BRANCH_LAWN ? "Lawn Service" : "Manual";
   cleaningServiceType.disabled = activeServiceWorkspace === SERVICE_BRANCH_LAWN;
   if (cleaningWeeklyServiceLevel) cleaningWeeklyServiceLevel.value = WEEKLY_SERVICE_LEVEL_FULL;
@@ -2489,6 +2494,12 @@ function openCleaningModal(propertyId = null, prefilledDate = null) {
 
   cleaningModal.classList.remove("hidden");
   cleaningModalInitialState = getCleaningModalStateSnapshot();
+}
+
+function openManagerManualTaskModal(propertyId) {
+  if (!isManagerUser()) return;
+  openCleaningModal(propertyId);
+  if (cleaningModalTitle) cleaningModalTitle.textContent = "Add Manual Task";
 }
 
 function openAddCleaningTaskForDate(dateString = "") {
@@ -2547,6 +2558,7 @@ function getCleaningModalStateSnapshot() {
     propertyId: selectedCleaningPropertyId || "",
     editingTaskId: editingCleaningId || "",
     serviceDate: String(cleaningDate?.value || ""),
+    serviceBranch: String(cleaningServiceBranch?.value || ""),
     serviceType: String(cleaningServiceType?.value || ""),
     weeklyServiceLevel: String(cleaningWeeklyServiceLevel?.value || ""),
     status: String(cleaningStatus?.value || ""),
@@ -5008,6 +5020,7 @@ async function syncPropertyIcal(propertyId) {
 
 async function saveCleaningTask() {
   const returnToMonthView = document.getElementById("monthView")?.classList.contains("active") === true;
+  const returnToPropertiesView = document.getElementById("propertiesView")?.classList.contains("active") === true;
   const selectedPropId = cleaningPropertySelect?.value || selectedCleaningPropertyId;
   const property = properties.find((p) => p.id === selectedPropId);
   if (!property) {
@@ -5039,12 +5052,17 @@ async function saveCleaningTask() {
       if (returnToMonthView) {
         showView("month");
         await loadMonthTasks();
+      } else if (returnToPropertiesView) {
+        showView("properties");
+        renderManagerProperties();
       }
       return;
     } else {
       const selectedTechnician = findActiveTechnicianByName(cleaningTechnician.value.trim());
       const serviceType = cleaningServiceType.value || "Manual";
-      const serviceBranch = serviceType === "Lawn Service" ? SERVICE_BRANCH_LAWN : SERVICE_BRANCH_POOL;
+      const serviceBranch = serviceType === "Lawn Service"
+        ? SERVICE_BRANCH_LAWN
+        : normalizeServiceBranch(cleaningServiceBranch?.value || activeServiceWorkspace);
       const serviceLevel = serviceType === "Weekly Standard"
         ? normalizeWeeklyServiceLevel(cleaningWeeklyServiceLevel?.value)
         : null;
@@ -5066,6 +5084,9 @@ async function saveCleaningTask() {
       if (returnToMonthView) {
         showView("month");
         await loadMonthTasks();
+      } else if (returnToPropertiesView) {
+        showView("properties");
+        renderManagerProperties();
       }
       return;
     }
@@ -11848,11 +11869,15 @@ function getMonthCalendarDateRange() {
 }
 
 async function loadMonthTasks() {
-  if (isStaffUser() || !monthTasksCalendarContainer) return;
+  if (!monthTasksCalendarContainer) return;
 
   const requestId = ++monthTasksRequestId;
   const { startDate, endDate } = getMonthCalendarDateRange();
-  const source = isManagerUser() ? "manager_cleaning_tasks" : "cleaning_tasks";
+  const source = isStaffUser()
+    ? "staff_cleaning_tasks"
+    : isManagerUser()
+      ? "manager_cleaning_tasks"
+      : "cleaning_tasks";
   monthTasksCalendarContainer.innerHTML = `<div class="empty">Loading month schedule...</div>`;
 
   const { data, error } = await supabaseClient
@@ -12561,7 +12586,7 @@ function renderProperties() {
 async function navigateToView(viewName) {
   if (!viewName) return;
 
-  if (isStaffUser() && !["today", "week"].includes(viewName)) {
+  if (isStaffUser() && !["today", "week", "month"].includes(viewName)) {
     showView("today");
     return;
   }
@@ -12817,6 +12842,9 @@ function renderManagerProperties() {
           <div><strong>Lawn / Gen Labor Day:</strong> ${escapeHtml(property.lawn_service_day || "Wednesday")}</div>
           <div><strong>Lawn / Gen Labor Frequency:</strong> ${escapeHtml(getServiceFrequencyLabel(property.lawn_service_frequency))}</div>
           <div><strong>iCal:</strong> ${property.ical_url ? "Configured" : "Not configured"}</div>
+        </div>
+        <div class="card-actions">
+          <button type="button" onclick="openManagerManualTaskModal('${property.id}')">+ Manual Task</button>
         </div>
         <div class="reminders-section">
           <div class="reminders-header"><h4>Operational Reminders</h4></div>
