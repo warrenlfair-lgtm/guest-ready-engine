@@ -79,6 +79,7 @@ function applyRoleBasedInterface() {
   });
   document.body.classList.toggle("staff-role", isStaffUser());
   document.body.classList.toggle("manager-role", isManagerUser());
+  renderMonthAddTaskControl();
 
   if (isManagerUser() && !["current", "next"].includes(selectedMonthFilter)) {
     selectedMonthFilter = "current";
@@ -329,7 +330,7 @@ const currentMonthBtn = document.getElementById("currentMonthBtn");
 const nextMonthBtn = document.getElementById("nextMonthBtn");
 const monthCalendarTitle = document.getElementById("monthCalendarTitle");
 const monthBranchFilterSelect = document.getElementById("monthBranchFilterSelect");
-const monthAddTaskBtn = document.getElementById("monthAddTaskBtn");
+const monthAddTaskSlot = document.getElementById("monthAddTaskSlot");
 const monthTasksCalendarContainer = document.getElementById("monthTasksCalendar");
 const cleaningPropertySelect = document.getElementById("cleaningPropertySelect");
 const debugTasksBtn = document.getElementById("debugTasksBtn");
@@ -647,10 +648,18 @@ if (monthBranchFilterSelect) {
   });
 }
 
-if (monthAddTaskBtn) {
-  monthAddTaskBtn.addEventListener("click", () => {
-    openAddCleaningTaskForDate();
-  });
+function renderMonthAddTaskControl() {
+  if (!monthAddTaskSlot) return;
+  monthAddTaskSlot.replaceChildren();
+  if (!(isAdminUser() || isManagerUser())) return;
+
+  const button = document.createElement("button");
+  button.type = "button";
+  button.id = "monthAddTaskBtn";
+  button.className = "primary-btn";
+  button.textContent = "+ Add Task";
+  button.addEventListener("click", () => openAddCleaningTaskForDate());
+  monthAddTaskSlot.appendChild(button);
 }
 
 if (debugTasksBtn) {
@@ -11873,12 +11882,18 @@ async function loadMonthTasks() {
 
   const requestId = ++monthTasksRequestId;
   const { startDate, endDate } = getMonthCalendarDateRange();
-  const source = isStaffUser()
-    ? "staff_cleaning_tasks"
-    : isManagerUser()
-      ? "manager_cleaning_tasks"
-      : "cleaning_tasks";
   monthTasksCalendarContainer.innerHTML = `<div class="empty">Loading month schedule...</div>`;
+
+  if (isStaffUser()) {
+    monthCleaningTasks = cleaningTasks.filter((task) => {
+      const taskDate = normalizeDateKey(task.service_date || task.scheduled_date);
+      return taskDate && taskDate >= startDate && taskDate <= endDate;
+    });
+    renderMonthView();
+    return;
+  }
+
+  const source = isManagerUser() ? "manager_cleaning_tasks" : "cleaning_tasks";
 
   const { data, error } = await supabaseClient
     .from(source)
