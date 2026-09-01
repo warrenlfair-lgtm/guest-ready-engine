@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex,nofollow,noarchive">
+  <title>Work Proposal | Fair Ventures</title>
+  <link rel="stylesheet" href="proposal.css">
+</head>
+<body>
+  <main class="proposal-shell">
+    <header class="proposal-brand">
+      <span>Fair Ventures</span>
+      <strong>Guest Ready Pool Pros</strong>
+    </header>
+
+    <section id="proposalLoading" class="proposal-panel proposal-message" aria-live="polite">
+      <p>Loading your proposal...</p>
+    </section>
+
+    <section id="proposalInvalid" class="proposal-panel proposal-message hidden" aria-live="polite">
+      <h1>Approval Link Unavailable</h1>
+      <p>This approval link is no longer valid.</p>
+    </section>
+
+    <section id="proposalContent" class="proposal-panel hidden">
+      <div class="proposal-heading">
+        <span>Work Proposal</span>
+        <h1 id="proposalJobTitle"></h1>
+        <p id="proposalProperty"></p>
+      </div>
+
+      <div class="proposal-details">
+        <div>
+          <span>Description</span>
+          <p id="proposalDescription"></p>
+        </div>
+        <div class="proposal-price-row">
+          <span>Proposed Price</span>
+          <strong id="proposalPrice"></strong>
+        </div>
+        <div id="proposalDateRow" class="hidden">
+          <span>Tentative Service Date</span>
+          <p id="proposalDate"></p>
+        </div>
+      </div>
+
+      <div class="proposal-response-form">
+        <label for="customerName">Name <span>(optional)</span></label>
+        <input id="customerName" type="text" maxlength="200" autocomplete="name">
+
+        <label for="customerComment">Comment or Question <span>(optional)</span></label>
+        <textarea id="customerComment" rows="4" maxlength="2000" placeholder="Please explain if you'd like us to revise the proposal."></textarea>
+
+        <div id="proposalError" class="proposal-error hidden" aria-live="polite"></div>
+        <button id="approveProposalBtn" type="button" class="approve-button">Approve Work</button>
+        <button id="declineProposalBtn" type="button" class="decline-button">Decline</button>
+      </div>
+    </section>
+
+    <section id="proposalApproved" class="proposal-panel proposal-message hidden" aria-live="polite">
+      <span class="confirmation-mark">Approved</span>
+      <h1>Thank You</h1>
+      <p>Your approval has been received.</p>
+      <p>We will contact you to confirm scheduling.</p>
+    </section>
+
+    <section id="proposalDeclined" class="proposal-panel proposal-message hidden" aria-live="polite">
+      <span class="confirmation-mark declined">Response Received</span>
+      <h1>Thank You</h1>
+      <p>Your response has been received.</p>
+      <p>We will contact you if additional information is needed.</p>
+    </section>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="proposal.js"></script>
+</body>
+</html>

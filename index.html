@@ -83,6 +83,7 @@
     <button type="button" class="view-btn" data-view="week">Week View</button>
     <button type="button" class="view-btn" data-view="month">Month View</button>
     <button type="button" class="view-btn admin-manager-only" data-view="properties">Properties</button>
+    <button type="button" class="view-btn admin-only" data-view="pipeline">Pipeline</button>
     <button type="button" class="view-btn admin-only" data-view="reports">Reports</button>
     <button type="button" class="view-btn admin-only" data-view="expenses">Expenses</button>
     <button type="button" class="view-btn admin-only" data-view="invoices">Invoices</button>
@@ -174,6 +175,32 @@
     </div>
     
     <div id="propertyList"></div>
+  </section>
+
+  <section id="pipelineView" class="view-panel admin-only">
+    <div class="view-header pipeline-header">
+      <div>
+        <h2>Pipeline</h2>
+        <p>Potential customer work awaiting approval and scheduling.</p>
+      </div>
+      <button type="button" id="addPipelineJobBtn">+ Add Pipeline Job</button>
+    </div>
+    <div id="pipelineSummary" class="pipeline-summary"></div>
+    <div class="pipeline-toolbar">
+      <label for="pipelineFilter">Show</label>
+      <select id="pipelineFilter">
+        <option value="open">All Open</option>
+        <option value="pool">Pool</option>
+        <option value="lawn">Lawn / Gen Labor</option>
+        <option value="Lead">Lead</option>
+        <option value="Proposed">Proposed</option>
+        <option value="Waiting Approval">Waiting Approval</option>
+        <option value="Approved">Approved</option>
+        <option value="Scheduled">Scheduled</option>
+        <option value="Declined">Declined</option>
+      </select>
+    </div>
+    <div id="pipelineJobsList"></div>
   </section>
 
   <section id="billingView" class="view-panel">
@@ -991,6 +1018,93 @@
     <div class="modal-actions property-modal-footer">
       <button id="cancelBtn">Cancel</button>
       <button id="savePropertyBtn">Save Property</button>
+    </div>
+  </div>
+</div>
+
+<div id="pipelineJobModal" class="modal hidden">
+  <div class="modal-card pipeline-modal-card">
+    <div class="edit-task-modal-header">
+      <h2 id="pipelineJobModalTitle">Add Pipeline Job</h2>
+      <button id="closePipelineJobBtn" type="button" class="modal-close-x" aria-label="Close Pipeline job form">×</button>
+    </div>
+    <div class="edit-task-modal-body pipeline-form-grid">
+      <label for="pipelinePropertyInput">Property</label>
+      <select id="pipelinePropertyInput"></select>
+      <label for="pipelineJobTitleInput">Job / Job Title</label>
+      <input id="pipelineJobTitleInput" maxlength="200">
+      <label for="pipelineDescriptionInput">Description</label>
+      <textarea id="pipelineDescriptionInput" rows="3"></textarea>
+      <label for="pipelineBranchInput">Service Branch</label>
+      <select id="pipelineBranchInput">
+        <option value="pool">Pool Service</option>
+        <option value="lawn">Lawn / Gen Labor</option>
+      </select>
+      <label for="pipelineRevenueInput">Potential Revenue</label>
+      <input id="pipelineRevenueInput" type="number" min="0" step="0.01" value="0">
+      <label for="pipelinePartsInput">Parts / Materials Cost</label>
+      <input id="pipelinePartsInput" type="number" min="0" step="0.01" value="0">
+      <label for="pipelinePaidLaborInput">Paid Labor?</label>
+      <select id="pipelinePaidLaborInput">
+        <option value="no">No</option>
+        <option value="yes">Yes</option>
+      </select>
+      <div id="pipelineLaborCostRow" class="pipeline-form-row hidden">
+        <label for="pipelineLaborInput">Estimated Labor Cost</label>
+        <input id="pipelineLaborInput" type="number" min="0" step="0.01" value="0">
+      </div>
+      <label for="pipelineTentativeDateInput">Tentative Date</label>
+      <input id="pipelineTentativeDateInput" type="date">
+      <label for="pipelineStatusInput">Status</label>
+      <select id="pipelineStatusInput">
+        <option value="Lead">Lead</option>
+        <option value="Proposed">Proposed</option>
+        <option value="Waiting Approval">Waiting Approval</option>
+        <option value="Approved">Approved</option>
+        <option value="Declined">Declined</option>
+      </select>
+      <label for="pipelineNotesInput">Notes</label>
+      <textarea id="pipelineNotesInput" rows="3"></textarea>
+      <div id="pipelineProjectionPreview" class="pipeline-projection-preview"></div>
+    </div>
+    <div class="modal-actions edit-task-modal-footer">
+      <button id="cancelPipelineJobBtn" type="button">Cancel</button>
+      <button id="savePipelineJobBtn" type="button">Save Pipeline Job</button>
+    </div>
+  </div>
+</div>
+
+<div id="pipelineScheduleModal" class="modal hidden">
+  <div class="modal-card pipeline-modal-card">
+    <div class="edit-task-modal-header">
+      <h2>Approve &amp; Schedule</h2>
+      <button id="closePipelineScheduleBtn" type="button" class="modal-close-x" aria-label="Close scheduling form">×</button>
+    </div>
+    <div class="edit-task-modal-body pipeline-form-grid">
+      <label for="pipelineScheduleProperty">Property</label>
+      <select id="pipelineScheduleProperty"></select>
+      <label for="pipelineScheduleDate">Service Date</label>
+      <input id="pipelineScheduleDate" type="date">
+      <label for="pipelineScheduleBranch">Service Branch</label>
+      <select id="pipelineScheduleBranch">
+        <option value="pool">Pool Service</option>
+        <option value="lawn">Lawn / Gen Labor</option>
+      </select>
+      <label for="pipelineScheduleType">Service Type</label>
+      <select id="pipelineScheduleType">
+        <option value="Manual">Manual</option>
+        <option value="Off-Cycle">Off-Cycle</option>
+        <option value="Lawn Service">Lawn / Gen Labor</option>
+      </select>
+      <label for="pipelineScheduleTechnician">Technician</label>
+      <select id="pipelineScheduleTechnician"></select>
+      <label for="pipelineScheduleNotes">Operational Notes</label>
+      <textarea id="pipelineScheduleNotes" rows="4"></textarea>
+      <div id="pipelineScheduleCharge" class="pipeline-projection-preview"></div>
+    </div>
+    <div class="modal-actions edit-task-modal-footer">
+      <button id="cancelPipelineScheduleBtn" type="button">Cancel</button>
+      <button id="confirmPipelineScheduleBtn" type="button">Create Scheduled Task</button>
     </div>
   </div>
 </div>

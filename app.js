@@ -11,6 +11,8 @@ let invoiceItems = [];
 let expenses = [];
 let appUsers = [];
 let propertyContractRevenueHistory = [];
+let pipelineJobs = [];
+let pipelineApprovals = [];
 let propertyContractRevenueHistoryAvailable = true;
 let invoicePropertyLabelById = new Map();
 let currentInvoiceDraft = null;
@@ -133,6 +135,8 @@ let editingChemicalUsageId = null;
 let editingChemicalSettingId = null;
 let editingTechnicianId = null;
 let editingExpenseId = null;
+let editingPipelineJobId = null;
+let schedulingPipelineJobId = null;
 let taskTechnicianSelections = new Map();
 let taskWeeklyServiceLevelSelections = new Map();
 let cleaningModalInitialState = null;
@@ -460,6 +464,39 @@ const technicianSettingsList = document.getElementById("technicianSettingsList")
 const technicianSettingsStatus = document.getElementById("technicianSettingsStatus");
 const appUsersList = document.getElementById("appUsersList");
 const appUsersStatus = document.getElementById("appUsersStatus");
+const addPipelineJobBtn = document.getElementById("addPipelineJobBtn");
+const pipelineSummary = document.getElementById("pipelineSummary");
+const pipelineFilter = document.getElementById("pipelineFilter");
+const pipelineJobsList = document.getElementById("pipelineJobsList");
+const pipelineJobModal = document.getElementById("pipelineJobModal");
+const pipelineJobModalTitle = document.getElementById("pipelineJobModalTitle");
+const pipelinePropertyInput = document.getElementById("pipelinePropertyInput");
+const pipelineJobTitleInput = document.getElementById("pipelineJobTitleInput");
+const pipelineDescriptionInput = document.getElementById("pipelineDescriptionInput");
+const pipelineBranchInput = document.getElementById("pipelineBranchInput");
+const pipelineRevenueInput = document.getElementById("pipelineRevenueInput");
+const pipelinePartsInput = document.getElementById("pipelinePartsInput");
+const pipelinePaidLaborInput = document.getElementById("pipelinePaidLaborInput");
+const pipelineLaborCostRow = document.getElementById("pipelineLaborCostRow");
+const pipelineLaborInput = document.getElementById("pipelineLaborInput");
+const pipelineTentativeDateInput = document.getElementById("pipelineTentativeDateInput");
+const pipelineStatusInput = document.getElementById("pipelineStatusInput");
+const pipelineNotesInput = document.getElementById("pipelineNotesInput");
+const pipelineProjectionPreview = document.getElementById("pipelineProjectionPreview");
+const closePipelineJobBtn = document.getElementById("closePipelineJobBtn");
+const cancelPipelineJobBtn = document.getElementById("cancelPipelineJobBtn");
+const savePipelineJobBtn = document.getElementById("savePipelineJobBtn");
+const pipelineScheduleModal = document.getElementById("pipelineScheduleModal");
+const pipelineScheduleProperty = document.getElementById("pipelineScheduleProperty");
+const pipelineScheduleDate = document.getElementById("pipelineScheduleDate");
+const pipelineScheduleBranch = document.getElementById("pipelineScheduleBranch");
+const pipelineScheduleType = document.getElementById("pipelineScheduleType");
+const pipelineScheduleTechnician = document.getElementById("pipelineScheduleTechnician");
+const pipelineScheduleNotes = document.getElementById("pipelineScheduleNotes");
+const pipelineScheduleCharge = document.getElementById("pipelineScheduleCharge");
+const closePipelineScheduleBtn = document.getElementById("closePipelineScheduleBtn");
+const cancelPipelineScheduleBtn = document.getElementById("cancelPipelineScheduleBtn");
+const confirmPipelineScheduleBtn = document.getElementById("confirmPipelineScheduleBtn");
 
 const COMPANY_LOGO_BUCKET = "company-logos";
 
@@ -580,6 +617,25 @@ viewButtons.forEach((button) => {
     await navigateToView(button.dataset.view);
   });
 });
+
+if (addPipelineJobBtn) addPipelineJobBtn.addEventListener("click", () => openPipelineJobModal());
+if (pipelineFilter) pipelineFilter.addEventListener("change", renderPipeline);
+if (pipelinePaidLaborInput) pipelinePaidLaborInput.addEventListener("change", syncPipelineLaborFields);
+[pipelineRevenueInput, pipelinePartsInput, pipelineLaborInput].forEach((input) => {
+  input?.addEventListener("input", renderPipelineProjectionPreview);
+});
+if (closePipelineJobBtn) closePipelineJobBtn.addEventListener("click", closePipelineJobModal);
+if (cancelPipelineJobBtn) cancelPipelineJobBtn.addEventListener("click", closePipelineJobModal);
+if (savePipelineJobBtn) savePipelineJobBtn.addEventListener("click", savePipelineJob);
+if (closePipelineScheduleBtn) closePipelineScheduleBtn.addEventListener("click", closePipelineScheduleModal);
+if (cancelPipelineScheduleBtn) cancelPipelineScheduleBtn.addEventListener("click", closePipelineScheduleModal);
+if (confirmPipelineScheduleBtn) confirmPipelineScheduleBtn.addEventListener("click", approveAndSchedulePipelineJob);
+if (pipelineScheduleBranch) {
+  pipelineScheduleBranch.addEventListener("change", () => {
+    if (pipelineScheduleBranch.value === SERVICE_BRANCH_LAWN) pipelineScheduleType.value = "Lawn Service";
+    if (pipelineScheduleBranch.value === SERVICE_BRANCH_POOL && pipelineScheduleType.value === "Lawn Service") pipelineScheduleType.value = "Manual";
+  });
+}
 
 propertyFilterSelect.addEventListener("change", (e) => {
   selectedPropertyFilter = e.target.value;
@@ -1273,6 +1329,10 @@ function showView(viewName) {
     renderInvoicePreview();
     renderInvoiceBatchPreview();
     renderInvoiceHistory();
+  }
+
+  if (viewName === "pipeline") {
+    renderPipeline();
   }
 
   if (viewName === "routeFragmentation") {
@@ -2842,6 +2902,8 @@ async function loadData() {
   await loadChemicalUsageEntries();
   await loadInvoices();
   await loadExpenses();
+  await loadPipelineJobs();
+  await loadPipelineApprovals();
   renderChemicalSettingsSection();
   renderTechnicianSettingsSection();
   initializeChemicalUsageOptions();
@@ -2869,6 +2931,7 @@ async function loadData() {
   populateExpenseControls();
   renderExpenseLedger();
   renderExpenseReport();
+  renderPipeline();
   renderRouteFragmentationAnalytics();
   if (!document.getElementById("chemicalReportWorkspace")?.classList.contains("hidden")) {
     renderChemicalUsageReport();
@@ -12548,6 +12611,7 @@ function renderProperties() {
 
         <div class="card-actions">
           <button onclick="openCleaningModal('${property.id}')">+ ${activeServiceWorkspace === SERVICE_BRANCH_LAWN ? "Lawn / Gen Labor" : "Cleaning"}</button>
+          <button onclick="openPipelineJobModal('${property.id}')">+ Add to Pipeline</button>
           <button onclick="openEditModal('${property.id}')">Edit</button>
           <button class="delete-btn" onclick="deleteProperty('${property.id}')">Delete</button>
         </div>
@@ -12596,6 +12660,396 @@ function renderProperties() {
       </div>
     `;
   }).join("");
+}
+
+function getPipelineProjection(job) {
+  const revenue = Math.max(0, Number(job?.potential_revenue || 0));
+  const parts = Math.max(0, Number(job?.parts_material_cost || 0));
+  const labor = job?.paid_labor === true ? Math.max(0, Number(job?.estimated_labor_cost || 0)) : 0;
+  const cost = parts + labor;
+  const profit = revenue - cost;
+  return { revenue, cost, profit, margin: revenue > 0 ? (profit / revenue) * 100 : 0 };
+}
+
+function formatPipelineCurrency(value) {
+  return Number(value || 0).toLocaleString("en-US", { style: "currency", currency: "USD" });
+}
+
+async function loadPipelineJobs() {
+  if (!isAdminUser()) {
+    pipelineJobs = [];
+    return;
+  }
+  const { data, error } = await supabaseClient
+    .from("pipeline_jobs")
+    .select("*")
+    .order("created_at", { ascending: false });
+  if (error) throw new Error(`Could not load Pipeline: ${error.message}`);
+  pipelineJobs = data || [];
+}
+
+async function loadPipelineApprovals() {
+  if (!isAdminUser()) {
+    pipelineApprovals = [];
+    return;
+  }
+  const { data, error } = await supabaseClient
+    .from("pipeline_approvals")
+    .select("*")
+    .order("approval_created_at", { ascending: false });
+  if (error) throw new Error(`Could not load customer approvals: ${error.message}`);
+  pipelineApprovals = data || [];
+}
+
+function getPipelineApprovalsForJob(jobId) {
+  return pipelineApprovals.filter((approval) => approval.pipeline_job_id === jobId);
+}
+
+function getCurrentPipelineApproval(jobId) {
+  return getPipelineApprovalsForJob(jobId).find((approval) => !approval.revoked_at) || null;
+}
+
+function getPipelineApprovalStatus(approval) {
+  if (!approval) return "No Link";
+  if (approval.revoked_at) return "Revoked";
+  if (new Date(approval.approval_expires_at).getTime() <= Date.now()) return "Expired";
+  if (approval.customer_response) return approval.customer_response;
+  return approval.approval_viewed_at ? "Viewed" : "Not Viewed";
+}
+
+function formatPipelineTimestamp(value) {
+  if (!value) return "";
+  return new Date(value).toLocaleString("en-US", {
+    month: "long", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit",
+  });
+}
+
+function getApprovalTokenStorageKey(jobId) {
+  return `guestReadyPipelineApprovalToken:${jobId}`;
+}
+
+function buildPublicApprovalUrl(rawToken) {
+  const url = new URL("proposal.html", window.location.href);
+  url.search = "";
+  url.hash = "";
+  url.searchParams.set("token", rawToken);
+  return url.toString();
+}
+
+async function copyTextToClipboard(value) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+  const textArea = document.createElement("textarea");
+  textArea.value = value;
+  textArea.style.position = "fixed";
+  textArea.style.opacity = "0";
+  document.body.appendChild(textArea);
+  textArea.select();
+  document.execCommand("copy");
+  textArea.remove();
+}
+
+async function generatePipelineApprovalLink(jobId) {
+  if (!requireAdminAccess()) return;
+  const { data: rawToken, error } = await supabaseClient.rpc("admin_generate_pipeline_approval_link", {
+    target_pipeline_job_id: jobId,
+  });
+  if (error) {
+    alert("Could not generate approval link: " + error.message);
+    return;
+  }
+  localStorage.setItem(getApprovalTokenStorageKey(jobId), rawToken);
+  await Promise.all([loadPipelineJobs(), loadPipelineApprovals()]);
+  renderPipeline();
+  await copyPipelineApprovalLink(jobId);
+}
+
+async function copyPipelineApprovalLink(jobId) {
+  if (!requireAdminAccess()) return;
+  const rawToken = localStorage.getItem(getApprovalTokenStorageKey(jobId));
+  if (!rawToken) {
+    alert("This browser no longer has the one-time token. Revoke this link and generate a new one.");
+    return;
+  }
+  try {
+    await copyTextToClipboard(buildPublicApprovalUrl(rawToken));
+    alert("Approval link copied.");
+  } catch (error) {
+    alert("Could not copy automatically. Approval URL: " + buildPublicApprovalUrl(rawToken));
+  }
+}
+
+async function revokePipelineApproval(jobId, approvalId) {
+  if (!requireAdminAccess() || !confirm("Revoke this approval link? The existing customer URL will stop working.")) return;
+  const { error } = await supabaseClient.rpc("admin_revoke_pipeline_approval", {
+    target_approval_id: approvalId,
+  });
+  if (error) {
+    alert("Could not revoke approval link: " + error.message);
+    return;
+  }
+  localStorage.removeItem(getApprovalTokenStorageKey(jobId));
+  await Promise.all([loadPipelineJobs(), loadPipelineApprovals()]);
+  renderPipeline();
+}
+
+function renderPipelineApproval(job) {
+  const approvals = getPipelineApprovalsForJob(job.id);
+  const currentApproval = getCurrentPipelineApproval(job.id);
+  const currentStatus = getPipelineApprovalStatus(currentApproval);
+  const canGenerate = !job.scheduled_task_id && (!currentApproval || ["Expired", "Revoked"].includes(currentStatus));
+  const storedToken = localStorage.getItem(getApprovalTokenStorageKey(job.id));
+  const history = approvals.length
+    ? approvals.map((approval) => `<div class="pipeline-approval-history-item">
+        <strong>${escapeHtml(getPipelineApprovalStatus(approval))}</strong>
+      <span>Snapshot: ${escapeHtml(approval.property_name_snapshot)} - ${escapeHtml(approval.job_title_snapshot)}</span>
+      <span>Proposed Price: ${escapeHtml(formatPipelineCurrency(approval.proposed_price_snapshot))}</span>
+      ${approval.description_snapshot ? `<span>Description: ${escapeHtml(approval.description_snapshot)}</span>` : ""}
+      ${approval.tentative_date_snapshot ? `<span>Tentative Date: ${escapeHtml(approval.tentative_date_snapshot)}</span>` : ""}
+        <span>Link Created: ${escapeHtml(formatPipelineTimestamp(approval.approval_created_at))}</span>
+        ${approval.approval_viewed_at ? `<span>First Viewed: ${escapeHtml(formatPipelineTimestamp(approval.approval_viewed_at))}</span>` : ""}
+        ${approval.customer_response_at ? `<span>${escapeHtml(approval.customer_response)}: ${escapeHtml(formatPipelineTimestamp(approval.customer_response_at))}</span>` : ""}
+        ${approval.customer_name ? `<span>Customer: ${escapeHtml(approval.customer_name)}</span>` : ""}
+        ${approval.customer_comment ? `<blockquote>${escapeHtml(approval.customer_comment)}</blockquote>` : ""}
+        ${approval.revoked_at ? `<span>Revoked: ${escapeHtml(formatPipelineTimestamp(approval.revoked_at))}${approval.revoked_reason ? ` - ${escapeHtml(approval.revoked_reason)}` : ""}</span>` : ""}
+      </div>`).join("")
+    : '<span>No approval link generated.</span>';
+
+  return `<details class="pipeline-approval-details">
+    <summary>Customer Approval: ${escapeHtml(currentStatus)}</summary>
+    <div class="pipeline-approval-controls">
+      ${canGenerate ? `<button type="button" onclick="generatePipelineApprovalLink('${job.id}')">Generate Approval Link</button>` : ""}
+      ${currentApproval && storedToken && !["Expired", "Revoked"].includes(currentStatus) ? `<button type="button" class="secondary-btn" onclick="copyPipelineApprovalLink('${job.id}')">Copy Approval Link</button>` : ""}
+      ${currentApproval && !["Expired", "Revoked"].includes(currentStatus) ? `<button type="button" class="delete-btn" onclick="revokePipelineApproval('${job.id}','${currentApproval.id}')">Revoke Approval Link</button>` : ""}
+    </div>
+    <div class="pipeline-approval-history"><h4>Approval History</h4>${history}</div>
+  </details>`;
+}
+
+function getPipelinePropertyOptions(selectedId = "") {
+  return properties
+    .filter((property) => isPropertyActive(property))
+    .sort((left, right) => String(left.property_name || "").localeCompare(String(right.property_name || "")))
+    .map((property) => `<option value="${property.id}" ${property.id === selectedId ? "selected" : ""}>${escapeHtml(property.property_name || "Property")}</option>`)
+    .join("");
+}
+
+function syncPipelineLaborFields() {
+  const paid = pipelinePaidLaborInput?.value === "yes";
+  pipelineLaborCostRow?.classList.toggle("hidden", !paid);
+  if (!paid && pipelineLaborInput) pipelineLaborInput.value = "0";
+  renderPipelineProjectionPreview();
+}
+
+function renderPipelineProjectionPreview() {
+  if (!pipelineProjectionPreview) return;
+  const projection = getPipelineProjection({
+    potential_revenue: pipelineRevenueInput?.value,
+    parts_material_cost: pipelinePartsInput?.value,
+    paid_labor: pipelinePaidLaborInput?.value === "yes",
+    estimated_labor_cost: pipelineLaborInput?.value,
+  });
+  pipelineProjectionPreview.innerHTML = `<strong>Potential Cost:</strong> ${formatPipelineCurrency(projection.cost)} <span>Potential Profit: ${formatPipelineCurrency(projection.profit)}</span> <span>Potential Margin: ${projection.margin.toFixed(2)}%</span>`;
+}
+
+function openPipelineJobModal(propertyId = null, pipelineJobId = null) {
+  if (!requireAdminAccess() || !pipelineJobModal) return;
+  const job = pipelineJobId ? pipelineJobs.find((item) => item.id === pipelineJobId) : null;
+  if (job?.scheduled_task_id) return;
+  editingPipelineJobId = job?.id || null;
+  if (pipelineJobModalTitle) pipelineJobModalTitle.textContent = job ? "Edit Pipeline Job" : "Add Pipeline Job";
+  pipelinePropertyInput.innerHTML = getPipelinePropertyOptions(job?.property_id || propertyId || "");
+  pipelineJobTitleInput.value = job?.job_title || "";
+  pipelineDescriptionInput.value = job?.description || "";
+  pipelineBranchInput.value = normalizeServiceBranch(job?.service_branch || activeServiceWorkspace);
+  pipelineRevenueInput.value = Number(job?.potential_revenue || 0);
+  pipelinePartsInput.value = Number(job?.parts_material_cost || 0);
+  pipelinePaidLaborInput.value = job?.paid_labor === true ? "yes" : "no";
+  pipelineLaborInput.value = Number(job?.estimated_labor_cost || 0);
+  pipelineTentativeDateInput.value = job?.tentative_date || "";
+  pipelineStatusInput.value = job?.status === "Scheduled" ? "Approved" : (job?.status || "Lead");
+  pipelineNotesInput.value = job?.notes || "";
+  syncPipelineLaborFields();
+  pipelineJobModal.classList.remove("hidden");
+}
+
+function closePipelineJobModal() {
+  pipelineJobModal?.classList.add("hidden");
+  editingPipelineJobId = null;
+}
+
+async function savePipelineJob() {
+  if (!requireAdminAccess()) return;
+  const jobTitle = String(pipelineJobTitleInput?.value || "").trim();
+  const potentialRevenue = Number(pipelineRevenueInput?.value || 0);
+  const partsMaterialCost = Number(pipelinePartsInput?.value || 0);
+  const paidLabor = pipelinePaidLaborInput?.value === "yes";
+  const estimatedLaborCost = paidLabor ? Number(pipelineLaborInput?.value || 0) : 0;
+  if (!pipelinePropertyInput?.value || !jobTitle) {
+    alert("Property and Job Title are required.");
+    return;
+  }
+  if (![potentialRevenue, partsMaterialCost, estimatedLaborCost].every((value) => Number.isFinite(value) && value >= 0)) {
+    alert("Pipeline amounts must be valid non-negative numbers.");
+    return;
+  }
+  const payload = {
+    property_id: pipelinePropertyInput.value,
+    job_title: jobTitle,
+    description: String(pipelineDescriptionInput?.value || "").trim() || null,
+    service_branch: normalizeServiceBranch(pipelineBranchInput?.value),
+    potential_revenue: potentialRevenue,
+    parts_material_cost: partsMaterialCost,
+    paid_labor: paidLabor,
+    estimated_labor_cost: estimatedLaborCost,
+    tentative_date: pipelineTentativeDateInput?.value || null,
+    status: pipelineStatusInput?.value || "Lead",
+    notes: String(pipelineNotesInput?.value || "").trim() || null,
+  };
+  savePipelineJobBtn.disabled = true;
+  const result = editingPipelineJobId
+    ? await supabaseClient.from("pipeline_jobs").update(payload).eq("id", editingPipelineJobId).is("scheduled_task_id", null)
+    : await supabaseClient.from("pipeline_jobs").insert(payload);
+  savePipelineJobBtn.disabled = false;
+  if (result.error) {
+    alert("Could not save Pipeline job: " + result.error.message);
+    return;
+  }
+  closePipelineJobModal();
+  await Promise.all([loadPipelineJobs(), loadPipelineApprovals()]);
+  renderPipeline();
+}
+
+function renderPipeline() {
+  if (!isAdminUser() || !pipelineSummary || !pipelineJobsList) return;
+  const openJobs = pipelineJobs.filter((job) => !["Scheduled", "Declined"].includes(job.status));
+  const totals = openJobs.reduce((summary, job) => {
+    const projection = getPipelineProjection(job);
+    summary.revenue += projection.revenue;
+    summary.cost += projection.cost;
+    summary.profit += projection.profit;
+    return summary;
+  }, { revenue: 0, cost: 0, profit: 0 });
+  const margin = totals.revenue > 0 ? (totals.profit / totals.revenue) * 100 : 0;
+  pipelineSummary.innerHTML = [
+    ["Potential Revenue", formatPipelineCurrency(totals.revenue)],
+    ["Potential Costs", formatPipelineCurrency(totals.cost)],
+    ["Potential Profit", formatPipelineCurrency(totals.profit)],
+    ["Potential Margin", `${margin.toFixed(2)}%`],
+    ["Open Pipeline Jobs", String(openJobs.length)],
+  ].map(([label, value]) => `<div class="pipeline-summary-card"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`).join("");
+
+  const selectedFilter = pipelineFilter?.value || "open";
+  const filteredJobs = pipelineJobs.filter((job) => {
+    if (selectedFilter === "open") return !["Scheduled", "Declined"].includes(job.status);
+    if ([SERVICE_BRANCH_POOL, SERVICE_BRANCH_LAWN].includes(selectedFilter)) return normalizeServiceBranch(job.service_branch) === selectedFilter;
+    return job.status === selectedFilter;
+  });
+  if (!filteredJobs.length) {
+    pipelineJobsList.innerHTML = '<div class="empty">No Pipeline jobs match this filter.</div>';
+    return;
+  }
+  pipelineJobsList.innerHTML = `<div class="pipeline-table-wrap"><table class="pipeline-table"><thead><tr><th>Property</th><th>Job</th><th>Branch</th><th>Potential Revenue</th><th>Potential Cost</th><th>Potential Profit</th><th>Tentative Date</th><th>Status</th><th>Customer Approval</th><th>Actions</th></tr></thead><tbody>${filteredJobs.map((job) => {
+    const property = properties.find((item) => item.id === job.property_id);
+    const projection = getPipelineProjection(job);
+    const isScheduled = Boolean(job.scheduled_task_id) || job.status === "Scheduled";
+    const isDeclined = job.status === "Declined";
+    return `<tr><td data-label="Property">${escapeHtml(property?.property_name || "Unknown Property")}</td><td data-label="Job"><strong>${escapeHtml(job.job_title)}</strong>${job.description ? `<small>${escapeHtml(job.description)}</small>` : ""}</td><td data-label="Branch">${normalizeServiceBranch(job.service_branch) === SERVICE_BRANCH_LAWN ? "Lawn / Gen Labor" : "Pool Service"}</td><td data-label="Potential Revenue">${formatPipelineCurrency(projection.revenue)}</td><td data-label="Potential Cost">${formatPipelineCurrency(projection.cost)}</td><td data-label="Potential Profit">${formatPipelineCurrency(projection.profit)}</td><td data-label="Tentative Date">${escapeHtml(job.tentative_date || "Not set")}</td><td data-label="Status"><span class="pipeline-status">${escapeHtml(job.status)}</span></td><td data-label="Customer Approval">${renderPipelineApproval(job)}</td><td data-label="Actions"><div class="pipeline-actions">${!isScheduled && !isDeclined ? `<button type="button" onclick="openPipelineScheduleModal('${job.id}')">Approve &amp; Schedule</button><button type="button" class="secondary-btn" onclick="openPipelineJobModal(null,'${job.id}')">Edit</button><button type="button" class="secondary-btn" onclick="declinePipelineJob('${job.id}')">Decline</button>` : ""}${isDeclined ? `<button type="button" onclick="reopenPipelineJob('${job.id}')">Reopen</button>` : ""}${!isScheduled ? `<button type="button" class="delete-btn" onclick="deletePipelineJob('${job.id}')">Delete</button>` : `<small>Task created</small>`}</div></td></tr>`;
+  }).join("")}</tbody></table></div>`;
+}
+
+async function declinePipelineJob(jobId) {
+  if (!requireAdminAccess()) return;
+  const currentApproval = getCurrentPipelineApproval(jobId);
+  if (currentApproval) {
+    const revokeResult = await supabaseClient.rpc("admin_revoke_pipeline_approval", {
+      target_approval_id: currentApproval.id,
+    });
+    if (revokeResult.error) return alert("Could not revoke the customer approval link: " + revokeResult.error.message);
+    localStorage.removeItem(getApprovalTokenStorageKey(jobId));
+  }
+  const { error } = await supabaseClient.from("pipeline_jobs").update({ status: "Declined" }).eq("id", jobId).is("scheduled_task_id", null);
+  if (error) return alert("Could not decline Pipeline job: " + error.message);
+  await Promise.all([loadPipelineJobs(), loadPipelineApprovals()]);
+  renderPipeline();
+}
+
+async function reopenPipelineJob(jobId) {
+  if (!requireAdminAccess()) return;
+  const currentApproval = getCurrentPipelineApproval(jobId);
+  if (currentApproval) {
+    const revokeResult = await supabaseClient.rpc("admin_revoke_pipeline_approval", {
+      target_approval_id: currentApproval.id,
+    });
+    if (revokeResult.error) return alert("Could not revoke the prior customer approval: " + revokeResult.error.message);
+    localStorage.removeItem(getApprovalTokenStorageKey(jobId));
+  }
+  const { error } = await supabaseClient.from("pipeline_jobs").update({ status: "Lead" }).eq("id", jobId).is("scheduled_task_id", null);
+  if (error) return alert("Could not reopen Pipeline job: " + error.message);
+  await Promise.all([loadPipelineJobs(), loadPipelineApprovals()]);
+  renderPipeline();
+}
+
+async function deletePipelineJob(jobId) {
+  if (!requireAdminAccess() || !confirm("Permanently delete this accidental or duplicate Pipeline job? Use Decline for a legitimate lost opportunity.")) return;
+  const { error } = await supabaseClient.from("pipeline_jobs").delete().eq("id", jobId).is("scheduled_task_id", null);
+  if (error) return alert("Could not delete Pipeline job: " + error.message);
+  await loadPipelineJobs();
+  renderPipeline();
+}
+
+function openPipelineScheduleModal(jobId) {
+  if (!requireAdminAccess() || !pipelineScheduleModal) return;
+  const job = pipelineJobs.find((item) => item.id === jobId);
+  if (!job || job.scheduled_task_id || job.status === "Scheduled") return;
+  schedulingPipelineJobId = job.id;
+  pipelineScheduleProperty.innerHTML = getPipelinePropertyOptions(job.property_id);
+  pipelineScheduleDate.value = job.tentative_date || "";
+  pipelineScheduleBranch.value = normalizeServiceBranch(job.service_branch);
+  pipelineScheduleType.value = pipelineScheduleBranch.value === SERVICE_BRANCH_LAWN ? "Lawn Service" : "Manual";
+  pipelineScheduleTechnician.innerHTML = `<option value="">Unassigned</option>${technicians.filter((technician) => technician.active !== false).map((technician) => `<option value="${technician.id}">${escapeHtml(technician.name || "Technician")}</option>`).join("")}`;
+  pipelineScheduleNotes.value = job.notes || "";
+  const projection = getPipelineProjection(job);
+  pipelineScheduleCharge.innerHTML = `<strong>Approved customer charge:</strong> ${formatPipelineCurrency(projection.revenue)} <span>Parts: ${formatPipelineCurrency(job.parts_material_cost)}</span> <span>Estimated paid labor: ${formatPipelineCurrency(job.paid_labor ? job.estimated_labor_cost : 0)}</span>`;
+  pipelineScheduleModal.classList.remove("hidden");
+}
+
+function closePipelineScheduleModal() {
+  pipelineScheduleModal?.classList.add("hidden");
+  schedulingPipelineJobId = null;
+  if (confirmPipelineScheduleBtn) confirmPipelineScheduleBtn.disabled = false;
+}
+
+async function approveAndSchedulePipelineJob() {
+  if (!requireAdminAccess() || !schedulingPipelineJobId) return;
+  if (!pipelineScheduleProperty?.value || !pipelineScheduleDate?.value) {
+    alert("Property and Service Date are required.");
+    return;
+  }
+  confirmPipelineScheduleBtn.disabled = true;
+  const { error } = await supabaseClient.rpc("approve_and_schedule_pipeline_job", {
+    target_pipeline_job_id: schedulingPipelineJobId,
+    selected_property_id: pipelineScheduleProperty.value,
+    selected_service_date: pipelineScheduleDate.value,
+    selected_service_branch: pipelineScheduleBranch.value,
+    selected_service_type: pipelineScheduleType.value,
+    selected_technician_id: pipelineScheduleTechnician.value || null,
+    entered_operational_notes: String(pipelineScheduleNotes.value || "").trim() || null,
+  });
+  if (error) {
+    confirmPipelineScheduleBtn.disabled = false;
+    alert("Could not schedule Pipeline job: " + error.message);
+    await loadPipelineJobs();
+    renderPipeline();
+    return;
+  }
+  closePipelineScheduleModal();
+  await Promise.all([loadPipelineJobs(), loadPipelineApprovals(), loadCleaningTasks()]);
+  renderPipeline();
+  renderTaskViews();
+  renderProperties();
 }
 
 async function navigateToView(viewName) {

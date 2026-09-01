@@ -1,0 +1,219 @@
+:root {
+  color-scheme: light;
+  --ink: #14213d;
+  --muted: #5d6878;
+  --line: #d8e1e8;
+  --water: #007f8b;
+  --water-dark: #075b64;
+  --decline: #8a2d35;
+  --paper: #ffffff;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background:
+    linear-gradient(135deg, rgba(0, 127, 139, .08), transparent 42%),
+    repeating-linear-gradient(0deg, transparent, transparent 31px, rgba(20, 33, 61, .035) 32px),
+    #edf3f5;
+  color: var(--ink);
+  font-family: Georgia, "Times New Roman", serif;
+  letter-spacing: 0;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+  letter-spacing: 0;
+}
+
+.proposal-shell {
+  width: min(100% - 24px, 720px);
+  margin: 0 auto;
+  padding: 20px 0 48px;
+}
+
+.proposal-brand {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 4px 20px;
+  color: var(--water-dark);
+}
+
+.proposal-brand span {
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.proposal-brand strong {
+  font-size: clamp(24px, 8vw, 38px);
+}
+
+.proposal-panel {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-top: 6px solid var(--water);
+  border-radius: 8px;
+  background: var(--paper);
+  box-shadow: 0 18px 48px rgba(20, 33, 61, .12);
+}
+
+.proposal-heading,
+.proposal-details,
+.proposal-response-form,
+.proposal-message {
+  padding: 24px;
+}
+
+.proposal-heading {
+  border-bottom: 1px solid var(--line);
+}
+
+.proposal-heading span,
+.proposal-details span,
+.proposal-response-form label span {
+  color: var(--muted);
+  font-family: "Trebuchet MS", Verdana, sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.proposal-heading h1,
+.proposal-message h1 {
+  margin: 8px 0;
+  font-size: clamp(30px, 10vw, 52px);
+  line-height: 1.05;
+  overflow-wrap: anywhere;
+}
+
+.proposal-heading p,
+.proposal-message p {
+  margin: 0;
+  color: var(--muted);
+  font-family: "Trebuchet MS", Verdana, sans-serif;
+  font-size: 18px;
+  line-height: 1.5;
+}
+
+.proposal-details {
+  display: grid;
+  gap: 24px;
+  border-bottom: 1px solid var(--line);
+}
+
+.proposal-details p {
+  margin: 8px 0 0;
+  font-family: "Trebuchet MS", Verdana, sans-serif;
+  font-size: 18px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+.proposal-price-row strong {
+  display: block;
+  margin-top: 5px;
+  color: var(--water-dark);
+  font-size: clamp(36px, 12vw, 58px);
+}
+
+.proposal-response-form {
+  display: grid;
+  gap: 10px;
+  font-family: "Trebuchet MS", Verdana, sans-serif;
+}
+
+.proposal-response-form label {
+  margin-top: 8px;
+  font-weight: 700;
+}
+
+.proposal-response-form label span {
+  font-size: 11px;
+}
+
+.proposal-response-form input,
+.proposal-response-form textarea {
+  width: 100%;
+  border: 1px solid #aebcc7;
+  border-radius: 6px;
+  padding: 14px;
+  color: var(--ink);
+  font-size: 17px;
+}
+
+.proposal-response-form button {
+  width: 100%;
+  min-height: 56px;
+  border: 0;
+  border-radius: 6px;
+  padding: 14px 18px;
+  color: white;
+  font-size: 18px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.proposal-response-form button:disabled {
+  cursor: wait;
+  opacity: .6;
+}
+
+.approve-button {
+  margin-top: 14px;
+  background: var(--water);
+}
+
+.decline-button {
+  background: var(--decline);
+}
+
+.proposal-message {
+  text-align: center;
+}
+
+.confirmation-mark {
+  display: inline-block;
+  margin-bottom: 8px;
+  color: var(--water-dark);
+  font-family: "Trebuchet MS", Verdana, sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.confirmation-mark.declined {
+  color: var(--decline);
+}
+
+.proposal-error {
+  padding: 12px;
+  border-left: 4px solid var(--decline);
+  background: #fff1f2;
+  color: #761d27;
+}
+
+.hidden {
+  display: none !important;
+}
+
+@media (min-width: 640px) {
+  .proposal-shell {
+    padding-top: 48px;
+  }
+
+  .proposal-heading,
+  .proposal-details,
+  .proposal-response-form,
+  .proposal-message {
+    padding: 34px 40px;
+  }
+}
