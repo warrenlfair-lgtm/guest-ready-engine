@@ -12728,10 +12728,22 @@ function getApprovalTokenStorageKey(jobId) {
   return `guestReadyPipelineApprovalToken:${jobId}`;
 }
 
-function buildPublicApprovalUrl(rawToken) {
+function createPipelineJobSlug(jobTitle) {
+  return String(jobTitle || "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80);
+}
+
+function buildPublicApprovalUrl(rawToken, jobTitle = "") {
   const url = new URL("proposal.html", window.location.href);
   url.search = "";
   url.hash = "";
+  const jobSlug = createPipelineJobSlug(jobTitle);
+  if (jobSlug) url.searchParams.set("job", jobSlug);
   url.searchParams.set("token", rawToken);
   return url.toString();
 }
@@ -12769,16 +12781,31 @@ async function generatePipelineApprovalLink(jobId) {
 async function copyPipelineApprovalLink(jobId) {
   if (!requireAdminAccess()) return;
   const rawToken = localStorage.getItem(getApprovalTokenStorageKey(jobId));
+  const job = pipelineJobs.find((item) => item.id === jobId);
+  const approval = getCurrentPipelineApproval(jobId);
   if (!rawToken) {
     alert("This browser no longer has the one-time token. Revoke this link and generate a new one.");
     return;
   }
+  const approvalUrl = buildPublicApprovalUrl(rawToken, approval?.job_title_snapshot || job?.job_title);
   try {
-    await copyTextToClipboard(buildPublicApprovalUrl(rawToken));
+    await copyTextToClipboard(approvalUrl);
     alert("Approval link copied.");
   } catch (error) {
-    alert("Could not copy automatically. Approval URL: " + buildPublicApprovalUrl(rawToken));
+    alert("Could not copy automatically. Approval URL: " + approvalUrl);
   }
+}
+
+function viewPipelineApproval(jobId) {
+  if (!requireAdminAccess()) return;
+  const rawToken = localStorage.getItem(getApprovalTokenStorageKey(jobId));
+  const job = pipelineJobs.find((item) => item.id === jobId);
+  const approval = getCurrentPipelineApproval(jobId);
+  if (!rawToken) {
+    alert("This browser no longer has the one-time token. Revoke this link and generate a new one.");
+    return;
+  }
+  window.open(buildPublicApprovalUrl(rawToken, approval?.job_title_snapshot || job?.job_title), "_blank", "noopener,noreferrer");
 }
 
 async function revokePipelineApproval(jobId, approvalId) {
@@ -12799,7 +12826,10 @@ function renderPipelineApproval(job) {
   const approvals = getPipelineApprovalsForJob(job.id);
   const currentApproval = getCurrentPipelineApproval(job.id);
   const currentStatus = getPipelineApprovalStatus(currentApproval);
+  const currentDisplayStatus = currentApproval?.customer_response
+    || (currentApproval && currentStatus !== "Expired" ? "Waiting Approval" : currentStatus);
   const canGenerate = !job.scheduled_task_id && (!currentApproval || ["Expired", "Revoked"].includes(currentStatus));
+  const generateLinkLabel = approvals.length ? "Generate New Approval Link" : "Generate Approval Link";
   const storedToken = localStorage.getItem(getApprovalTokenStorageKey(job.id));
   const history = approvals.length
     ? approvals.map((approval) => `<div class="pipeline-approval-history-item">
@@ -12818,10 +12848,11 @@ function renderPipelineApproval(job) {
     : '<span>No approval link generated.</span>';
 
   return `<details class="pipeline-approval-details">
-    <summary>Customer Approval: ${escapeHtml(currentStatus)}</summary>
+    <summary>Customer Approval: ${escapeHtml(currentDisplayStatus)}</summary>
     <div class="pipeline-approval-controls">
-      ${canGenerate ? `<button type="button" onclick="generatePipelineApprovalLink('${job.id}')">Generate Approval Link</button>` : ""}
+      ${canGenerate ? `<button type="button" onclick="generatePipelineApprovalLink('${job.id}')">${generateLinkLabel}</button>` : ""}
       ${currentApproval && storedToken && !["Expired", "Revoked"].includes(currentStatus) ? `<button type="button" class="secondary-btn" onclick="copyPipelineApprovalLink('${job.id}')">Copy Approval Link</button>` : ""}
+      ${currentApproval && storedToken && !["Expired", "Revoked"].includes(currentStatus) ? `<button type="button" class="secondary-btn" onclick="viewPipelineApproval('${job.id}')">View Approval</button>` : ""}
       ${currentApproval && !["Expired", "Revoked"].includes(currentStatus) ? `<button type="button" class="delete-btn" onclick="revokePipelineApproval('${job.id}','${currentApproval.id}')">Revoke Approval Link</button>` : ""}
     </div>
     <div class="pipeline-approval-history"><h4>Approval History</h4>${history}</div>
