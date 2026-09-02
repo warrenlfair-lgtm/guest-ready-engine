@@ -205,6 +205,51 @@ textarea {
   color: var(--decline);
 }
 
+.confirmation-proposal {
+  margin: 24px 0;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #f8fafc;
+  text-align: left;
+}
+
+.confirmation-proposal h2 {
+  margin: 0 0 14px;
+  color: var(--water-dark);
+  font-family: "Trebuchet MS", Verdana, sans-serif;
+  font-size: 14px;
+  text-transform: uppercase;
+}
+
+.confirmation-proposal dl {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  font-family: "Trebuchet MS", Verdana, sans-serif;
+}
+
+.confirmation-proposal dl > div {
+  display: grid;
+  grid-template-columns: minmax(105px, 38%) minmax(0, 1fr);
+  gap: 10px;
+}
+
+.confirmation-proposal dt {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.confirmation-proposal dd {
+  margin: 0;
+  color: var(--ink);
+  font-size: 16px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
 .proposal-error {
   padding: 12px;
   border-left: 4px solid var(--decline);

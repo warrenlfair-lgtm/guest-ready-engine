@@ -40,8 +40,24 @@ function formatProposalDate(value) {
   });
 }
 
+function renderConfirmation(panel, proposal) {
+  panel.querySelector("[data-confirmation-property]").textContent = proposal.property_name || "";
+  panel.querySelector("[data-confirmation-job]").textContent = proposal.job_title || "Work Proposal";
+  panel.querySelector("[data-confirmation-price]").textContent = formatProposalPrice(proposal.proposed_price);
+
+  const descriptionRow = panel.querySelector("[data-confirmation-description-row]");
+  const description = proposal.customer_description || "";
+  descriptionRow.classList.toggle("hidden", !description);
+  panel.querySelector("[data-confirmation-description]").textContent = description;
+
+  const dateRow = panel.querySelector("[data-confirmation-date-row]");
+  dateRow.classList.toggle("hidden", !proposal.tentative_service_date);
+  panel.querySelector("[data-confirmation-date]").textContent = formatProposalDate(proposal.tentative_service_date);
+}
+
 function renderProposal(proposal) {
   currentProposal = proposal;
+  document.title = `Guest Ready - ${proposal.job_title || "Work Proposal"}`;
   document.getElementById("proposalProperty").textContent = proposal.property_name || "";
   document.getElementById("proposalJobTitle").textContent = proposal.job_title || "Work Proposal";
   document.getElementById("proposalDescription").textContent = proposal.customer_description || "Proposal details provided by Fair Ventures.";
@@ -49,6 +65,8 @@ function renderProposal(proposal) {
   const dateRow = document.getElementById("proposalDateRow");
   dateRow.classList.toggle("hidden", !proposal.tentative_service_date);
   document.getElementById("proposalDate").textContent = formatProposalDate(proposal.tentative_service_date);
+  renderConfirmation(approvedPanel, proposal);
+  renderConfirmation(declinedPanel, proposal);
   if (proposal.response_status === "Approved") {
     showOnly(approvedPanel);
   } else if (proposal.response_status === "Declined") {
@@ -100,6 +118,7 @@ async function submitResponse(response) {
     declineButton.disabled = false;
     return;
   }
+  renderConfirmation(data === "Approved" ? approvedPanel : declinedPanel, currentProposal);
   showOnly(data === "Approved" ? approvedPanel : declinedPanel);
 }
 
