@@ -12778,13 +12778,31 @@ async function generatePipelineApprovalLink(jobId) {
   await copyPipelineApprovalLink(jobId);
 }
 
+async function getPipelineApprovalToken(jobId, approval) {
+  if (!approval?.id) throw new Error("Active approval link not found.");
+
+  const { data: rawToken, error } = await supabaseClient.rpc("admin_get_pipeline_approval_token", {
+    target_approval_id: approval.id,
+  });
+  if (!error && rawToken) {
+    localStorage.setItem(getApprovalTokenStorageKey(jobId), rawToken);
+    return rawToken;
+  }
+
+  const legacyToken = localStorage.getItem(getApprovalTokenStorageKey(jobId));
+  if (legacyToken && error?.message?.includes("legacy approval token")) return legacyToken;
+  throw new Error(error?.message || "Approval token is unavailable.");
+}
+
 async function copyPipelineApprovalLink(jobId) {
   if (!requireAdminAccess()) return;
-  const rawToken = localStorage.getItem(getApprovalTokenStorageKey(jobId));
   const job = pipelineJobs.find((item) => item.id === jobId);
   const approval = getCurrentPipelineApproval(jobId);
-  if (!rawToken) {
-    alert("This browser no longer has the one-time token. Revoke this link and generate a new one.");
+  let rawToken;
+  try {
+    rawToken = await getPipelineApprovalToken(jobId, approval);
+  } catch (error) {
+    alert("Could not retrieve approval link: " + error.message);
     return;
   }
   const approvalUrl = buildPublicApprovalUrl(rawToken, approval?.job_title_snapshot || job?.job_title);
@@ -12796,16 +12814,25 @@ async function copyPipelineApprovalLink(jobId) {
   }
 }
 
-function viewPipelineApproval(jobId) {
+async function viewPipelineApproval(jobId) {
   if (!requireAdminAccess()) return;
-  const rawToken = localStorage.getItem(getApprovalTokenStorageKey(jobId));
-  const job = pipelineJobs.find((item) => item.id === jobId);
-  const approval = getCurrentPipelineApproval(jobId);
-  if (!rawToken) {
-    alert("This browser no longer has the one-time token. Revoke this link and generate a new one.");
+  const approvalWindow = window.open("", "_blank");
+  if (!approvalWindow) {
+    alert("Allow pop-ups to view the approval in a new tab.");
     return;
   }
-  window.open(buildPublicApprovalUrl(rawToken, approval?.job_title_snapshot || job?.job_title), "_blank", "noopener,noreferrer");
+  approvalWindow.opener = null;
+  const job = pipelineJobs.find((item) => item.id === jobId);
+  const approval = getCurrentPipelineApproval(jobId);
+  let rawToken;
+  try {
+    rawToken = await getPipelineApprovalToken(jobId, approval);
+  } catch (error) {
+    approvalWindow.close();
+    alert("Could not retrieve approval link: " + error.message);
+    return;
+  }
+  approvalWindow.location.replace(buildPublicApprovalUrl(rawToken, approval?.job_title_snapshot || job?.job_title));
 }
 
 async function revokePipelineApproval(jobId, approvalId) {
@@ -12830,7 +12857,6 @@ function renderPipelineApproval(job) {
     || (currentApproval && currentStatus !== "Expired" ? "Waiting Approval" : currentStatus);
   const canGenerate = !job.scheduled_task_id && (!currentApproval || ["Expired", "Revoked"].includes(currentStatus));
   const generateLinkLabel = approvals.length ? "Generate New Approval Link" : "Generate Approval Link";
-  const storedToken = localStorage.getItem(getApprovalTokenStorageKey(job.id));
   const history = approvals.length
     ? approvals.map((approval) => `<div class="pipeline-approval-history-item">
         <strong>${escapeHtml(getPipelineApprovalStatus(approval))}</strong>
@@ -12851,8 +12877,8 @@ function renderPipelineApproval(job) {
     <summary>Customer Approval: ${escapeHtml(currentDisplayStatus)}</summary>
     <div class="pipeline-approval-controls">
       ${canGenerate ? `<button type="button" onclick="generatePipelineApprovalLink('${job.id}')">${generateLinkLabel}</button>` : ""}
-      ${currentApproval && storedToken && !["Expired", "Revoked"].includes(currentStatus) ? `<button type="button" class="secondary-btn" onclick="copyPipelineApprovalLink('${job.id}')">Copy Approval Link</button>` : ""}
-      ${currentApproval && storedToken && !["Expired", "Revoked"].includes(currentStatus) ? `<button type="button" class="secondary-btn" onclick="viewPipelineApproval('${job.id}')">View Approval</button>` : ""}
+      ${currentApproval && !["Expired", "Revoked"].includes(currentStatus) ? `<button type="button" class="secondary-btn" onclick="copyPipelineApprovalLink('${job.id}')">Copy Approval Link</button>` : ""}
+      ${currentApproval && !["Expired", "Revoked"].includes(currentStatus) ? `<button type="button" class="secondary-btn" onclick="viewPipelineApproval('${job.id}')">View Approval</button>` : ""}
       ${currentApproval && !["Expired", "Revoked"].includes(currentStatus) ? `<button type="button" class="delete-btn" onclick="revokePipelineApproval('${job.id}','${currentApproval.id}')">Revoke Approval Link</button>` : ""}
     </div>
     <div class="pipeline-approval-history"><h4>Approval History</h4>${history}</div>

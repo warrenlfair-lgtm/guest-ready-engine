@@ -4,11 +4,13 @@
 BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
+CREATE EXTENSION IF NOT EXISTS supabase_vault WITH SCHEMA vault;
 
 CREATE TABLE IF NOT EXISTS public.pipeline_approvals (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   pipeline_job_id UUID NOT NULL REFERENCES public.pipeline_jobs(id) ON DELETE CASCADE,
   token_hash BYTEA NOT NULL UNIQUE,
+  token_secret_id UUID,
   property_name_snapshot TEXT NOT NULL,
   job_title_snapshot TEXT NOT NULL,
   description_snapshot TEXT,
@@ -28,6 +30,9 @@ CREATE TABLE IF NOT EXISTS public.pipeline_approvals (
     OR (customer_response IS NOT NULL AND customer_response_at IS NOT NULL)
   )
 );
+
+ALTER TABLE public.pipeline_approvals
+  ADD COLUMN IF NOT EXISTS token_secret_id UUID;
 
 CREATE INDEX IF NOT EXISTS pipeline_approvals_job_created_idx
   ON public.pipeline_approvals(pipeline_job_id, approval_created_at DESC);
@@ -54,6 +59,7 @@ DECLARE
   pipeline_row public.pipeline_jobs%ROWTYPE;
   property_label TEXT;
   raw_token TEXT;
+  token_secret_id UUID;
 BEGIN
   IF NOT public.is_active_app_admin() THEN
     RAISE EXCEPTION 'Admin access required' USING ERRCODE = '42501';
@@ -84,18 +90,31 @@ BEGIN
     RAISE EXCEPTION 'Pipeline proposal is not available' USING ERRCODE = '22023';
   END IF;
 
+  DELETE FROM vault.secrets
+  WHERE id IN (
+    SELECT token_secret_id FROM public.pipeline_approvals
+    WHERE pipeline_job_id = target_pipeline_job_id
+      AND revoked_at IS NULL
+      AND token_secret_id IS NOT NULL
+  );
   UPDATE public.pipeline_approvals
   SET revoked_at = now(),
-      revoked_reason = 'Superseded by a new approval request'
+      revoked_reason = 'Superseded by a new approval request',
+      token_secret_id = NULL
   WHERE pipeline_job_id = target_pipeline_job_id
     AND revoked_at IS NULL;
 
   raw_token := encode(extensions.gen_random_bytes(32), 'hex');
+  token_secret_id := vault.create_secret(
+    raw_token,
+    NULL,
+    'Pipeline customer approval token for approval resend'
+  );
   INSERT INTO public.pipeline_approvals (
-    pipeline_job_id, token_hash, property_name_snapshot, job_title_snapshot,
+    pipeline_job_id, token_hash, token_secret_id, property_name_snapshot, job_title_snapshot,
     description_snapshot, proposed_price_snapshot, tentative_date_snapshot
   ) VALUES (
-    pipeline_row.id, extensions.digest(raw_token, 'sha256'), property_label, pipeline_row.job_title,
+    pipeline_row.id, extensions.digest(raw_token, 'sha256'), token_secret_id, property_label, pipeline_row.job_title,
     pipeline_row.description, pipeline_row.potential_revenue, pipeline_row.tentative_date
   );
 
@@ -115,18 +134,24 @@ SET search_path = public
 AS $$
 DECLARE
   target_pipeline_job_id UUID;
+  target_token_secret_id UUID;
 BEGIN
   IF NOT public.is_active_app_admin() THEN
     RAISE EXCEPTION 'Admin access required' USING ERRCODE = '42501';
   END IF;
 
-  SELECT pipeline_job_id INTO target_pipeline_job_id
+  SELECT pipeline_job_id, token_secret_id
+  INTO target_pipeline_job_id, target_token_secret_id
   FROM public.pipeline_approvals
   WHERE id = target_approval_id;
 
+  DELETE FROM vault.secrets
+  WHERE id = target_token_secret_id;
+
   UPDATE public.pipeline_approvals
   SET revoked_at = COALESCE(revoked_at, now()),
-      revoked_reason = COALESCE(revoked_reason, 'Revoked by Admin')
+      revoked_reason = COALESCE(revoked_reason, 'Revoked by Admin'),
+      token_secret_id = NULL
   WHERE id = target_approval_id
     AND revoked_at IS NULL;
 
@@ -134,6 +159,44 @@ BEGIN
   SET status = 'Waiting Approval'
   WHERE id = target_pipeline_job_id
     AND scheduled_task_id IS NULL;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.admin_get_pipeline_approval_token(target_approval_id UUID)
+RETURNS TEXT
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, extensions, vault
+AS $$
+DECLARE
+  approval_row public.pipeline_approvals%ROWTYPE;
+  raw_token TEXT;
+BEGIN
+  IF NOT public.is_active_app_admin() THEN
+    RAISE EXCEPTION 'Admin access required' USING ERRCODE = '42501';
+  END IF;
+
+  SELECT * INTO approval_row
+  FROM public.pipeline_approvals
+  WHERE id = target_approval_id
+    AND revoked_at IS NULL
+    AND approval_expires_at > now();
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Active approval link not found' USING ERRCODE = '22023';
+  END IF;
+  IF approval_row.token_secret_id IS NULL THEN
+    RAISE EXCEPTION 'This legacy approval token cannot be recovered; revoke it and generate a new link' USING ERRCODE = '22023';
+  END IF;
+
+  SELECT decrypted_secret INTO raw_token
+  FROM vault.decrypted_secrets
+  WHERE id = approval_row.token_secret_id;
+  IF raw_token IS NULL
+      OR extensions.digest(lower(raw_token), 'sha256') <> approval_row.token_hash THEN
+    RAISE EXCEPTION 'Approval token is unavailable' USING ERRCODE = '22023';
+  END IF;
+
+  RETURN raw_token;
 END;
 $$;
 
@@ -259,9 +322,17 @@ BEGIN
         WHERE pipeline_job_id = OLD.id
           AND revoked_at IS NULL
       ) THEN
+    DELETE FROM vault.secrets
+    WHERE id IN (
+      SELECT token_secret_id FROM public.pipeline_approvals
+      WHERE pipeline_job_id = OLD.id
+        AND revoked_at IS NULL
+        AND token_secret_id IS NOT NULL
+    );
     UPDATE public.pipeline_approvals
     SET revoked_at = now(),
-        revoked_reason = 'Material customer-facing proposal terms changed'
+        revoked_reason = 'Material customer-facing proposal terms changed',
+        token_secret_id = NULL
     WHERE pipeline_job_id = OLD.id
       AND revoked_at IS NULL;
     NEW.status := 'Waiting Approval';
@@ -277,8 +348,10 @@ FOR EACH ROW EXECUTE FUNCTION public.invalidate_pipeline_approval_on_material_ch
 
 REVOKE ALL ON FUNCTION public.admin_generate_pipeline_approval_link(UUID) FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.admin_revoke_pipeline_approval(UUID) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.admin_get_pipeline_approval_token(UUID) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.admin_generate_pipeline_approval_link(UUID) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.admin_revoke_pipeline_approval(UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.admin_get_pipeline_approval_token(UUID) TO authenticated;
 
 REVOKE ALL ON FUNCTION public.get_public_pipeline_proposal(TEXT) FROM PUBLIC, authenticated;
 REVOKE ALL ON FUNCTION public.submit_public_pipeline_response(TEXT, TEXT, TEXT, TEXT) FROM PUBLIC, authenticated;
