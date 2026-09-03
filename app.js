@@ -1522,7 +1522,7 @@ function applyTaskModalRole(task) {
   if (cleaningStatus) cleaningStatus.disabled = staffMode || managerMode;
   if (cleaningServiceBranchRow) cleaningServiceBranchRow.classList.toggle("hidden", !managerMode || Boolean(task));
   if (saveCleaningBtn) saveCleaningBtn.classList.toggle("role-restricted-hidden", staffMode);
-  cleaningModal?.querySelector(".chemical-usage-section")?.classList.toggle("role-restricted-hidden", managerMode);
+  cleaningModal?.querySelector(".chemical-usage-section")?.classList.remove("role-restricted-hidden");
 
   if (staffTaskPropertyDetails) {
     const property = getPropertyById(task?.property_id || selectedCleaningPropertyId);
@@ -2974,16 +2974,18 @@ async function loadStaffOperationalData() {
 }
 
 async function loadManagerOperationalData() {
-  const [profileResult, propertiesResult, tasksResult, reservationsResult, techniciansResult, remindersResult] = await Promise.all([
+  const [profileResult, propertiesResult, tasksResult, reservationsResult, techniciansResult, remindersResult, chemicalsResult, usageResult] = await Promise.all([
     supabaseClient.from("manager_company_profile").select("*").limit(1).maybeSingle(),
     supabaseClient.from("manager_properties").select("*").order("property_name", { ascending: true }),
     supabaseClient.from("manager_cleaning_tasks").select("*").order("service_date", { ascending: true }),
     supabaseClient.from("manager_reservations").select("*").order("check_in", { ascending: true }),
     supabaseClient.from("manager_technicians").select("*").order("name", { ascending: true }),
     supabaseClient.from("manager_operations_reminders").select("*").order("due_date", { ascending: true }),
+    supabaseClient.from("manager_chemicals").select("*").order("name", { ascending: true }),
+    supabaseClient.from("manager_chemical_usage").select("*").order("created_at", { ascending: false }),
   ]);
 
-  const failed = [profileResult, propertiesResult, tasksResult, reservationsResult, techniciansResult, remindersResult]
+  const failed = [profileResult, propertiesResult, tasksResult, reservationsResult, techniciansResult, remindersResult, chemicalsResult, usageResult]
     .find((result) => result.error);
   if (failed?.error) throw new Error(`Could not load manager workspace: ${failed.error.message}`);
 
@@ -2993,14 +2995,15 @@ async function loadManagerOperationalData() {
   reservations = (reservationsResult.data || []).filter(isReservationActive);
   technicians = techniciansResult.data || [];
   operationsReminders = remindersResult.data || [];
-  chemicals = [];
-  chemicalUsageEntries = [];
+  chemicals = chemicalsResult.data || [];
+  chemicalUsageEntries = usageResult.data || [];
   invoices = [];
   invoiceItems = [];
   expenses = [];
   propertyContractRevenueHistory = [];
 
   applyCompanyProfileToApp();
+  initializeChemicalUsageOptions();
   statusMessage.textContent = "";
   showView("today");
   renderTaskViews();
@@ -3130,12 +3133,13 @@ async function saveChemicalUsageEntry() {
   const serviceDate = cleaningDate?.value || task.service_date || task.scheduled_date;
   const selectedChemical = getChemicalByName(chemicalName);
 
-  if (isStaffUser()) {
+  if (isOperationalRole()) {
     if (!selectedChemical?.id) {
       alert("Select an active chemical.");
       return;
     }
-    const { error: staffSaveError } = await supabaseClient.rpc("staff_save_chemical_usage", {
+    const rolePrefix = isManagerUser() ? "manager" : "staff";
+    const { error: operationalSaveError } = await supabaseClient.rpc(`${rolePrefix}_save_chemical_usage`, {
       target_entry_id: editingChemicalUsageId || null,
       target_task_id: task.id,
       selected_chemical_id: selectedChemical.id,
@@ -3143,12 +3147,12 @@ async function saveChemicalUsageEntry() {
       entered_unit: unit,
       entered_notes: notes || null,
     });
-    if (staffSaveError) {
-      alert("Error saving chemical usage: " + staffSaveError.message);
+    if (operationalSaveError) {
+      alert("Error saving chemical usage: " + operationalSaveError.message);
       return;
     }
     closeChemicalUsageModal();
-    const usageResult = await supabaseClient.from("staff_chemical_usage").select("*").order("created_at", { ascending: false });
+    const usageResult = await supabaseClient.from(`${rolePrefix}_chemical_usage`).select("*").order("created_at", { ascending: false });
     if (usageResult.error) {
       alert("Chemical usage saved, but the list could not be refreshed: " + usageResult.error.message);
       return;
@@ -3216,12 +3220,13 @@ async function deleteChemicalUsageEntry(entryId) {
   if (!canEditChemicalEntries()) return;
   if (!confirm("Delete this chemical entry?")) return;
 
-  if (isStaffUser()) {
-    const { error: staffDeleteError } = await supabaseClient.rpc("staff_delete_chemical_usage", {
+  if (isOperationalRole()) {
+    const rolePrefix = isManagerUser() ? "manager" : "staff";
+    const { error: operationalDeleteError } = await supabaseClient.rpc(`${rolePrefix}_delete_chemical_usage`, {
       target_entry_id: entryId,
     });
-    if (staffDeleteError) {
-      alert("Error deleting chemical entry: " + staffDeleteError.message);
+    if (operationalDeleteError) {
+      alert("Error deleting chemical entry: " + operationalDeleteError.message);
       return;
     }
     chemicalUsageEntries = chemicalUsageEntries.filter((entry) => entry.id !== entryId);

@@ -343,6 +343,9 @@ BEGIN
   END IF;
   SELECT * INTO task_row FROM public.cleaning_tasks WHERE id = target_task_id;
   IF NOT FOUND THEN RAISE EXCEPTION 'Task not found' USING ERRCODE = '22023'; END IF;
+  IF COALESCE(task_row.service_branch, 'pool') <> 'pool' THEN
+    RAISE EXCEPTION 'Chemical usage is only available for pool tasks' USING ERRCODE = '22023';
+  END IF;
   SELECT * INTO property_row FROM public.properties WHERE id = task_row.property_id;
   SELECT * INTO chemical_row FROM public.chemicals
   WHERE id = selected_chemical_id AND active IS DISTINCT FROM false;
@@ -381,8 +384,12 @@ BEGIN
   IF NOT public.is_active_app_staff() THEN
     RAISE EXCEPTION 'Active staff access required' USING ERRCODE = '42501';
   END IF;
-  DELETE FROM public.chemical_usage WHERE id = target_entry_id;
-  IF NOT FOUND THEN RAISE EXCEPTION 'Chemical usage entry not found' USING ERRCODE = '22023'; END IF;
+  DELETE FROM public.chemical_usage AS usage
+  USING public.cleaning_tasks AS task
+  WHERE usage.id = target_entry_id
+    AND task.id = usage.task_id
+    AND COALESCE(task.service_branch, 'pool') = 'pool';
+  IF NOT FOUND THEN RAISE EXCEPTION 'Pool chemical usage entry not found' USING ERRCODE = '22023'; END IF;
 END;
 $$;
 
