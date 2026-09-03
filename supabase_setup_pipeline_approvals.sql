@@ -59,53 +59,53 @@ DECLARE
   pipeline_row public.pipeline_jobs%ROWTYPE;
   property_label TEXT;
   raw_token TEXT;
-  token_secret_id UUID;
+  new_token_secret_id UUID;
 BEGIN
   IF NOT public.is_active_app_admin() THEN
     RAISE EXCEPTION 'Admin access required' USING ERRCODE = '42501';
   END IF;
 
-  SELECT * INTO pipeline_row
-  FROM public.pipeline_jobs
-  WHERE id = target_pipeline_job_id
+  SELECT pipeline_job.* INTO pipeline_row
+  FROM public.pipeline_jobs AS pipeline_job
+  WHERE pipeline_job.id = target_pipeline_job_id
   FOR UPDATE;
   IF NOT FOUND OR pipeline_row.scheduled_task_id IS NOT NULL THEN
     RAISE EXCEPTION 'Pipeline proposal is not available' USING ERRCODE = '22023';
   END IF;
 
   IF EXISTS (
-    SELECT 1 FROM public.pipeline_approvals
-    WHERE pipeline_job_id = target_pipeline_job_id
-      AND revoked_at IS NULL
-      AND customer_response IS NULL
-      AND approval_expires_at > now()
+    SELECT 1 FROM public.pipeline_approvals AS approval
+    WHERE approval.pipeline_job_id = target_pipeline_job_id
+      AND approval.revoked_at IS NULL
+      AND approval.customer_response IS NULL
+      AND approval.approval_expires_at > now()
   ) THEN
     RAISE EXCEPTION 'Revoke the current approval link before generating another' USING ERRCODE = '23505';
   END IF;
 
-  SELECT property_name INTO property_label
-  FROM public.properties
-  WHERE id = pipeline_row.property_id;
+  SELECT property.property_name INTO property_label
+  FROM public.properties AS property
+  WHERE property.id = pipeline_row.property_id;
   IF property_label IS NULL THEN
     RAISE EXCEPTION 'Pipeline proposal is not available' USING ERRCODE = '22023';
   END IF;
 
-  DELETE FROM vault.secrets
-  WHERE id IN (
-    SELECT token_secret_id FROM public.pipeline_approvals
-    WHERE pipeline_job_id = target_pipeline_job_id
-      AND revoked_at IS NULL
-      AND token_secret_id IS NOT NULL
+  DELETE FROM vault.secrets AS secret
+  WHERE secret.id IN (
+    SELECT approval.token_secret_id FROM public.pipeline_approvals AS approval
+    WHERE approval.pipeline_job_id = target_pipeline_job_id
+      AND approval.revoked_at IS NULL
+      AND approval.token_secret_id IS NOT NULL
   );
-  UPDATE public.pipeline_approvals
+  UPDATE public.pipeline_approvals AS approval
   SET revoked_at = now(),
       revoked_reason = 'Superseded by a new approval request',
       token_secret_id = NULL
-  WHERE pipeline_job_id = target_pipeline_job_id
-    AND revoked_at IS NULL;
+  WHERE approval.pipeline_job_id = target_pipeline_job_id
+    AND approval.revoked_at IS NULL;
 
   raw_token := encode(extensions.gen_random_bytes(32), 'hex');
-  token_secret_id := vault.create_secret(
+  new_token_secret_id := vault.create_secret(
     raw_token,
     NULL,
     'Pipeline customer approval token for approval resend'
@@ -114,13 +114,13 @@ BEGIN
     pipeline_job_id, token_hash, token_secret_id, property_name_snapshot, job_title_snapshot,
     description_snapshot, proposed_price_snapshot, tentative_date_snapshot
   ) VALUES (
-    pipeline_row.id, extensions.digest(raw_token, 'sha256'), token_secret_id, property_label, pipeline_row.job_title,
+    pipeline_row.id, extensions.digest(raw_token, 'sha256'), new_token_secret_id, property_label, pipeline_row.job_title,
     pipeline_row.description, pipeline_row.potential_revenue, pipeline_row.tentative_date
   );
 
-  UPDATE public.pipeline_jobs
+  UPDATE public.pipeline_jobs AS pipeline_job
   SET status = 'Waiting Approval'
-  WHERE id = pipeline_row.id;
+  WHERE pipeline_job.id = pipeline_row.id;
 
   RETURN raw_token;
 END;

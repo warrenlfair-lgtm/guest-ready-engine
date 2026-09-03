@@ -38,7 +38,6 @@ let activeServiceWorkspace = SERVICE_BRANCH_POOL;
 let currentMonthViewYear = new Date().getFullYear();
 let currentMonthViewMonth = new Date().getMonth();
 let monthBranchFilter = "all";
-let monthTasksRequestId = 0;
 
 let companyProfile = { ...DEFAULT_COMPANY_PROFILE };
 let currentSessionUserId = null;
@@ -5932,6 +5931,15 @@ function getTodayCleaningTasks() {
   return todayTasks.sort((a, b) => a.service_date.localeCompare(b.service_date));
 }
 
+function isTaskVisibleInOperationalSchedule(task, { matchActiveWorkspace = true } = {}) {
+  if (matchActiveWorkspace && !taskMatchesActiveWorkspace(task)) return false;
+  if (!task.service_date) return false;
+  if (shouldSuppressWeeklyStandardTaskDisplay(task)) return false;
+
+  const status = String(task.status || "").trim().toLowerCase();
+  return status !== "cancelled";
+}
+
 function getUpcomingCleaningTasks() {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -5946,12 +5954,7 @@ function getUpcomingCleaningTasks() {
 
   const filteredTasks = cleaningTasks
     .filter((task) => {
-      if (!taskMatchesActiveWorkspace(task)) return false;
-      if (!task.service_date) return false;
-      if (shouldSuppressWeeklyStandardTaskDisplay(task)) return false;
-
-      const status = String(task.status || "").trim().toLowerCase();
-      if (status === "cancelled") return false;
+      if (!isTaskVisibleInOperationalSchedule(task)) return false;
 
       const taskDate = normalizeServiceDateValue(task.service_date);
       if (!taskDate) return false;
@@ -11943,35 +11946,13 @@ function getMonthCalendarDateRange() {
 async function loadMonthTasks() {
   if (!monthTasksCalendarContainer) return;
 
-  const requestId = ++monthTasksRequestId;
   const { startDate, endDate } = getMonthCalendarDateRange();
-  monthTasksCalendarContainer.innerHTML = `<div class="empty">Loading month schedule...</div>`;
+  monthCleaningTasks = cleaningTasks.filter((task) => {
+    if (!isTaskVisibleInOperationalSchedule(task, { matchActiveWorkspace: false })) return false;
 
-  if (isStaffUser()) {
-    monthCleaningTasks = cleaningTasks.filter((task) => {
-      const taskDate = normalizeDateKey(task.service_date || task.scheduled_date);
-      return taskDate && taskDate >= startDate && taskDate <= endDate;
-    });
-    renderMonthView();
-    return;
-  }
-
-  const source = isManagerUser() ? "manager_cleaning_tasks" : "cleaning_tasks";
-
-  const { data, error } = await supabaseClient
-    .from(source)
-    .select("*")
-    .or(`and(service_date.gte.${startDate},service_date.lte.${endDate}),and(service_date.is.null,scheduled_date.gte.${startDate},scheduled_date.lte.${endDate})`)
-    .order("service_date", { ascending: true });
-
-  if (requestId !== monthTasksRequestId) return;
-  if (error) {
-    monthCleaningTasks = [];
-    monthTasksCalendarContainer.innerHTML = `<div class="empty">Could not load month schedule: ${escapeHtml(error.message)}</div>`;
-    return;
-  }
-
-  monthCleaningTasks = data || [];
+    const taskDate = normalizeDateKey(task.service_date);
+    return taskDate && taskDate >= startDate && taskDate <= endDate;
+  });
   renderMonthView();
 }
 
@@ -12006,7 +11987,7 @@ function renderMonthView() {
 
   const tasksByDateKey = new Map();
   monthCleaningTasks.forEach((task) => {
-    const taskDate = task.service_date || task.scheduled_date;
+    const taskDate = normalizeDateKey(task.service_date);
     if (!taskDate) return;
 
     if (monthBranchFilter === "pool" && isLawnTask(task)) return;
