@@ -36,6 +36,8 @@ const SERVICE_BRANCH_POOL = "pool";
 const SERVICE_BRANCH_LAWN = "lawn";
 const SERVICE_BRANCH_MAINTENANCE = "maintenance";
 const BUSINESS_TIME_ZONE = "America/New_York";
+const LAST_AUTO_ICAL_SYNC_STORAGE_KEY = "guestReadyLastAutoIcalSync";
+const AUTO_ICAL_SYNC_COOLDOWN_MS = 10 * 60 * 1000;
 let activeServiceWorkspace = SERVICE_BRANCH_POOL;
 let currentMonthViewYear = new Date().getFullYear();
 let currentMonthViewMonth = new Date().getMonth();
@@ -48,6 +50,8 @@ let currentSessionUserId = null;
 let currentAppRole = null;
 let currentAppUserEmail = "";
 let dataLoadPromise = null;
+let icalSyncPromise = null;
+let autoIcalSyncAttemptedUserId = null;
 let isPasswordRecoveryFlow = false;
 
 function isAdminUser() {
@@ -686,8 +690,9 @@ closeAlertDetailBtn.onclick = closeAlertDetail;
 
 const syncAllIcalBtn = document.getElementById("syncAllIcalBtn");
 const syncAllStatus = document.getElementById("syncAllStatus");
+const calendarSyncIndicator = document.getElementById("calendarSyncIndicator");
 if (syncAllIcalBtn) {
-  syncAllIcalBtn.addEventListener("click", syncAllIcal);
+  syncAllIcalBtn.addEventListener("click", () => syncAllIcal({ automatic: false }));
 }
 
 Array.from(document.querySelectorAll(".quick-btn")).forEach((btn) => {
@@ -1191,7 +1196,7 @@ function showAppScreen() {
 
 async function ensureDataLoadedForUser(userId) {
   if (!userId) return;
-  if (currentSessionUserId === userId) return;
+  if (currentSessionUserId === userId) return dataLoadPromise || undefined;
   if (dataLoadPromise) return dataLoadPromise;
 
   currentSessionUserId = userId;
@@ -1232,6 +1237,7 @@ async function applySessionState(session) {
   applyRoleBasedInterface();
   showAppScreen();
   await ensureDataLoadedForUser(session.user.id);
+  void maybeStartAutoIcalSync(session.user.id);
 }
 
 async function initializeAuthGate() {
@@ -1278,6 +1284,7 @@ function handleAuthStateChange(event, session) {
     currentSessionUserId = null;
     currentAppRole = null;
     currentAppUserEmail = "";
+    autoIcalSyncAttemptedUserId = null;
     if (loginPassword) loginPassword.value = "";
     setAuthLoading(false);
     setAuthMessage("");
@@ -4982,17 +4989,88 @@ async function deleteProperty(id) {
   loadData();
 }
 
-async function syncAllIcal() {
-  if (!requireAdminAccess()) return;
+function formatAutoIcalSyncTimestamp(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "short",
+    timeStyle: "short",
+  }).format(date);
+}
+
+function setAutoIcalSyncStatus(state, timestamp = "") {
+  if (!calendarSyncIndicator) return;
+  if (state === "syncing") {
+    calendarSyncIndicator.textContent = "Auto Calendar Sync: Syncing...";
+    return;
+  }
+  if (state === "recent") {
+    calendarSyncIndicator.textContent = `Auto Calendar Sync: Recently synced ${formatAutoIcalSyncTimestamp(timestamp)}`;
+    calendarSyncIndicator.title = "";
+    return;
+  }
+  if (state === "success") {
+    calendarSyncIndicator.textContent = `Auto Calendar Sync: Last synced ${formatAutoIcalSyncTimestamp(timestamp)}`;
+    calendarSyncIndicator.title = "";
+    return;
+  }
+  if (state === "failed") {
+    calendarSyncIndicator.textContent = "Auto Calendar Sync: Failed - use Sync All iCal to retry";
+    calendarSyncIndicator.title = "";
+    return;
+  }
+  calendarSyncIndicator.textContent = "Auto Calendar Sync: Not yet synced";
+  calendarSyncIndicator.title = "";
+}
+
+async function maybeStartAutoIcalSync(userId) {
+  if (!isAdminUser() || !userId || autoIcalSyncAttemptedUserId === userId) return;
+  autoIcalSyncAttemptedUserId = userId;
+
+  const lastSuccessfulSync = localStorage.getItem(LAST_AUTO_ICAL_SYNC_STORAGE_KEY) || "";
+  const lastSuccessfulSyncTime = new Date(lastSuccessfulSync).getTime();
+  const elapsedSinceLastSync = Date.now() - lastSuccessfulSyncTime;
+  if (Number.isFinite(lastSuccessfulSyncTime) && elapsedSinceLastSync >= 0 && elapsedSinceLastSync < AUTO_ICAL_SYNC_COOLDOWN_MS) {
+    setAutoIcalSyncStatus("recent", lastSuccessfulSync);
+    return;
+  }
+
+  await syncAllIcal({ automatic: true });
+}
+
+function syncAllIcal({ automatic = false } = {}) {
+  if (automatic) {
+    if (!isAdminUser()) return Promise.resolve({ success: false, unauthorized: true });
+  } else if (!requireAdminAccess()) {
+    return Promise.resolve({ success: false, unauthorized: true });
+  }
+
+  if (icalSyncPromise) return icalSyncPromise;
+  icalSyncPromise = runSyncAllIcal({ automatic })
+    .catch((error) => {
+      console.error("[SyncAll] Unexpected failure:", error);
+      setAutoIcalSyncStatus("failed");
+      return { success: false, error };
+    })
+    .finally(() => {
+      syncAllIcalBtn.disabled = false;
+      icalSyncPromise = null;
+    });
+  return icalSyncPromise;
+}
+
+async function runSyncAllIcal({ automatic }) {
   const allProperties = properties;
   const icalProperties = allProperties.filter((p) => p.ical_url && isPropertyActive(p) && propertySupportsServiceBranch(p, SERVICE_BRANCH_POOL));
 
   if (icalProperties.length === 0) {
     syncAllStatus.textContent = "No active properties with an iCal URL configured.";
-    return;
+    if (automatic) setAutoIcalSyncStatus("failed");
+    return { success: false, reason: "no-eligible-properties" };
   }
 
   syncAllIcalBtn.disabled = true;
+  setAutoIcalSyncStatus("syncing");
   renderSyncReport(null); // clear previous report
   console.log(`[SyncAll] Starting sync for ${icalProperties.length} active properties. Inactive properties are skipped.`);
 
@@ -5058,8 +5136,17 @@ async function syncAllIcal() {
   syncAllStatus.textContent = `Sync complete — ${succeeded} succeeded, ${failed} failed, ${results.filter(r => r.skipped).length} skipped. See report below.`;
   console.log("[SyncAll] Done.", syncAllStatus.textContent);
 
+  const success = failed === 0;
+  if (success) {
+    const completedAt = new Date().toISOString();
+    localStorage.setItem(LAST_AUTO_ICAL_SYNC_STORAGE_KEY, completedAt);
+    setAutoIcalSyncStatus("success", completedAt);
+  } else {
+    setAutoIcalSyncStatus("failed");
+  }
+
   renderSyncReport(results);
-  syncAllIcalBtn.disabled = false;
+  return { success, results };
 }
 
 function renderSyncReport(results) {

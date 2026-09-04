@@ -162,6 +162,16 @@ h1 {
     color: #374151;
 }
 
+.calendar-sync-indicator {
+    font-size: 12px;
+    color: #475569;
+    padding: 4px 8px;
+    border: 1px solid #cbd5e1;
+    border-radius: 4px;
+    background: #f8fafc;
+    line-height: 1.35;
+}
+
 .sync-report {
     margin-bottom: 20px;
     background: white;
