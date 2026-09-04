@@ -182,7 +182,17 @@ SELECT
   completed_by_technician_name, notes, guest_ready, off_cycle, completed_at,
   source_type, source_key, manually_modified,
   public.manager_reconciliation_eligible(id, 'task') AS manager_reconcile_eligible,
-  public.manager_reconciliation_eligible(id, 'sds') AS manager_sds_reconcile_eligible
+  public.manager_reconciliation_eligible(id, 'sds') AS manager_sds_reconcile_eligible,
+  (
+    lower(COALESCE(status, 'scheduled')) IN ('scheduled', 'in progress', 'in_progress')
+    AND completed_at IS NULL
+    AND invoiced IS DISTINCT FROM true
+    AND invoice_id IS NULL
+    AND invoiced_invoice_id IS NULL
+    AND same_day_surcharge_reconciled IS DISTINCT FROM true
+    AND same_day_surcharge_invoice_id IS NULL
+    AND COALESCE(service_date, scheduled_date) >= CURRENT_DATE
+  ) AS month_reschedule_eligible
 FROM public.cleaning_tasks
 WHERE public.is_active_app_manager() OR public.is_active_app_admin();
 ALTER VIEW public.manager_cleaning_tasks OWNER TO postgres;

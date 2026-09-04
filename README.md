@@ -42,6 +42,10 @@ Managers can use Pool Service, Lawn, and Maintenance Today, Week, Month, and Pro
 
 Run `supabase_setup_maintenance_branch.sql` in the Supabase SQL Editor before deploying the three-branch frontend. This additive migration allows `maintenance` in existing branch constraints and updates Manager task creation and Pipeline scheduling to preserve it. It does not update or reclassify historical rows; existing `lawn` tasks and recurring Lawn generation remain Lawn.
 
+## Month Task Rescheduling
+
+Run `supabase_setup_month_task_rescheduling.sql` in the Supabase SQL Editor before deploying Month View drag-and-drop. The migration adds a role-checked Admin/Manager RPC and a non-financial Manager eligibility flag. Rescheduling updates only the existing task's `service_date`, `scheduled_date`, and `manually_modified` fields; it never inserts or duplicates a task. Completed, historical, reconciled, and invoice-linked tasks remain locked.
+
 ## Pipeline Setup
 
 Run `supabase_setup_pipeline_jobs.sql` in the Supabase SQL Editor after the role-based access and cleaning-task parts/labor migrations. Pipeline is Admin-only: its table RLS policy and scheduling RPC both require `is_active_app_admin()`, and no Pipeline columns are added to Staff or Manager views.

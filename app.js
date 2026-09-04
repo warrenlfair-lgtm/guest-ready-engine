@@ -39,6 +39,8 @@ let activeServiceWorkspace = SERVICE_BRANCH_POOL;
 let currentMonthViewYear = new Date().getFullYear();
 let currentMonthViewMonth = new Date().getMonth();
 let monthBranchFilter = "all";
+let draggedMonthTaskId = null;
+let pendingMonthTaskMove = null;
 
 let companyProfile = { ...DEFAULT_COMPANY_PROFILE };
 let currentSessionUserId = null;
@@ -141,6 +143,36 @@ function propertySupportsServiceBranch(property, branch = activeServiceWorkspace
   if (branch === SERVICE_BRANCH_LAWN) return property?.lawn_service_active === true;
   if (branch === SERVICE_BRANCH_MAINTENANCE) return true;
   return property?.pool_service_active !== false;
+}
+
+function getTaskRescheduleBlockReason(task) {
+  if (!(isAdminUser() || isManagerUser())) return "Your role cannot reschedule tasks.";
+  if (!task?.id) return "Task not found.";
+
+  const status = String(task.status || "Scheduled").trim().toLowerCase();
+  if (!["scheduled", "in progress", "in_progress"].includes(status)) {
+    return "Only Scheduled or In Progress tasks can be rescheduled.";
+  }
+  if (task.completed_at) return "Completed tasks cannot be rescheduled.";
+  if (task.invoiced === true || task.invoice_id || task.invoiced_invoice_id) {
+    return "Reconciled or invoiced tasks cannot be rescheduled.";
+  }
+  if (task.same_day_surcharge_reconciled === true || task.same_day_surcharge_invoice_id) {
+    return "Reconciled or invoiced tasks cannot be rescheduled.";
+  }
+  if (isManagerUser() && task.month_reschedule_eligible !== true) {
+    return "This task is finalized, reconciled, or otherwise locked.";
+  }
+
+  const taskDate = normalizeDateKey(task.service_date || task.scheduled_date);
+  if (taskDate && taskDate < formatDateValue(new Date())) {
+    return "Historical tasks cannot be rescheduled.";
+  }
+  return "";
+}
+
+function canRescheduleTask(task) {
+  return getTaskRescheduleBlockReason(task) === "";
 }
 
 let editingPropertyId = null;
@@ -344,6 +376,10 @@ const deleteCleaningConfirmInput = document.getElementById("deleteCleaningConfir
 const deleteCleaningCancelBtn = document.getElementById("deleteCleaningCancelBtn");
 const deleteCleaningConfirmBtn = document.getElementById("deleteCleaningConfirmBtn");
 const deleteCleaningSyncWarning = document.getElementById("deleteCleaningSyncWarning");
+const monthMoveTaskModal = document.getElementById("monthMoveTaskModal");
+const monthMoveTaskMessage = document.getElementById("monthMoveTaskMessage");
+const monthMoveTaskCancelBtn = document.getElementById("monthMoveTaskCancelBtn");
+const monthMoveTaskConfirmBtn = document.getElementById("monthMoveTaskConfirmBtn");
 const weekTasksContainer = document.getElementById("weekTasks");
 const weekTasksCalendarContainer = document.getElementById("weekTasksCalendar");
 const weekViewToggleButtons = Array.from(document.querySelectorAll(".week-view-btn"));
@@ -564,6 +600,14 @@ if (deleteCleaningCancelBtn) {
 
 if (deleteCleaningConfirmBtn) {
   deleteCleaningConfirmBtn.addEventListener("click", () => closeDeleteCleaningModal(true));
+}
+
+if (monthMoveTaskCancelBtn) monthMoveTaskCancelBtn.addEventListener("click", closeMonthMoveTaskModal);
+if (monthMoveTaskConfirmBtn) monthMoveTaskConfirmBtn.addEventListener("click", confirmMonthTaskMove);
+if (monthMoveTaskModal) {
+  monthMoveTaskModal.addEventListener("click", (event) => {
+    if (event.target === monthMoveTaskModal) closeMonthMoveTaskModal();
+  });
 }
 
 if (deleteCleaningConfirmInput) {
@@ -1548,6 +1592,7 @@ function applyTaskModalRole(task) {
   if (cleaningNotes) cleaningNotes.disabled = staffMode;
   if (cleaningTechnician) cleaningTechnician.disabled = staffMode;
   if (cleaningStatus) cleaningStatus.disabled = staffMode || managerMode;
+  if (cleaningDate && task) cleaningDate.disabled = staffMode || !canRescheduleTask(task);
   if (cleaningServiceBranchRow) cleaningServiceBranchRow.classList.toggle("hidden", !managerMode || Boolean(task));
   if (saveCleaningBtn) saveCleaningBtn.classList.toggle("role-restricted-hidden", staffMode);
   cleaningModal?.querySelector(".chemical-usage-section")?.classList.remove("role-restricted-hidden");
@@ -2616,7 +2661,7 @@ function openEditCleaning(taskId) {
 
   populateCleaningPropertySelect(task.property_id);
 
-  cleaningDate.value = task.scheduled_date || task.service_date || "";
+  cleaningDate.value = task.service_date || task.scheduled_date || "";
   cleaningServiceType.value = task.service_type || "Manual";
   cleaningServiceType.disabled = normalizeServiceBranch(task.service_branch) !== SERVICE_BRANCH_POOL;
   if (cleaningWeeklyServiceLevel) {
@@ -5138,9 +5183,21 @@ async function saveCleaningTask() {
       const selectedTechnician = findActiveTechnicianByName(cleaningTechnician.value.trim());
       const existingTask = cleaningTasks.find((task) => task.id === editingCleaningId)
         || monthCleaningTasks.find((task) => task.id === editingCleaningId);
+      const existingServiceDate = normalizeDateKey(existingTask?.service_date || existingTask?.scheduled_date);
+      const selectedServiceDate = normalizeDateKey(cleaningDate.value);
       const serviceLevel = existingTask?.service_type === "Weekly Standard"
         ? normalizeWeeklyServiceLevel(cleaningWeeklyServiceLevel?.value)
         : null;
+      if (selectedServiceDate && selectedServiceDate !== existingServiceDate) {
+        const rescheduleResult = await supabaseClient.rpc("manager_reschedule_task", {
+          target_task_id: editingCleaningId,
+          selected_service_date: selectedServiceDate,
+        });
+        if (rescheduleResult.error) {
+          alert("Could not reschedule task: " + rescheduleResult.error.message);
+          return;
+        }
+      }
       const { error } = await supabaseClient.rpc("manager_update_task_operations", {
         target_task_id: editingCleaningId,
         selected_technician_id: selectedTechnician?.id || null,
@@ -11990,6 +12047,122 @@ async function loadMonthTasks() {
   renderMonthView();
 }
 
+function handleMonthTaskDragStart(event, taskId) {
+  const task = monthCleaningTasks.find((item) => item.id === taskId)
+    || cleaningTasks.find((item) => item.id === taskId);
+  if (!canRescheduleTask(task)) {
+    event.preventDefault();
+    draggedMonthTaskId = null;
+    return;
+  }
+
+  draggedMonthTaskId = taskId;
+  event.dataTransfer.effectAllowed = "move";
+  event.dataTransfer.setData("text/plain", taskId);
+  event.currentTarget.classList.add("month-task-dragging");
+}
+
+function handleMonthTaskDragEnd(event) {
+  event.currentTarget.classList.remove("month-task-dragging");
+  document.querySelectorAll(".month-day-drop-target").forEach((cell) => cell.classList.remove("month-day-drop-target"));
+  draggedMonthTaskId = null;
+}
+
+function handleMonthDayDragOver(event) {
+  if (!draggedMonthTaskId) return;
+  const targetDate = normalizeDateKey(event.currentTarget.dataset.monthDate);
+  if (!targetDate || targetDate < formatDateValue(new Date())) return;
+  event.preventDefault();
+  event.dataTransfer.dropEffect = "move";
+  event.currentTarget.classList.add("month-day-drop-target");
+}
+
+function handleMonthDayDragLeave(event) {
+  if (event.currentTarget.contains(event.relatedTarget)) return;
+  event.currentTarget.classList.remove("month-day-drop-target");
+}
+
+function handleMonthDayDrop(event, newDate) {
+  event.preventDefault();
+  event.stopPropagation();
+  event.currentTarget.classList.remove("month-day-drop-target");
+
+  const taskId = event.dataTransfer.getData("text/plain") || draggedMonthTaskId;
+  draggedMonthTaskId = null;
+  const task = monthCleaningTasks.find((item) => item.id === taskId)
+    || cleaningTasks.find((item) => item.id === taskId);
+  const blockReason = getTaskRescheduleBlockReason(task);
+  if (blockReason) {
+    alert(blockReason);
+    return;
+  }
+
+  const oldDate = normalizeDateKey(task.service_date || task.scheduled_date);
+  const normalizedNewDate = normalizeDateKey(newDate);
+  if (!oldDate || !normalizedNewDate || oldDate === normalizedNewDate) return;
+  if (normalizedNewDate < formatDateValue(new Date())) {
+    alert("Tasks cannot be moved into a historical date.");
+    return;
+  }
+
+  pendingMonthTaskMove = { taskId, oldDate, newDate: normalizedNewDate };
+  const propertyName = getPropertyName(task.property_id);
+  const taskType = getServiceTypeDisplayLabel(task.service_type);
+  if (monthMoveTaskMessage) {
+    monthMoveTaskMessage.textContent = `Move ${propertyName} - ${taskType} from ${oldDate} to ${normalizedNewDate}?`;
+  }
+  monthMoveTaskModal?.classList.remove("hidden");
+}
+
+function closeMonthMoveTaskModal() {
+  pendingMonthTaskMove = null;
+  monthMoveTaskModal?.classList.add("hidden");
+}
+
+async function confirmMonthTaskMove() {
+  if (!pendingMonthTaskMove) return;
+  const { taskId, newDate } = pendingMonthTaskMove;
+  const task = monthCleaningTasks.find((item) => item.id === taskId)
+    || cleaningTasks.find((item) => item.id === taskId);
+  const blockReason = getTaskRescheduleBlockReason(task);
+  if (blockReason) {
+    closeMonthMoveTaskModal();
+    alert(blockReason);
+    return;
+  }
+
+  if (monthMoveTaskConfirmBtn) monthMoveTaskConfirmBtn.disabled = true;
+  let error = null;
+  if (isAdminUser() || isManagerUser()) {
+    const result = await supabaseClient.rpc("manager_reschedule_task", {
+      target_task_id: taskId,
+      selected_service_date: newDate,
+    });
+    error = result.error;
+  } else {
+    error = new Error("Your role cannot reschedule tasks.");
+  }
+
+  if (monthMoveTaskConfirmBtn) monthMoveTaskConfirmBtn.disabled = false;
+  if (error) {
+    closeMonthMoveTaskModal();
+    renderMonthView();
+    const message = `Could not move task: ${error.message || error}`;
+    if (statusMessage) statusMessage.textContent = message;
+    alert(message);
+    return;
+  }
+
+  closeMonthMoveTaskModal();
+  if (isManagerUser()) {
+    await loadManagerOperationalData();
+  } else {
+    await loadCleaningTasks();
+  }
+  showView("month");
+  await loadMonthTasks();
+}
+
 function renderMonthView() {
   if (!monthTasksCalendarContainer) return;
 
@@ -12060,9 +12233,14 @@ function renderMonthView() {
       const guestReadyBadge = isTaskGuestReady(task)
         ? `<span class="month-task-gr-pill" title="Guest Ready">GR</span>`
         : "";
+      const rescheduleEnabled = canRescheduleTask(task);
+      const dragAttributes = rescheduleEnabled
+        ? `draggable="true" ondragstart="handleMonthTaskDragStart(event, '${task.id}')" ondragend="handleMonthTaskDragEnd(event)"`
+        : "";
+      const dragTitle = rescheduleEnabled ? "Drag to another calendar day to reschedule" : getTaskRescheduleBlockReason(task);
 
       return `
-        <div class="month-task-card ${branchClass}" onclick="event.stopPropagation(); openEditCleaning('${task.id}')">
+        <div class="month-task-card ${branchClass} ${rescheduleEnabled ? "month-task-draggable" : "month-task-locked"}" ${dragAttributes} title="${escapeHtml(dragTitle)}" onclick="event.stopPropagation(); openEditCleaning('${task.id}')">
           <div class="month-task-property-name">${escapeHtml(propertyName)}</div>
           <div class="month-task-meta-line">
             <span>${escapeHtml(getServiceTypeDisplayLabel(task.service_type))}</span>
@@ -12083,7 +12261,7 @@ function renderMonthView() {
     const cellClickAttr = canAddTask ? `onclick="openAddCleaningTaskForDate('${dateString}')"` : "";
 
     return `
-      <td class="${cellClasses}" ${cellClickAttr}>
+      <td class="${cellClasses}" data-month-date="${dateString}" ondragover="handleMonthDayDragOver(event)" ondragleave="handleMonthDayDragLeave(event)" ondrop="handleMonthDayDrop(event, '${dateString}')" ${cellClickAttr}>
         <div class="month-day-header-row">
           <span class="month-day-number">${dayNumber}</span>
           <div class="month-day-header-right">
