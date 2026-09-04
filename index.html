@@ -69,7 +69,8 @@
 
   <div class="service-workspace-selector" role="group" aria-label="Service workspace">
     <button type="button" class="service-workspace-btn active" data-service-workspace="pool">Pool Service</button>
-    <button type="button" class="service-workspace-btn" data-service-workspace="lawn">Lawn / Gen Labor</button>
+    <button type="button" class="service-workspace-btn" data-service-workspace="lawn">Lawn</button>
+    <button type="button" class="service-workspace-btn" data-service-workspace="maintenance">Maintenance</button>
   </div>
 
   <div class="top-actions admin-only">
@@ -139,7 +140,8 @@
           <select id="monthBranchFilterSelect">
             <option value="all">All Tasks</option>
             <option value="pool">Pool Service</option>
-            <option value="lawn">Lawn / Gen Labor</option>
+            <option value="lawn">Lawn</option>
+            <option value="maintenance">Maintenance</option>
           </select>
         </div>
         <div id="monthAddTaskSlot"></div>
@@ -161,6 +163,14 @@
         <label for="propertyFilterSelect">Property:</label>
         <select id="propertyFilterSelect">
           <option value="">All Properties</option>
+        </select>
+      </div>
+      <div class="filter-group">
+        <label for="propertyStatusFilterSelect">Status:</label>
+        <select id="propertyStatusFilterSelect">
+          <option value="active" selected>Active</option>
+          <option value="inactive">Inactive</option>
+          <option value="all">All</option>
         </select>
       </div>
       <div class="filter-group">
@@ -191,7 +201,8 @@
       <select id="pipelineFilter">
         <option value="open">All Open</option>
         <option value="pool">Pool</option>
-        <option value="lawn">Lawn / Gen Labor</option>
+        <option value="lawn">Lawn</option>
+        <option value="maintenance">Maintenance</option>
         <option value="Lead">Lead</option>
         <option value="Proposed">Proposed</option>
         <option value="Waiting Approval">Waiting Approval</option>
@@ -956,21 +967,21 @@
       <input id="propertySameDaySurcharge" type="number" min="0" step="0.01" value="0">
 
       <div class="property-service-section">
-        <h3>Lawn / Gen Labor</h3>
+        <h3>Lawn</h3>
 
-        <label>Lawn / Gen Labor Active</label>
+        <label>Lawn Active</label>
         <select id="propertyLawnServiceActive">
           <option value="no" selected>No</option>
           <option value="yes">Yes</option>
         </select>
 
-        <label>Lawn / Gen Labor Frequency</label>
+        <label>Lawn Frequency</label>
         <select id="propertyLawnServiceFrequency">
           <option value="weekly" selected>Weekly</option>
           <option value="bi_weekly">Bi-Weekly</option>
         </select>
 
-        <label>Lawn / Gen Labor Day</label>
+        <label>Lawn Day</label>
         <select id="propertyLawnServiceDay">
           <option>Monday</option>
           <option>Tuesday</option>
@@ -1038,7 +1049,8 @@
       <label for="pipelineBranchInput">Service Branch</label>
       <select id="pipelineBranchInput">
         <option value="pool">Pool Service</option>
-        <option value="lawn">Lawn / Gen Labor</option>
+        <option value="lawn">Lawn</option>
+        <option value="maintenance">Maintenance</option>
       </select>
       <label for="pipelineRevenueInput">Potential Revenue</label>
       <input id="pipelineRevenueInput" type="number" min="0" step="0.01" value="0">
@@ -1088,13 +1100,14 @@
       <label for="pipelineScheduleBranch">Service Branch</label>
       <select id="pipelineScheduleBranch">
         <option value="pool">Pool Service</option>
-        <option value="lawn">Lawn / Gen Labor</option>
+        <option value="lawn">Lawn</option>
+        <option value="maintenance">Maintenance</option>
       </select>
       <label for="pipelineScheduleType">Service Type</label>
       <select id="pipelineScheduleType">
         <option value="Manual">Manual</option>
         <option value="Off-Cycle">Off-Cycle</option>
-        <option value="Lawn Service">Lawn / Gen Labor</option>
+        <option value="Lawn Service">Lawn Service</option>
       </select>
       <label for="pipelineScheduleTechnician">Technician</label>
       <select id="pipelineScheduleTechnician"></select>
@@ -1131,7 +1144,8 @@
         <label for="cleaningServiceBranch">Service Branch</label>
         <select id="cleaningServiceBranch">
           <option value="pool">Pool Service</option>
-          <option value="lawn">Lawn / Gen Labor</option>
+          <option value="lawn">Lawn</option>
+          <option value="maintenance">Maintenance</option>
         </select>
       </div>
 
@@ -1139,7 +1153,7 @@
       <select id="cleaningServiceType" class="staff-readonly-field">
         <option value="Weekly Standard">Weekly Standard</option>
         <option value="Guest Ready">Guest Ready</option>
-        <option value="Lawn Service">Lawn / Gen Labor</option>
+          <option value="Lawn Service">Lawn Service</option>
         <option value="Manual">Manual</option>
         <option value="Off-Cycle">Off-Cycle</option>
       </select>

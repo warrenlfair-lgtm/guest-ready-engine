@@ -45,6 +45,7 @@ BEGIN
   END IF;
 
   normalized_branch := CASE
+    WHEN lower(trim(COALESCE(selected_service_branch, ''))) = 'maintenance' THEN 'maintenance'
     WHEN lower(trim(COALESCE(selected_service_branch, ''))) = 'lawn' OR selected_service_type = 'Lawn Service' THEN 'lawn'
     ELSE 'pool'
   END;

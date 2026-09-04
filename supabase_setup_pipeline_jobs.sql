@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS public.pipeline_jobs (
   property_id UUID NOT NULL REFERENCES public.properties(id) ON DELETE RESTRICT,
   job_title TEXT NOT NULL CHECK (trim(job_title) <> ''),
   description TEXT,
-  service_branch TEXT NOT NULL DEFAULT 'pool' CHECK (service_branch IN ('pool', 'lawn')),
+  service_branch TEXT NOT NULL DEFAULT 'pool' CHECK (service_branch IN ('pool', 'lawn', 'maintenance')),
   potential_revenue NUMERIC(12,2) NOT NULL DEFAULT 0 CHECK (potential_revenue >= 0),
   parts_material_cost NUMERIC(12,2) NOT NULL DEFAULT 0 CHECK (parts_material_cost >= 0),
   paid_labor BOOLEAN NOT NULL DEFAULT false,
@@ -135,8 +135,9 @@ BEGIN
     END IF;
   END IF;
 
-  normalized_branch := CASE
-    WHEN lower(trim(COALESCE(selected_service_branch, pipeline_row.service_branch))) = 'lawn' THEN 'lawn'
+  normalized_branch := CASE lower(trim(COALESCE(selected_service_branch, pipeline_row.service_branch)))
+    WHEN 'lawn' THEN 'lawn'
+    WHEN 'maintenance' THEN 'maintenance'
     ELSE 'pool'
   END;
   normalized_service_type := CASE

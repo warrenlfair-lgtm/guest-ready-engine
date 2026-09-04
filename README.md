@@ -34,9 +34,13 @@ To add the first staff account:
 2. Sign in with an Admin account and open Settings > Authorized Users.
 3. Set the user's role to Staff, leave Active enabled, and save.
 
-Staff can use Pool Service and Lawn Service Today/Week operations, start and complete tasks, open checklists, and record chemical quantities. Financial tables remain protected by admin-only row-level security; staff reads use restricted views that omit financial columns, and staff writes use role-checked RPC functions.
+Staff can use Pool Service, Lawn, and Maintenance Today/Week operations and start and complete tasks. Pool tasks retain checklist and chemical-quantity tools. Financial tables remain protected by admin-only row-level security; staff reads use restricted views that omit financial columns, and staff writes use role-checked RPC functions.
 
-Managers can use Pool Service and Lawn / Gen Labor Today, Week, and Properties views. The Properties view is limited to Current Month and Next Month. Manager reads use dedicated operational-only views, and task assignments, service levels, notes, starts, completions, and completed-task reconciliation use role-checked RPC functions. Reconciliation eligibility is exposed only as boolean fields; configured charges and invoice data remain server-side, Manager views expose no financial columns, and Managers cannot access the Invoices page.
+Managers can use Pool Service, Lawn, and Maintenance Today, Week, Month, and Properties views. The Properties view is limited to Current Month and Next Month. Manager reads use dedicated operational-only views, and task assignments, service levels, notes, starts, completions, and completed-task reconciliation use role-checked RPC functions. Reconciliation eligibility is exposed only as boolean fields; configured charges and invoice data remain server-side, Manager views expose no financial columns, and Managers cannot access the Invoices page.
+
+## Maintenance Branch Setup
+
+Run `supabase_setup_maintenance_branch.sql` in the Supabase SQL Editor before deploying the three-branch frontend. This additive migration allows `maintenance` in existing branch constraints and updates Manager task creation and Pipeline scheduling to preserve it. It does not update or reclassify historical rows; existing `lawn` tasks and recurring Lawn generation remain Lawn.
 
 ## Pipeline Setup
 

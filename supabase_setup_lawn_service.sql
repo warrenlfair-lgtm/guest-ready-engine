@@ -50,13 +50,13 @@ ALTER TABLE cleaning_tasks
 DROP CONSTRAINT IF EXISTS cleaning_tasks_service_branch_check;
 ALTER TABLE cleaning_tasks
 ADD CONSTRAINT cleaning_tasks_service_branch_check
-CHECK (service_branch IN ('pool', 'lawn'));
+CHECK (service_branch IN ('pool', 'lawn', 'maintenance'));
 
 ALTER TABLE invoice_items
 DROP CONSTRAINT IF EXISTS invoice_items_service_branch_check;
 ALTER TABLE invoice_items
 ADD CONSTRAINT invoice_items_service_branch_check
-CHECK (service_branch IS NULL OR service_branch IN ('pool', 'lawn'));
+CHECK (service_branch IS NULL OR service_branch IN ('pool', 'lawn', 'maintenance'));
 
 CREATE INDEX IF NOT EXISTS idx_cleaning_tasks_service_branch_date
 ON cleaning_tasks(service_branch, service_date);
