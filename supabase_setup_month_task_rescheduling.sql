@@ -1,4 +1,5 @@
 -- Allow Managers to reschedule existing operational tasks without exposing direct table writes.
+-- Operational "today" follows the America/New_York business calendar, not the Supabase UTC session date.
 -- Run manually in the Supabase SQL Editor as the postgres/database owner.
 
 BEGIN;
@@ -22,7 +23,7 @@ SELECT
     AND invoiced_invoice_id IS NULL
     AND same_day_surcharge_reconciled IS DISTINCT FROM true
     AND same_day_surcharge_invoice_id IS NULL
-    AND COALESCE(service_date, scheduled_date) >= CURRENT_DATE
+    AND COALESCE(service_date, scheduled_date) >= (CURRENT_TIMESTAMP AT TIME ZONE 'America/New_York')::DATE
   ) AS month_reschedule_eligible
 FROM public.cleaning_tasks
 WHERE public.is_active_app_manager() OR public.is_active_app_admin();
@@ -42,11 +43,12 @@ SET search_path = public
 AS $$
 DECLARE
   task_row public.cleaning_tasks%ROWTYPE;
+  business_date DATE := (CURRENT_TIMESTAMP AT TIME ZONE 'America/New_York')::DATE;
 BEGIN
   IF NOT (public.is_active_app_manager() OR public.is_active_app_admin()) THEN
     RAISE EXCEPTION 'Active manager or admin access required' USING ERRCODE = '42501';
   END IF;
-  IF selected_service_date IS NULL OR selected_service_date < CURRENT_DATE THEN
+  IF selected_service_date IS NULL OR selected_service_date < business_date THEN
     RAISE EXCEPTION 'A current or future service date is required' USING ERRCODE = '22023';
   END IF;
 
@@ -59,14 +61,18 @@ BEGIN
   END IF;
 
   IF lower(COALESCE(task_row.status, 'scheduled')) NOT IN ('scheduled', 'in progress', 'in_progress')
-     OR task_row.completed_at IS NOT NULL
-     OR task_row.invoiced IS TRUE
+     OR task_row.completed_at IS NOT NULL THEN
+    RAISE EXCEPTION 'Completed or inactive tasks cannot be rescheduled' USING ERRCODE = '22023';
+  END IF;
+  IF task_row.invoiced IS TRUE
      OR task_row.invoice_id IS NOT NULL
      OR task_row.invoiced_invoice_id IS NOT NULL
-    OR task_row.same_day_surcharge_reconciled IS TRUE
-    OR task_row.same_day_surcharge_invoice_id IS NOT NULL
-     OR COALESCE(task_row.service_date, task_row.scheduled_date) < CURRENT_DATE THEN
-    RAISE EXCEPTION 'Completed, historical, reconciled, or invoiced tasks cannot be rescheduled' USING ERRCODE = '22023';
+     OR task_row.same_day_surcharge_reconciled IS TRUE
+     OR task_row.same_day_surcharge_invoice_id IS NOT NULL THEN
+    RAISE EXCEPTION 'Reconciled or invoiced tasks cannot be rescheduled' USING ERRCODE = '22023';
+  END IF;
+  IF COALESCE(task_row.service_date, task_row.scheduled_date) < business_date THEN
+    RAISE EXCEPTION 'Historical tasks cannot be rescheduled' USING ERRCODE = '22023';
   END IF;
 
   UPDATE public.cleaning_tasks

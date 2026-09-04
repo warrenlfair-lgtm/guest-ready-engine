@@ -191,7 +191,7 @@ SELECT
     AND invoiced_invoice_id IS NULL
     AND same_day_surcharge_reconciled IS DISTINCT FROM true
     AND same_day_surcharge_invoice_id IS NULL
-    AND COALESCE(service_date, scheduled_date) >= CURRENT_DATE
+    AND COALESCE(service_date, scheduled_date) >= (CURRENT_TIMESTAMP AT TIME ZONE 'America/New_York')::DATE
   ) AS month_reschedule_eligible
 FROM public.cleaning_tasks
 WHERE public.is_active_app_manager() OR public.is_active_app_admin();

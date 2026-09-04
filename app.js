@@ -35,6 +35,7 @@ const COMPANY_BRANCH_OPTIONS = [COMPANY_BRANCH_GUEST_READY, COMPANY_BRANCH_WEEKE
 const SERVICE_BRANCH_POOL = "pool";
 const SERVICE_BRANCH_LAWN = "lawn";
 const SERVICE_BRANCH_MAINTENANCE = "maintenance";
+const BUSINESS_TIME_ZONE = "America/New_York";
 let activeServiceWorkspace = SERVICE_BRANCH_POOL;
 let currentMonthViewYear = new Date().getFullYear();
 let currentMonthViewMonth = new Date().getMonth();
@@ -145,6 +146,24 @@ function propertySupportsServiceBranch(property, branch = activeServiceWorkspace
   return property?.pool_service_active !== false;
 }
 
+function getBusinessDateValue(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: BUSINESS_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
+function getTaskRescheduleTargetBlockReason(selectedDate) {
+  const normalizedDate = normalizeDateKey(selectedDate);
+  if (!normalizedDate) return "A valid service date is required.";
+  if (normalizedDate < getBusinessDateValue()) return "Tasks cannot be moved into a historical date.";
+  return "";
+}
+
 function getTaskRescheduleBlockReason(task) {
   if (!(isAdminUser() || isManagerUser())) return "Your role cannot reschedule tasks.";
   if (!task?.id) return "Task not found.";
@@ -165,7 +184,7 @@ function getTaskRescheduleBlockReason(task) {
   }
 
   const taskDate = normalizeDateKey(task.service_date || task.scheduled_date);
-  if (taskDate && taskDate < formatDateValue(new Date())) {
+  if (taskDate && taskDate < getBusinessDateValue()) {
     return "Historical tasks cannot be rescheduled.";
   }
   return "";
@@ -1582,6 +1601,7 @@ function getStaffOperationalTaskMarkup(task) {
 function applyTaskModalRole(task) {
   const staffMode = isStaffUser();
   const managerMode = isManagerUser();
+  const branchEditorMode = managerMode || (isAdminUser() && Boolean(task));
   document.querySelectorAll("#cleaningModal .admin-task-field").forEach((element) => {
     element.classList.toggle("role-restricted-hidden", staffMode || managerMode);
   });
@@ -1593,7 +1613,8 @@ function applyTaskModalRole(task) {
   if (cleaningTechnician) cleaningTechnician.disabled = staffMode;
   if (cleaningStatus) cleaningStatus.disabled = staffMode || managerMode;
   if (cleaningDate && task) cleaningDate.disabled = staffMode || !canRescheduleTask(task);
-  if (cleaningServiceBranchRow) cleaningServiceBranchRow.classList.toggle("hidden", !managerMode || Boolean(task));
+  if (cleaningServiceBranchRow) cleaningServiceBranchRow.classList.toggle("hidden", !branchEditorMode);
+  if (cleaningServiceBranch) cleaningServiceBranch.disabled = staffMode || (Boolean(task) && !canRescheduleTask(task));
   if (saveCleaningBtn) saveCleaningBtn.classList.toggle("role-restricted-hidden", staffMode);
   cleaningModal?.querySelector(".chemical-usage-section")?.classList.remove("role-restricted-hidden");
 
@@ -2662,6 +2683,7 @@ function openEditCleaning(taskId) {
   populateCleaningPropertySelect(task.property_id);
 
   cleaningDate.value = task.service_date || task.scheduled_date || "";
+  if (cleaningServiceBranch) cleaningServiceBranch.value = normalizeServiceBranch(task.service_branch);
   cleaningServiceType.value = task.service_type || "Manual";
   cleaningServiceType.disabled = normalizeServiceBranch(task.service_branch) !== SERVICE_BRANCH_POOL;
   if (cleaningWeeklyServiceLevel) {
@@ -5178,6 +5200,45 @@ async function saveCleaningTask() {
   }
   selectedCleaningPropertyId = property.id;
 
+  const currentModalState = getCleaningModalStateSnapshot();
+  const changedModalFields = cleaningModalInitialState
+    ? Object.keys(currentModalState).filter((key) => currentModalState[key] !== cleaningModalInitialState[key])
+    : [];
+  if (editingCleaningId && changedModalFields.length === 1 && changedModalFields[0] === "serviceBranch") {
+    const existingTask = cleaningTasks.find((task) => task.id === editingCleaningId)
+      || monthCleaningTasks.find((task) => task.id === editingCleaningId);
+    const branchBlockReason = getTaskRescheduleBlockReason(existingTask);
+    if (branchBlockReason) {
+      alert(branchBlockReason);
+      return;
+    }
+
+    const branchResult = await supabaseClient.rpc("manager_update_task_service_branch", {
+      target_task_id: editingCleaningId,
+      selected_service_branch: normalizeServiceBranch(cleaningServiceBranch?.value),
+    });
+    if (branchResult.error) {
+      alert("Could not change service branch: " + branchResult.error.message);
+      return;
+    }
+
+    editingCleaningId = null;
+    closeCleaningModal({ force: true });
+    if (isManagerUser()) {
+      await loadManagerOperationalData();
+    } else {
+      await loadData();
+    }
+    if (returnToMonthView) {
+      showView("month");
+      await loadMonthTasks();
+    } else if (returnToPropertiesView) {
+      showView("properties");
+      renderProperties();
+    }
+    return;
+  }
+
   if (isManagerUser()) {
     if (editingCleaningId) {
       const selectedTechnician = findActiveTechnicianByName(cleaningTechnician.value.trim());
@@ -5185,10 +5246,25 @@ async function saveCleaningTask() {
         || monthCleaningTasks.find((task) => task.id === editingCleaningId);
       const existingServiceDate = normalizeDateKey(existingTask?.service_date || existingTask?.scheduled_date);
       const selectedServiceDate = normalizeDateKey(cleaningDate.value);
+      const existingServiceBranch = normalizeServiceBranch(existingTask?.service_branch);
+      const selectedServiceBranch = normalizeServiceBranch(cleaningServiceBranch?.value);
+      const serviceBranchChanged = selectedServiceBranch !== existingServiceBranch;
       const serviceLevel = existingTask?.service_type === "Weekly Standard"
         ? normalizeWeeklyServiceLevel(cleaningWeeklyServiceLevel?.value)
         : null;
+      if (serviceBranchChanged) {
+        const branchBlockReason = getTaskRescheduleBlockReason(existingTask);
+        if (branchBlockReason) {
+          alert(branchBlockReason);
+          return;
+        }
+      }
       if (selectedServiceDate && selectedServiceDate !== existingServiceDate) {
+        const targetBlockReason = getTaskRescheduleTargetBlockReason(selectedServiceDate);
+        if (targetBlockReason) {
+          alert(targetBlockReason);
+          return;
+        }
         const rescheduleResult = await supabaseClient.rpc("manager_reschedule_task", {
           target_task_id: editingCleaningId,
           selected_service_date: selectedServiceDate,
@@ -5207,6 +5283,16 @@ async function saveCleaningTask() {
       if (error) {
         alert("Could not save operational task details: " + error.message);
         return;
+      }
+      if (serviceBranchChanged) {
+        const branchResult = await supabaseClient.rpc("manager_update_task_service_branch", {
+          target_task_id: editingCleaningId,
+          selected_service_branch: selectedServiceBranch,
+        });
+        if (branchResult.error) {
+          alert("Could not change service branch: " + branchResult.error.message);
+          return;
+        }
       }
       closeCleaningModal({ force: true });
       await loadManagerOperationalData();
@@ -5255,7 +5341,9 @@ async function saveCleaningTask() {
 
   const serviceDate = cleaningDate.value;
   const serviceBranch = normalizeServiceBranch(cleaningServiceBranch?.value || activeServiceWorkspace);
-  const serviceType = serviceBranch === SERVICE_BRANCH_LAWN ? "Lawn Service" : cleaningServiceType.value;
+  const serviceType = editingCleaningId
+    ? cleaningServiceType.value
+    : (serviceBranch === SERVICE_BRANCH_LAWN ? "Lawn Service" : cleaningServiceType.value);
   const weeklyServiceLevel = serviceType === "Weekly Standard"
     ? normalizeWeeklyServiceLevel(cleaningWeeklyServiceLevel?.value)
     : null;
@@ -5286,6 +5374,22 @@ async function saveCleaningTask() {
     ? cleaningTasks.find((task) => task.id === editingCleaningId)
       || monthCleaningTasks.find((task) => task.id === editingCleaningId)
     : null;
+  const existingServiceBranch = existingTask ? normalizeServiceBranch(existingTask.service_branch) : serviceBranch;
+  const serviceBranchChanged = Boolean(existingTask && serviceBranch !== existingServiceBranch);
+  if (serviceBranchChanged) {
+    const branchBlockReason = getTaskRescheduleBlockReason(existingTask);
+    if (branchBlockReason) {
+      alert(branchBlockReason);
+      return;
+    }
+  }
+  if (existingTask && normalizeDateKey(existingTask.service_date || existingTask.scheduled_date) !== serviceDate) {
+    const targetBlockReason = getTaskRescheduleTargetBlockReason(serviceDate);
+    if (targetBlockReason) {
+      alert(targetBlockReason);
+      return;
+    }
+  }
   const existingCharge = Number(existingTask?.charge || 0);
   const wasCompleted = String(existingTask?.status || "") === "Completed";
   const completedAt = taskStatus === "Completed"
@@ -5386,7 +5490,7 @@ async function saveCleaningTask() {
     service_date: serviceDate,
     scheduled_date: serviceDate,
     service_type: serviceType,
-    service_branch: serviceBranch,
+    service_branch: existingTask ? existingServiceBranch : serviceBranch,
     weekly_service_level: weeklyServiceLevel,
     technician: completedByTechnician ? completedByTechnician.name : cleaningTechnician.value.trim(),
     technician_id: completedByTechnician?.id || null,
@@ -5481,6 +5585,17 @@ async function saveCleaningTask() {
   if (result.error) {
     alert("Error saving cleaning: " + result.error.message);
     return;
+  }
+
+  if (serviceBranchChanged) {
+    const branchResult = await supabaseClient.rpc("manager_update_task_service_branch", {
+      target_task_id: editingCleaningId,
+      selected_service_branch: serviceBranch,
+    });
+    if (branchResult.error) {
+      alert("Could not change service branch: " + branchResult.error.message);
+      return;
+    }
   }
 
   editingCleaningId = null;
@@ -12070,8 +12185,7 @@ function handleMonthTaskDragEnd(event) {
 
 function handleMonthDayDragOver(event) {
   if (!draggedMonthTaskId) return;
-  const targetDate = normalizeDateKey(event.currentTarget.dataset.monthDate);
-  if (!targetDate || targetDate < formatDateValue(new Date())) return;
+  if (getTaskRescheduleTargetBlockReason(event.currentTarget.dataset.monthDate)) return;
   event.preventDefault();
   event.dataTransfer.dropEffect = "move";
   event.currentTarget.classList.add("month-day-drop-target");
@@ -12100,8 +12214,9 @@ function handleMonthDayDrop(event, newDate) {
   const oldDate = normalizeDateKey(task.service_date || task.scheduled_date);
   const normalizedNewDate = normalizeDateKey(newDate);
   if (!oldDate || !normalizedNewDate || oldDate === normalizedNewDate) return;
-  if (normalizedNewDate < formatDateValue(new Date())) {
-    alert("Tasks cannot be moved into a historical date.");
+  const targetBlockReason = getTaskRescheduleTargetBlockReason(normalizedNewDate);
+  if (targetBlockReason) {
+    alert(targetBlockReason);
     return;
   }
 

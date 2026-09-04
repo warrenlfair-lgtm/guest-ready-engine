@@ -44,7 +44,11 @@ Run `supabase_setup_maintenance_branch.sql` in the Supabase SQL Editor before de
 
 ## Month Task Rescheduling
 
-Run `supabase_setup_month_task_rescheduling.sql` in the Supabase SQL Editor before deploying Month View drag-and-drop. The migration adds a role-checked Admin/Manager RPC and a non-financial Manager eligibility flag. Rescheduling updates only the existing task's `service_date`, `scheduled_date`, and `manually_modified` fields; it never inserts or duplicates a task. Completed, historical, reconciled, and invoice-linked tasks remain locked.
+Run `supabase_setup_month_task_rescheduling.sql` in the Supabase SQL Editor before deploying Month View drag-and-drop. The migration adds a role-checked Admin/Manager RPC and a non-financial Manager eligibility flag. Rescheduling updates only the existing task's `service_date`, `scheduled_date`, and `manually_modified` fields; it never inserts or duplicates a task. Completed, historical, reconciled, and invoice-linked tasks remain locked. Operational "today" is evaluated in the `America/New_York` business timezone so work scheduled for the current local date remains movable after UTC midnight.
+
+## Existing Task Branch Editing
+
+Run `supabase_setup_task_service_branch_editing.sql` in the Supabase SQL Editor before deploying existing-task branch editing. Its role-checked Admin/Manager RPC updates only `cleaning_tasks.service_branch` on the existing task ID. Completed, historical, reconciled, and invoice-linked tasks remain locked; Staff receives no branch-edit control or write permission.
 
 ## Pipeline Setup
 
