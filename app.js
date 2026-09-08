@@ -5622,7 +5622,11 @@ async function saveCleaningTask() {
     notes: notesWithOverride,
     guest_ready: serviceType === "Guest Ready",
     completed_at: completedAt,
-    ...(isManuallyMoving ? { manually_modified: true } : {}),
+    ...(isManuallyMoving ? {
+      manually_modified: true,
+      original_service_date: existingTask.original_service_date || normalizeDateKey(existingTask.service_date || existingTask.scheduled_date),
+      overdue_reference_date: serviceDate,
+    } : {}),
     // Only persist an explicit manual SDS override; a blank/0 field leaves any existing reconciled snapshot untouched.
     ...(sdsAmountInput !== null && sdsAmountInput > 0 ? { same_day_surcharge_amount: sdsAmountInput } : {})
   };
@@ -12033,19 +12037,22 @@ function getWeeklyReconciliationBillingLine(task, taskBillingAmount) {
 function getCarryForwardInfo(task) {
   const originalDate = normalizeDateKey(task?.original_service_date);
   const currentDate = normalizeDateKey(task?.service_date || task?.scheduled_date);
+  const overdueReferenceDate = normalizeDateKey(task?.overdue_reference_date || originalDate);
   const carryForwardCount = Number(task?.carry_forward_count || 0);
-  if (!originalDate || !currentDate || carryForwardCount < 1) return null;
+  if (!originalDate || !currentDate || !overdueReferenceDate || carryForwardCount < 1) return null;
 
-  const originalParts = originalDate.split("-").map(Number);
+  const referenceParts = overdueReferenceDate.split("-").map(Number);
   const currentParts = currentDate.split("-").map(Number);
-  const overdueDays = Math.max(1, Math.round((
+  const overdueDays = Math.round((
     Date.UTC(currentParts[0], currentParts[1] - 1, currentParts[2])
-    - Date.UTC(originalParts[0], originalParts[1] - 1, originalParts[2])
-  ) / 86400000));
+    - Date.UTC(referenceParts[0], referenceParts[1] - 1, referenceParts[2])
+  ) / 86400000);
+  if (overdueDays < 1) return null;
 
   return {
     originalDate,
     currentDate,
+    overdueReferenceDate,
     overdueDays,
     urgent: overdueDays >= 3,
   };
