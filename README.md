@@ -50,6 +50,8 @@ Run `supabase_setup_month_task_rescheduling.sql` in the Supabase SQL Editor befo
 
 Run `supabase_setup_task_service_branch_editing.sql` in the Supabase SQL Editor before deploying existing-task branch editing. Its role-checked Admin/Manager RPC updates only `cleaning_tasks.service_branch` on the existing task ID. Completed, historical, reconciled, and invoice-linked tasks remain locked; Staff receives no branch-edit control or write permission.
 
+Run `supabase_setup_task_carry_forward.sql` in the Supabase SQL Editor before deploying automatic unfinished-task carry-forward. It adds permanent original-date/count/timestamp audit fields and an authenticated role-checked RPC that moves eligible unfinished rows to the current `America/New_York` business date without inserting, deleting, or changing task IDs. Completed, cancelled, reconciled, invoice-linked, and all Guest Ready/check-in-sensitive tasks are excluded. Guest Ready tasks remain historical for manual review because the iCal workflow owns their reservation-derived dates. Carried rows are marked modified so the existing iCal workflow cannot suppress or reposition them; the dedicated carry-forward audit fields distinguish that system action from an ordinary manual reschedule.
+
 ## Pipeline Setup
 
 Run `supabase_setup_pipeline_jobs.sql` in the Supabase SQL Editor after the role-based access and cleaning-task parts/labor migrations. Pipeline is Admin-only: its table RLS policy and scheduling RPC both require `is_active_app_admin()`, and no Pipeline columns are added to Staff or Manager views.

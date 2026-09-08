@@ -51,6 +51,7 @@ let currentAppRole = null;
 let currentAppUserEmail = "";
 let dataLoadPromise = null;
 let icalSyncPromise = null;
+let carryForwardReconciliationPromise = null;
 let autoIcalSyncAttemptedUserId = null;
 let isPasswordRecoveryFlow = false;
 
@@ -378,6 +379,7 @@ const cancelChemicalBtn = document.getElementById("cancelChemicalBtn");
 const saveChemicalBtn = document.getElementById("saveChemicalBtn");
 const viewButtons = Array.from(document.querySelectorAll(".view-btn"));
 const todayTasksContainer = document.getElementById("todayTasks");
+const carryForwardSummary = document.getElementById("carryForwardSummary");
 const guestProtectionAlertsContainer = document.getElementById("guestProtectionAlerts");
 const operationsRemindersWidget = document.getElementById("operationsRemindersWidget");
 const reminderModal = document.getElementById("reminderModal");
@@ -2980,6 +2982,7 @@ async function deleteReminder(reminderId) {
 
 async function loadData() {
   statusMessage.textContent = "Loading...";
+  await reconcileUnfinishedTaskCarryForward();
 
   if (isStaffUser()) {
     await loadStaffOperationalData();
@@ -3038,6 +3041,31 @@ async function loadData() {
     renderChemicalUsageReport();
   }
   renderMessagesPreview();
+}
+
+function reconcileUnfinishedTaskCarryForward() {
+  if (carryForwardReconciliationPromise) return carryForwardReconciliationPromise;
+
+  carryForwardReconciliationPromise = supabaseClient
+    .rpc("reconcile_unfinished_task_carry_forward")
+    .then(({ data, error }) => {
+      if (error) {
+        console.warn("Carry-forward reconciliation unavailable:", error.message);
+        return { movedCount: 0, skippedGuestReadyCount: 0, error };
+      }
+
+      const result = Array.isArray(data) ? data[0] : data;
+      return {
+        movedCount: Number(result?.moved_count || 0),
+        skippedGuestReadyCount: Number(result?.skipped_guest_ready_count || 0),
+        error: null,
+      };
+    })
+    .finally(() => {
+      carryForwardReconciliationPromise = null;
+    });
+
+  return carryForwardReconciliationPromise;
 }
 
 async function loadStaffOperationalData() {
@@ -6206,8 +6234,7 @@ function togglePropertyCardCollapse(propertyId) {
 }
 
 function getTodayCleaningTasks() {
-  const today = new Date();
-  const todayString = formatDateValue(today);
+  const todayString = getBusinessDateValue();
 
   console.log("[TodayView] Today date string:", todayString);
 
@@ -6233,13 +6260,12 @@ function isTaskVisibleInOperationalSchedule(task, { matchActiveWorkspace = true 
 }
 
 function getUpcomingCleaningTasks() {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  const today = parseDateString(getBusinessDateValue());
   const endDate = new Date(today);
-  endDate.setDate(endDate.getDate() + 7);
+  endDate.setUTCDate(endDate.getUTCDate() + 7);
 
-  const todayString = formatDateValue(today);
-  const endString = formatDateValue(endDate);
+  const todayString = formatIsoDateUtc(today);
+  const endString = formatIsoDateUtc(endDate);
 
   console.log("Today's date string:", todayString);
   console.log("Seven-days-out date string:", endString);
@@ -6530,6 +6556,7 @@ function isDateWithinCoverageRule(serviceDate, candidateDate, coverageRuleValue)
 
 function shouldSuppressWeeklyStandardTaskDisplay(task) {
   if (!task || task.service_type !== "Weekly Standard") return false;
+  if (getCarryForwardInfo(task)) return false;
 
   const property = properties.find((p) => p.id === task.property_id);
   if (!property) return false;
@@ -12003,6 +12030,64 @@ function getWeeklyReconciliationBillingLine(task, taskBillingAmount) {
     : `<div class="task-line"><small>Billing: Awaiting Reconciliation</small></div>`;
 }
 
+function getCarryForwardInfo(task) {
+  const originalDate = normalizeDateKey(task?.original_service_date);
+  const currentDate = normalizeDateKey(task?.service_date || task?.scheduled_date);
+  const carryForwardCount = Number(task?.carry_forward_count || 0);
+  if (!originalDate || !currentDate || carryForwardCount < 1) return null;
+
+  const originalParts = originalDate.split("-").map(Number);
+  const currentParts = currentDate.split("-").map(Number);
+  const overdueDays = Math.max(1, Math.round((
+    Date.UTC(currentParts[0], currentParts[1] - 1, currentParts[2])
+    - Date.UTC(originalParts[0], originalParts[1] - 1, originalParts[2])
+  ) / 86400000));
+
+  return {
+    originalDate,
+    currentDate,
+    overdueDays,
+    urgent: overdueDays >= 3,
+  };
+}
+
+function formatOperationalDateLabel(dateValue) {
+  const normalizedDate = normalizeDateKey(dateValue);
+  if (!normalizedDate) return "Not set";
+  const [year, month, day] = normalizedDate.split("-").map(Number);
+  return new Intl.DateTimeFormat(undefined, {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  }).format(new Date(year, month - 1, day));
+}
+
+function getCarryForwardBadgeMarkup(task, { compact = false } = {}) {
+  const info = getCarryForwardInfo(task);
+  if (!info) return "";
+  const urgencyClass = info.urgent ? "carry-forward-urgent" : "";
+  const overdueLabel = `${info.overdueDays} DAY${info.overdueDays === 1 ? "" : "S"} OVERDUE`;
+  if (compact) {
+    return `<span class="carry-forward-compact ${urgencyClass}" title="Originally scheduled ${escapeHtml(formatOperationalDateLabel(info.originalDate))}">⚠ ${overdueLabel}</span>`;
+  }
+  return `
+    <div class="carry-forward-badges ${urgencyClass}">
+      <span class="task-alert-badge carry-forward-badge">⚠ CARRIED FORWARD</span>
+      <span class="task-alert-badge carry-forward-overdue">${overdueLabel}</span>
+    </div>`;
+}
+
+function getCarryForwardHistoryMarkup(task) {
+  const info = getCarryForwardInfo(task);
+  if (!info) return "";
+  return `
+    <div class="carry-forward-history ${info.urgent ? "carry-forward-urgent" : ""}">
+      <div><strong>Originally Scheduled:</strong> ${escapeHtml(formatOperationalDateLabel(info.originalDate))}</div>
+      <div><strong>Current Service Date:</strong> ${escapeHtml(formatOperationalDateLabel(info.currentDate))}</div>
+      <div><strong>${info.overdueDays} Day${info.overdueDays === 1 ? "" : "s"} Overdue</strong></div>
+    </div>`;
+}
+
 function renderTaskCard(task) {
   const status = task.status || "Scheduled";
   const cardClass = (task.status === "Completed"
@@ -12027,9 +12112,12 @@ function renderTaskCard(task) {
   const laborSnapshotLine = renderTaskLaborSnapshot(task);
   const partsCostLine = renderTaskPartsCost(task);
   const staffOperationalMarkup = getStaffOperationalTaskMarkup(task);
+  const carryForwardInfo = getCarryForwardInfo(task);
+  const carryForwardBadge = getCarryForwardBadgeMarkup(task);
+  const carryForwardHistory = getCarryForwardHistoryMarkup(task);
 
   return `
-    <div class="${cardClass}">
+    <div class="${cardClass} ${carryForwardInfo?.urgent ? "carried-forward-urgent-card" : carryForwardInfo ? "carried-forward-card" : ""}">
       <div class="task-card-header">
         <div class="task-card-title">${getPropertyName(task.property_id)}</div>
         ${showReconcile ? `
@@ -12040,6 +12128,7 @@ function renderTaskCard(task) {
         ` : ""}
         ${sdsReconcileControl}
       </div>
+      ${carryForwardBadge}
       ${alertBadge}
       <div class="task-card-details">
         <div><strong>Service Date:</strong> ${task.service_date || task.scheduled_date || "Not set"}</div>
@@ -12055,6 +12144,7 @@ function renderTaskCard(task) {
         ${partsCostLine}
         ${staffOperationalMarkup}
         ${task.check_in_date ? `<div><strong>Check-In:</strong> ${task.check_in_date}</div>` : ""}
+        ${carryForwardHistory}
         <div><strong>Status:</strong> <span class="status-badge ${badgeClass}">${status}</span></div>
       </div>
       <div class="task-card-actions">
@@ -12215,6 +12305,10 @@ function renderTaskViews() {
   }
 
   const todayTasks = getTodayCleaningTasks();
+  const carriedForwardTasks = todayTasks.filter((task) => getCarryForwardInfo(task));
+  carryForwardSummary.innerHTML = carriedForwardTasks.length
+    ? `<div class="carry-forward-summary">⚠ ${carriedForwardTasks.length} CARRIED-FORWARD TASK${carriedForwardTasks.length === 1 ? " REQUIRES" : "S REQUIRE"} ATTENTION</div>`
+    : "";
   console.log("[TodayView] Rendering", todayTasks.length, "today tasks");
   todayTasksContainer.innerHTML = todayTasks.length
     ? todayTasks.map(renderTaskCard).join("")
@@ -12376,8 +12470,7 @@ function renderMonthView() {
     monthCalendarTitle.textContent = `${monthNames[currentMonthViewMonth]} ${currentMonthViewYear}`;
   }
 
-  const today = new Date();
-  const todayString = formatDateValue(today);
+  const todayString = getBusinessDateValue();
 
   const firstDayOfMonth = new Date(Date.UTC(currentMonthViewYear, currentMonthViewMonth, 1));
   const startDayOfWeek = firstDayOfMonth.getUTCDay();
@@ -12432,6 +12525,8 @@ function renderMonthView() {
       const sameDayBadge = isSameDayCheckInGuestReadyTask(task)
         ? `<span class="month-task-alert-pill" title="Same-Day Turnover Alert">🚨 Turnover</span>`
         : "";
+      const carryForwardInfo = getCarryForwardInfo(task);
+      const carryForwardBadge = getCarryForwardBadgeMarkup(task, { compact: true });
       const guestReadyBadge = isTaskGuestReady(task)
         ? `<span class="month-task-gr-pill" title="Guest Ready">GR</span>`
         : "";
@@ -12442,8 +12537,9 @@ function renderMonthView() {
       const dragTitle = rescheduleEnabled ? "Drag to another calendar day to reschedule" : getTaskRescheduleBlockReason(task);
 
       return `
-        <div class="month-task-card ${branchClass} ${rescheduleEnabled ? "month-task-draggable" : "month-task-locked"}" ${dragAttributes} title="${escapeHtml(dragTitle)}" onclick="event.stopPropagation(); openEditCleaning('${task.id}')">
+        <div class="month-task-card ${branchClass} ${carryForwardInfo?.urgent ? "carried-forward-urgent-card" : carryForwardInfo ? "carried-forward-card" : ""} ${rescheduleEnabled ? "month-task-draggable" : "month-task-locked"}" ${dragAttributes} title="${escapeHtml(dragTitle)}" onclick="event.stopPropagation(); openEditCleaning('${task.id}')">
           <div class="month-task-property-name">${escapeHtml(propertyName)}</div>
+          ${carryForwardBadge}
           <div class="month-task-meta-line">
             <span>${escapeHtml(getServiceTypeDisplayLabel(task.service_type))}</span>
             ${sameDayBadge || guestReadyBadge}
@@ -12585,9 +12681,12 @@ function renderWeekViewListTaskCard(task) {
   const laborSnapshotLine = renderTaskLaborSnapshot(task);
   const partsCostLine = renderTaskPartsCost(task);
   const staffOperationalMarkup = getStaffOperationalTaskMarkup(task);
+  const carryForwardInfo = getCarryForwardInfo(task);
+  const carryForwardBadge = getCarryForwardBadgeMarkup(task);
+  const carryForwardHistory = getCarryForwardHistoryMarkup(task);
 
   return `
-    <div class="${taskClass}">
+    <div class="${taskClass} ${carryForwardInfo?.urgent ? "carried-forward-urgent-card" : carryForwardInfo ? "carried-forward-card" : ""}">
       <div class="task-item-header">
         <div class="task-title">${getPropertyName(task.property_id)} — ${task.service_date || task.scheduled_date || "Not set"}</div>
         ${showReconcile ? `
@@ -12599,6 +12698,7 @@ function renderWeekViewListTaskCard(task) {
         ${sdsReconcileControl}
       </div>
       ${badge}
+      ${carryForwardBadge}
       ${sameDayBadge}
       <div class="task-line"><small>Task Type: ${getServiceTypeDisplayLabel(task.service_type)}</small></div>
       <div class="task-line"><small>Service Branch: <span class="service-branch-pill ${getServiceBranchClass(task)}">${getServiceBranchLabel(task.service_branch)}</span></small></div>
@@ -12613,6 +12713,7 @@ function renderWeekViewListTaskCard(task) {
       ${partsCostLine}
       ${staffOperationalMarkup}
       ${task.check_in_date ? `<div class="task-line"><small>Prior to check-in: ${task.check_in_date}</small></div>` : ""}
+      ${carryForwardHistory}
       <div class="task-line"><small>Status: ${status}</small></div>
       ${!isStaffUser() && task.notes ? `<div class="task-line"><small>Notes: ${stripManualBillingOverrideTag(task.notes)}</small></div>` : ""}
       ${task.completed_at ? `<div class="task-line"><small>Completed: ${new Date(task.completed_at).toLocaleString()}</small></div>` : ""}
@@ -12628,15 +12729,14 @@ function renderWeekViewListTaskCard(task) {
 }
 
 function renderWeekViewCalendar(weekTasks) {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const todayString = formatDateValue(today);
+  const today = parseDateString(getBusinessDateValue());
+  const todayString = formatIsoDateUtc(today);
 
   // Create 7-day calendar
   const dayColumns = [];
   for (let i = 0; i < 7; i++) {
     const columnDate = new Date(today);
-    columnDate.setDate(columnDate.getDate() + i);
+    columnDate.setUTCDate(columnDate.getUTCDate() + i);
     dayColumns.push(columnDate);
   }
 
@@ -12653,8 +12753,8 @@ function renderWeekViewCalendar(weekTasks) {
   const calendarHTML = `
     <div class="week-calendar">
       ${dayColumns.map(date => {
-        const dateString = formatDateValue(date);
-        const dayName = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][date.getDay()];
+        const dateString = formatIsoDateUtc(date);
+        const dayName = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][date.getUTCDay()];
         const dayTasks = tasksByDate[dateString] || [];
         const isToday = dateString === todayString;
         
@@ -12675,6 +12775,9 @@ function renderWeekViewCalendar(weekTasks) {
                       ? `<span class="status-badge badge-green">COMPLETED</span>`
                       : `<span class="status-badge badge-blue">${task.status || 'Scheduled'}</span>`;
                     const alertBadge = getAlertBadgeForTask(task);
+                    const carryForwardInfo = getCarryForwardInfo(task);
+                    const carryForwardBadge = getCarryForwardBadgeMarkup(task);
+                    const carryForwardHistory = getCarryForwardHistoryMarkup(task);
                     const showReconcile = shouldShowReconcileForTask(task);
                     const invoiceMarkerClass = task.invoiced ? "invoice-marker-checked" : "invoice-marker-unchecked";
                     const sdsReconcileControl = renderSdsReconcileControl(task);
@@ -12686,13 +12789,15 @@ function renderWeekViewCalendar(weekTasks) {
                     const staffOperationalMarkup = getStaffOperationalTaskMarkup(task);
                     
                     return `
-                      <div class="calendar-task-card ${getServiceBranchClass(task)}">
+                      <div class="calendar-task-card ${getServiceBranchClass(task)} ${carryForwardInfo?.urgent ? "carried-forward-urgent-card" : carryForwardInfo ? "carried-forward-card" : ""}">
                         <div class="calendar-task-header">
                           <div class="calendar-task-property">${propertyName}</div>
                         </div>
                         <div class="calendar-task-type">${getServiceTypeDisplayLabel(task.service_type)}</div>
                         ${guestReadyBadge}
+                        ${carryForwardBadge}
                         ${alertBadge}
+                        ${carryForwardHistory}
                         <div class="calendar-task-status">
                           <span>Status:</span>
                           ${statusBadge}
@@ -12920,13 +13025,16 @@ function renderProperties() {
           const technicianMarkup = renderTaskTechnicianSelector(task);
           const laborSnapshotLine = renderTaskLaborSnapshot(task);
           const partsCostLine = renderTaskPartsCost(task);
+          const carryForwardInfo = getCarryForwardInfo(task);
+          const carryForwardBadge = getCarryForwardBadgeMarkup(task);
+          const carryForwardHistory = getCarryForwardHistoryMarkup(task);
 
           const sameDayBadge = isSameDayCheckInGuestReadyTask(task)
             ? `<span class="task-alert-badge badge-alert-red">🚨 Same-Day Check-In</span>`
             : "";
 
           return `
-            <div class="${taskClass}">
+            <div class="${taskClass} ${carryForwardInfo?.urgent ? "carried-forward-urgent-card" : carryForwardInfo ? "carried-forward-card" : ""}">
               <div class="task-item-header">
                 <div class="task-title">${task.service_date} — ${getServiceTypeDisplayLabel(task.service_type)}</div>
                 ${showReconcile ? `
@@ -12938,6 +13046,7 @@ function renderProperties() {
                 ${sdsReconcileControl}
               </div>
               ${badge}
+              ${carryForwardBadge}
               ${sameDayBadge}
               ${taskBillingAmount > 0 ? `<div class="task-line">$${taskBillingAmount}</div>` : ""}
               ${billingLine}
@@ -12947,6 +13056,7 @@ function renderProperties() {
               ${technicianMarkup}
               ${laborSnapshotLine}
               ${partsCostLine}
+              ${carryForwardHistory}
               <div class="task-line"><small>Status: ${task.status}</small></div>
               ${task.completed_at ? `<div class="task-line"><small>Completed: ${new Date(task.completed_at).toLocaleString()}</small></div>` : ""}
               ${task.check_in_date ? `<div class="task-line"><small>Prior to check-in: ${task.check_in_date}</small></div>` : ""}
@@ -13713,8 +13823,10 @@ function renderManagerProperties() {
     const checklistUrl = normalizeSafetyCultureUrl(property.safetyculture_checklist_url || "");
 
     const taskMarkup = tasks.length
-      ? tasks.map((task) => `
-          <div class="task-item ${task.status === "Completed" ? "completed" : ""} ${getServiceBranchClass(task)}">
+      ? tasks.map((task) => {
+        const carryForwardInfo = getCarryForwardInfo(task);
+        return `
+          <div class="task-item ${task.status === "Completed" ? "completed" : ""} ${getServiceBranchClass(task)} ${carryForwardInfo?.urgent ? "carried-forward-urgent-card" : carryForwardInfo ? "carried-forward-card" : ""}">
             <div class="task-item-header">
               <div class="task-title">${escapeHtml(task.service_date || task.scheduled_date || "Not set")} - ${escapeHtml(getServiceTypeDisplayLabel(task.service_type))}</div>
               ${shouldShowReconcileForTask(task) ? `
@@ -13725,7 +13837,9 @@ function renderManagerProperties() {
               ` : ""}
               ${renderSdsReconcileControl(task)}
             </div>
+            ${getCarryForwardBadgeMarkup(task)}
             ${isSameDayCheckInGuestReadyTask(task) ? '<span class="task-alert-badge badge-alert-red">Same-Day Check-In</span>' : ""}
+            ${getCarryForwardHistoryMarkup(task)}
             <div class="task-line"><small>Status: ${escapeHtml(task.status || "Scheduled")}</small></div>
             ${task.service_type === "Weekly Standard" ? `<div class="task-line"><small>Service Level: ${escapeHtml(getWeeklyServiceLevelLabel(getWeeklyServiceLevelForTask(task)))}</small></div>` : ""}
             <div class="task-line"><small>Technician: ${escapeHtml(getTaskTechnicianDisplayName(task) || "Unassigned")}</small></div>
@@ -13737,7 +13851,8 @@ function renderManagerProperties() {
               ${task.status !== "Completed" ? `<button type="button" onclick="markCleaningComplete('${task.id}')">Complete</button>` : ""}
             </div>
           </div>
-        `).join("")
+        `;
+      }).join("")
       : `<p>No ${getServiceBranchLabel(activeServiceWorkspace)} tasks in the selected month.</p>`;
 
     const reminderMarkup = reminders.length
