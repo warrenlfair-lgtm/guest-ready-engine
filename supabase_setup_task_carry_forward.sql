@@ -1,4 +1,4 @@
--- Move eligible unfinished historical tasks to the current operational day while preserving audit history.
+-- Move eligible unfinished tasks originating on or after 2026-09-08 while preserving audit history.
 -- Run manually in the Supabase SQL Editor as the postgres/database owner.
 
 BEGIN;
@@ -75,6 +75,7 @@ SET search_path = public
 AS $$
 DECLARE
   business_date DATE := (CURRENT_TIMESTAMP AT TIME ZONE 'America/New_York')::DATE;
+  activation_date CONSTANT DATE := DATE '2026-09-08';
 BEGIN
   IF NOT (
     public.is_active_app_admin()
@@ -90,6 +91,7 @@ BEGIN
   INTO skipped_guest_ready_count
   FROM public.cleaning_tasks task
   WHERE COALESCE(task.service_date, task.scheduled_date) < business_date
+    AND COALESCE(task.original_service_date, task.service_date, task.scheduled_date) >= activation_date
     AND lower(COALESCE(task.status, 'scheduled')) IN ('scheduled', 'in progress', 'in_progress')
     AND task.completed_at IS NULL
     AND task.invoiced IS DISTINCT FROM true
@@ -109,6 +111,7 @@ BEGIN
       COALESCE(task.service_date, task.scheduled_date) AS previous_service_date
     FROM public.cleaning_tasks task
     WHERE COALESCE(task.service_date, task.scheduled_date) < business_date
+      AND COALESCE(task.original_service_date, task.service_date, task.scheduled_date) >= activation_date
       AND lower(COALESCE(task.status, 'scheduled')) IN ('scheduled', 'in progress', 'in_progress')
       AND task.completed_at IS NULL
       AND task.invoiced IS DISTINCT FROM true
