@@ -346,6 +346,8 @@ const propertyCompanyBranch = document.getElementById("propertyCompanyBranch");
 const propertyStatus = document.getElementById("propertyStatus");
 const propertyPoolServiceActive = document.getElementById("propertyPoolServiceActive");
 const propertyHousekeepingServiceActive = document.getElementById("propertyHousekeepingServiceActive");
+const propertyHousekeepingDefaultCharge = document.getElementById("propertyHousekeepingDefaultCharge");
+const propertyHousekeepingLaborAmount = document.getElementById("propertyHousekeepingLaborAmount");
 const propertyServiceFrequency = document.getElementById("propertyServiceFrequency");
 const propertyBiweeklyAnchorDateRow = document.getElementById("propertyBiweeklyAnchorDateRow");
 const propertyBiweeklyAnchorDate = document.getElementById("propertyBiweeklyAnchorDate");
@@ -2359,6 +2361,8 @@ function openEditModal(id) {
   if (propertyStatus) propertyStatus.value = isPropertyActive(property) ? "active" : "inactive";
   if (propertyPoolServiceActive) propertyPoolServiceActive.value = property.pool_service_active === false ? "no" : "yes";
   if (propertyHousekeepingServiceActive) propertyHousekeepingServiceActive.value = property.housekeeping_service_active === true ? "yes" : "no";
+  if (propertyHousekeepingDefaultCharge) propertyHousekeepingDefaultCharge.value = Number(property.housekeeping_default_charge || 0);
+  if (propertyHousekeepingLaborAmount) propertyHousekeepingLaborAmount.value = Number(property.housekeeping_labor_amount || 0);
   if (propertyServiceFrequency) propertyServiceFrequency.value = getPropertyFrequencyForScheduling(property);
   if (propertyBiweeklyAnchorDate) {
     propertyBiweeklyAnchorDate.value = getBiweeklyAnchorDateForScheduling(property);
@@ -2662,13 +2666,21 @@ function openCleaningModal(propertyId = null, prefilledDate = null) {
   cleaningTechnician.value = "";
 
   const property = selectedCleaningPropertyId ? properties.find(p => p.id === selectedCleaningPropertyId) : null;
-  cleaningCharge.value = (activeServiceWorkspace === SERVICE_BRANCH_LAWN && property) ? Number(property.lawn_default_charge || 0) : 0;
+  cleaningCharge.value = activeServiceWorkspace === SERVICE_BRANCH_LAWN && property
+    ? Number(property.lawn_default_charge || 0)
+    : activeServiceWorkspace === SERVICE_BRANCH_HOUSEKEEPING && property
+      ? Number(property.housekeeping_default_charge || 0)
+      : 0;
   if (cleaningSdsAmount) {
     if (cleaningSdsAmountLabel) cleaningSdsAmountLabel.classList.add("hidden");
     cleaningSdsAmount.classList.add("hidden");
     cleaningSdsAmount.value = "";
   }
-  if (cleaningLaborAmount) cleaningLaborAmount.value = "";
+  if (cleaningLaborAmount) {
+    cleaningLaborAmount.value = activeServiceWorkspace === SERVICE_BRANCH_HOUSEKEEPING && property
+      ? Number(property.housekeeping_labor_amount || 0)
+      : "";
+  }
   if (cleaningPartsCost) cleaningPartsCost.value = 0;
   cleaningNotes.value = "";
   syncCleaningServiceTypeDependentFields();
@@ -4916,6 +4928,8 @@ async function saveProperty() {
     biweekly_anchor_date: selectedBiweeklyAnchorDate,
     pool_service_active: selectedPoolServiceActive,
     housekeeping_service_active: selectedHousekeepingServiceActive,
+    housekeeping_default_charge: Math.max(0, Number(propertyHousekeepingDefaultCharge?.value || 0)),
+    housekeeping_labor_amount: Math.max(0, Number(propertyHousekeepingLaborAmount?.value || 0)),
     lawn_service_active: selectedLawnServiceActive,
     lawn_service_frequency: selectedLawnFrequency,
     lawn_service_day: String(propertyLawnServiceDay?.value || "Wednesday"),
@@ -4964,6 +4978,8 @@ async function saveProperty() {
     "service_frequency",
     "biweekly_anchor_date",
     "housekeeping_service_active",
+    "housekeeping_default_charge",
+    "housekeeping_labor_amount",
     "active",
   ];
 
@@ -5163,9 +5179,9 @@ async function runSyncAllIcal({ automatic }) {
         console.log(`[SyncAll] ERROR for "${property.property_name}":`, result.error);
       } else if (
         propertySupportsServiceBranch(property, SERVICE_BRANCH_HOUSEKEEPING)
-        && !Object.prototype.hasOwnProperty.call(data || {}, "housekeepingTasksCreated")
+        && data?.syncVersion !== "housekeeping-pricing-v1"
       ) {
-        result.error = "Housekeeping sync is not deployed. Deploy the updated sync-ical Edge Function, then sync again.";
+        result.error = "Housekeeping pricing sync is not deployed. Deploy the updated sync-ical Edge Function, then sync again.";
         console.log(`[SyncAll] OUTDATED FUNCTION for "${property.property_name}":`, result.error);
       } else {
         result.success = true;
@@ -5559,6 +5575,19 @@ async function saveCleaningTask() {
     return;
   }
 
+  const existingLaborAmount = Number(existingTask?.labor_amount || 0);
+  const requestedLaborAmount = hasManualLaborInput ? Number(manualLaborAmount || 0) : existingLaborAmount;
+  if (
+    editingCleaningId
+    && existingTask
+    && isHousekeepingTask(existingTask)
+    && isTaskReconciled(existingTask)
+    && (charge !== existingCharge || requestedLaborAmount !== existingLaborAmount)
+  ) {
+    alert("This Housekeeping task is reconciled. Its charge and labor snapshot cannot be changed.");
+    return;
+  }
+
   const sdsAmountInput = cleaningSdsAmount && !cleaningSdsAmount.classList.contains("hidden")
     ? Number(cleaningSdsAmount.value || 0)
     : null;
@@ -5576,6 +5605,7 @@ async function saveCleaningTask() {
   const selectedModalTechnician = findActiveTechnicianByName(cleaningTechnician.value.trim());
   const isMarkingCompleteNow = taskStatus === "Completed" && !wasCompleted;
   const isManualServiceTask = isManualTask({ service_type: serviceType });
+  const usesStoredLaborSnapshot = isManualServiceTask || serviceBranch === SERVICE_BRANCH_HOUSEKEEPING;
 
   const persistedCompletedById = String(existingTask?.completed_by_technician_id || existingTask?.technician_id || "").trim();
   const persistedCompletedByTechnician = findTechnicianById(persistedCompletedById);
@@ -5600,7 +5630,7 @@ async function saveCleaningTask() {
   const existingLaborRaw = existingTask?.labor_amount;
   const hasExistingLaborSnapshot = existingLaborRaw !== null && existingLaborRaw !== undefined && String(existingLaborRaw).trim() !== "";
   const wasMissingTechnicianAtCompletion = Boolean(existingTask && wasCompleted && !hasTechnicianSnapshot(existingTask));
-  const shouldBackfillLaborNow = taskStatus === "Completed" && hasCompletedTechnician && wasMissingTechnicianAtCompletion && !isManualServiceTask;
+  const shouldBackfillLaborNow = taskStatus === "Completed" && hasCompletedTechnician && wasMissingTechnicianAtCompletion && !usesStoredLaborSnapshot;
   const hasExistingLaborPayableSnapshot = existingTask?.labor_payable === true || existingTask?.labor_payable === false;
   const laborPayable = taskStatus === "Completed" && hasCompletedTechnician
     ? (isMarkingCompleteNow || shouldBackfillLaborNow || technicianChanged || !hasExistingLaborPayableSnapshot
@@ -5618,10 +5648,10 @@ async function saveCleaningTask() {
 
   const laborAmount = taskStatus === "Completed"
     ? (hasCompletedTechnician
-      ? (isManualServiceTask
+      ? (usesStoredLaborSnapshot
         ? (hasManualLaborInput
           ? manualLaborAmount
-          : (wasCompleted && hasExistingLaborSnapshot && Number(existingTask?.labor_amount || 0) > 0
+          : (hasExistingLaborSnapshot
             ? Number(existingTask?.labor_amount || 0)
             : null))
         : (wasCompleted && hasExistingLaborSnapshot && !shouldBackfillLaborNow
@@ -5965,13 +5995,17 @@ async function markCleaningComplete(id) {
   const hasCompletedTechnician = Boolean(selectedTechnician?.id || selectedTechnician?.name);
   const isManualServiceTask = isManualTask(task);
   const existingManualLabor = Number(task?.labor_amount);
-  const hasExistingManualLabor = Number.isFinite(existingManualLabor) && existingManualLabor > 0;
+  const usesStoredLaborSnapshot = isManualServiceTask || isHousekeepingTask(task);
+  const hasExistingManualLabor = task?.labor_amount !== null
+    && task?.labor_amount !== undefined
+    && String(task.labor_amount).trim() !== ""
+    && Number.isFinite(existingManualLabor);
   const laborTaskContext = {
     ...task,
     weekly_service_level: weeklyServiceLevel,
   };
   const laborAmount = hasCompletedTechnician
-    ? (isManualServiceTask
+    ? (usesStoredLaborSnapshot
       ? (hasExistingManualLabor ? existingManualLabor : null)
       : getLaborAmountForTask(laborTaskContext, property))
     : null;
@@ -6086,6 +6120,8 @@ function clearPropertyForm() {
   if (propertyStatus) propertyStatus.value = "active";
   if (propertyPoolServiceActive) propertyPoolServiceActive.value = "yes";
   if (propertyHousekeepingServiceActive) propertyHousekeepingServiceActive.value = "no";
+  if (propertyHousekeepingDefaultCharge) propertyHousekeepingDefaultCharge.value = 0;
+  if (propertyHousekeepingLaborAmount) propertyHousekeepingLaborAmount.value = 0;
   if (propertyServiceFrequency) propertyServiceFrequency.value = SERVICE_FREQUENCY_WEEKLY;
   if (propertyBiweeklyAnchorDate) propertyBiweeklyAnchorDate.value = "";
   if (propertyLawnServiceActive) propertyLawnServiceActive.value = "no";
@@ -6727,6 +6763,15 @@ function getEffectiveWeeklyStandardCharge(task, property) {
 }
 
 function getTaskBillingContext(task) {
+  if (isHousekeepingTask(task)) {
+    const amount = Number(task.charge || 0);
+    return {
+      billableAmount: amount,
+      isBillable: amount > 0,
+      billingReasonLabel: amount > 0 ? "Housekeeping Charge" : "No Housekeeping Charge",
+    };
+  }
+
   if (isLawnTask(task)) {
     const property = properties.find((item) => item.id === task.property_id);
     const rawCharge = Number(task.charge || 0);
@@ -6786,6 +6831,7 @@ function getPropertyLaborRules(property) {
     guestReadyServiceLabor: Math.max(0, Number(property?.guest_ready_service_labor || 0)),
     additionalCleaningLabor: Math.max(0, Number(property?.additional_cleaning_labor || 0)),
     lawnServiceLabor: Math.max(0, Number(property?.lawn_labor_amount || 0)),
+    housekeepingLabor: Math.max(0, Number(property?.housekeeping_labor_amount || 0)),
   };
 }
 
@@ -6799,6 +6845,10 @@ function getLaborAmountForTask(task, property) {
 
   if (isLawnTask(task)) {
     return rules.lawnServiceLabor;
+  }
+
+  if (isHousekeepingTask(task)) {
+    return rules.housekeepingLabor;
   }
 
   if (serviceType === "Weekly Standard") {
@@ -7814,6 +7864,9 @@ function getLaborTaskTechnicianSnapshot(task) {
 
 function getLaborServiceCategory(task) {
   const serviceType = String(task?.service_type || "").trim().toLowerCase();
+  if (isHousekeepingTask(task)) {
+    return "housekeeping";
+  }
   if (serviceType === "weekly standard") {
     return "weekly";
   }
@@ -7847,6 +7900,7 @@ function getLaborServiceTypeDisplay(task) {
 function getLaborServiceCategoryLabel(category) {
   if (category === "weekly") return "Weekly Standard";
   if (category === "guestReady") return "Guest Ready";
+  if (category === "housekeeping") return "Housekeeping";
   if (category === "manual") return "Manual";
   return "Additional / Billable";
 }
@@ -9965,7 +10019,9 @@ function getInvoiceCandidateTasks({ startDate, endDate, selectedPropertyId = "",
     propertyId: row.property_id,
     propertyName: row.propertyName || getPropertyName(row.property_id),
     clientName: row.clientName || "",
-    description: isLawnTask(row)
+    description: isHousekeepingTask(row)
+      ? `${row.propertyName || getPropertyName(row.property_id)} - Housekeeping`
+      : isLawnTask(row)
       ? `${row.propertyName || getPropertyName(row.property_id)} - ${normalizeServiceFrequency(getPropertyById(row.property_id)?.lawn_service_frequency) === SERVICE_FREQUENCY_BIWEEKLY ? "Biweekly Lawn Service" : "Lawn Service"}`
       : `${row.propertyName || getPropertyName(row.property_id)} - ${row.serviceLabel || row.service_type || "Cleaning Service"} (${row.billingReasonLabel || "Chargeable"})`,
     serviceDate: row.serviceDate || row.service_date || row.scheduled_date || "",
@@ -13198,6 +13254,8 @@ function renderProperties() {
           <div><strong>Account / Reference:</strong> ${property.billing_account_reference || "Not entered"}</div>
           <div><strong>Address:</strong> ${property.address || "Not entered"}</div>
           <div><strong>Housekeeping:</strong> ${property.housekeeping_service_active === true ? "Active" : "Inactive"}</div>
+          <div><strong>Housekeeping Default Charge:</strong> $${Number(property.housekeeping_default_charge || 0).toFixed(2)}</div>
+          <div><strong>Housekeeping Labor Amount:</strong> $${Number(property.housekeeping_labor_amount || 0).toFixed(2)}</div>
           ${activeServiceWorkspace === SERVICE_BRANCH_LAWN ? `
             <div><strong>Lawn Day:</strong> ${property.lawn_service_day || "Wednesday"}</div>
             <div><strong>Lawn Frequency:</strong> ${getServiceFrequencyLabel(property.lawn_service_frequency)}</div>

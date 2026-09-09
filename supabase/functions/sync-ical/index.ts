@@ -19,6 +19,8 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
+const SYNC_VERSION = "housekeeping-pricing-v1";
+
 function createErrorResponse(message: string, status: number) {
   return new Response(JSON.stringify({ success: false, error: message }), {
     status,
@@ -59,6 +61,7 @@ function createSuccessResponse(
 ) {
   return new Response(JSON.stringify({
     success: true,
+    syncVersion: SYNC_VERSION,
     reservationsCreated,
     tasksCreated,
     reservationsParsed: extras.reservationsParsed ?? 0,
@@ -308,6 +311,8 @@ Deno.serve(async (req: Request) => {
       active: boolean | null;
       pool_service_active: boolean | null;
       housekeeping_service_active: boolean | null;
+      housekeeping_default_charge: number | null;
+      housekeeping_labor_amount: number | null;
       default_off_cycle_charge: number | null;
       standard_service_day: string | null;
       coverage_days: number | null;
@@ -511,6 +516,8 @@ Deno.serve(async (req: Request) => {
     }
 
     if (housekeepingServiceActive) {
+      const housekeepingDefaultCharge = Math.max(0, Number(property.housekeeping_default_charge || 0));
+      const housekeepingLaborAmount = Math.max(0, Number(property.housekeeping_labor_amount || 0));
       const housekeepingSourceKeys = activeReservations
         .filter((reservation) => reservation.check_out)
         .map((reservation) => getHousekeepingSourceKey(propertyId, reservation));
@@ -592,7 +599,8 @@ Deno.serve(async (req: Request) => {
           status: "Scheduled",
           off_cycle: false,
           guest_ready: false,
-          charge: 0,
+          charge: housekeepingDefaultCharge,
+          labor_amount: housekeepingLaborAmount,
           notes: `Auto-created from iCal sync for checkout ${reservation.check_out}.`,
           source_type: "reservation_housekeeping",
           source_key: sourceKey,
@@ -602,6 +610,12 @@ Deno.serve(async (req: Request) => {
       }
 
       if (housekeepingTasksToCreate.length) {
+        console.log("[HOUSEKEEPING PRICING SNAPSHOT]", {
+          propertyId,
+          charge: housekeepingDefaultCharge,
+          laborAmount: housekeepingLaborAmount,
+          taskCount: housekeepingTasksToCreate.length,
+        });
         const { error: housekeepingInsertError } = await supabase
           .from("cleaning_tasks")
           .insert(housekeepingTasksToCreate);
