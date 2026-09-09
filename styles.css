@@ -278,6 +278,20 @@ h1 {
     box-shadow: none;
 }
 
+@media (max-width: 600px) {
+    .service-workspace-selector {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        width: 100%;
+        box-sizing: border-box;
+    }
+
+    .service-workspace-btn {
+        min-width: 0;
+        width: 100%;
+    }
+}
+
 .service-workspace-btn[data-service-workspace="pool"] {
     background: #dbeafe;
     color: #1d4ed8;
@@ -317,6 +331,20 @@ h1 {
 
 .service-workspace-btn[data-service-workspace="maintenance"].active {
     background: #c2410c;
+    color: #ffffff;
+}
+
+.service-workspace-btn[data-service-workspace="housekeeping"] {
+    background: #f3e8ff;
+    color: #7e22ce;
+}
+
+.service-workspace-btn[data-service-workspace="housekeeping"]:hover {
+    background: #e9d5ff;
+}
+
+.service-workspace-btn[data-service-workspace="housekeeping"].active {
+    background: #7e22ce;
     color: #ffffff;
 }
 
@@ -933,6 +961,11 @@ button:hover {
 .service-branch-pill.service-branch-maintenance {
     background: #ffedd5;
     color: #9a3412;
+}
+
+.service-branch-pill.service-branch-housekeeping {
+    background: #f3e8ff;
+    color: #7e22ce;
 }
 
 .status-badge{
@@ -3630,6 +3663,12 @@ textarea{
     border-left: 6px solid #ea580c;
 }
 
+.task-card.service-branch-housekeeping,
+.task-item.service-branch-housekeeping,
+.calendar-task-card.service-branch-housekeeping {
+    border-left: 6px solid #7e22ce;
+}
+
 .month-task-card.month-task-pool {
     border-left: 4px solid #2563eb;
     background: #f0f7ff;
@@ -3643,6 +3682,11 @@ textarea{
 .month-task-card.month-task-maintenance {
     border-left: 4px solid #ea580c;
     background: #fff7ed;
+}
+
+.month-task-card.month-task-housekeeping {
+    border-left: 4px solid #7e22ce;
+    background: #faf5ff;
 }
 
 .month-task-property-name {

@@ -53,6 +53,8 @@ function createSuccessResponse(
     oldIgnored?: number;
     weeklyTasksCreated?: number;
     guestReadyTasksCreated?: number;
+    housekeepingTasksCreated?: number;
+    housekeepingTasksUpdated?: number;
   } = {}
 ) {
   return new Response(JSON.stringify({
@@ -64,6 +66,8 @@ function createSuccessResponse(
     oldIgnored: extras.oldIgnored ?? 0,
     weeklyTasksCreated: extras.weeklyTasksCreated ?? 0,
     guestReadyTasksCreated: extras.guestReadyTasksCreated ?? 0,
+    housekeepingTasksCreated: extras.housekeepingTasksCreated ?? 0,
+    housekeepingTasksUpdated: extras.housekeepingTasksUpdated ?? 0,
   }), {
     status: 200,
     headers: {
@@ -106,6 +110,16 @@ function getReservationIdentityKey(reservation: { reservation_uid?: string | nul
   const uid = reservation.reservation_uid || reservation.uid || null;
   if (uid) return `uid:${uid}`;
   return `date:${reservation.check_in}|${reservation.check_out || ""}`;
+}
+
+function getHousekeepingSourceKey(
+  propertyId: string,
+  reservation: { reservation_uid?: string | null; uid?: string | null; check_in: string }
+) {
+  const uid = reservation.reservation_uid || reservation.uid || null;
+  return uid
+    ? `hk:${propertyId}:uid:${uid}`
+    : `hk:${propertyId}:checkin:${reservation.check_in}`;
 }
 
 function parseDateString(dateString: string) {
@@ -247,6 +261,8 @@ Deno.serve(async (req: Request) => {
   let oldIgnored = 0;
   let weeklyTasksCreated = 0;
   let guestReadyTasksCreated = 0;
+  let housekeepingTasksCreated = 0;
+  let housekeepingTasksUpdated = 0;
 
   if (req.method === "OPTIONS") {
     return new Response("ok", {
@@ -291,6 +307,7 @@ Deno.serve(async (req: Request) => {
       ical_url: string | null;
       active: boolean | null;
       pool_service_active: boolean | null;
+      housekeeping_service_active: boolean | null;
       default_off_cycle_charge: number | null;
       standard_service_day: string | null;
       coverage_days: number | null;
@@ -298,8 +315,10 @@ Deno.serve(async (req: Request) => {
       service_frequency: string | null;
       biweekly_anchor_date: string | null;
     };
-    if (property.active === false || property.pool_service_active === false) {
-      return createSuccessResponse(reservationsCreated, tasksCreated, { reservationsParsed, activeReservations: activeReservationCount, oldIgnored, weeklyTasksCreated, guestReadyTasksCreated });
+    const poolServiceActive = property.pool_service_active !== false;
+    const housekeepingServiceActive = property.housekeeping_service_active === true;
+    if (property.active === false || (!poolServiceActive && !housekeepingServiceActive)) {
+      return createSuccessResponse(reservationsCreated, tasksCreated, { reservationsParsed, activeReservations: activeReservationCount, oldIgnored, weeklyTasksCreated, guestReadyTasksCreated, housekeepingTasksCreated, housekeepingTasksUpdated });
     }
     console.log("STEP 1 property loaded");
     if (!property.ical_url) {
@@ -323,15 +342,36 @@ Deno.serve(async (req: Request) => {
     cutoff.setDate(cutoff.getDate() - 30);
     const cutoffDate = cutoff.toISOString().split("T")[0];
 
-    const { error: cleanupCleaningError } = await supabase
+    const { data: oldAutoTasks, error: cleanupLookupError } = await supabase
       .from("cleaning_tasks")
-      .delete()
+      .select("id, source_type, manually_modified, status, completed_at, invoiced, invoice_id, invoiced_invoice_id, same_day_surcharge_reconciled, same_day_surcharge_invoice_id")
       .eq("property_id", propertyId)
       .lt("service_date", cutoffDate);
 
-    if (cleanupCleaningError) {
-      console.error("sync-ical fatal error", cleanupCleaningError);
+    if (cleanupLookupError) {
+      console.error("sync-ical fatal error", cleanupLookupError);
       return createSuccessResponse(reservationsCreated, tasksCreated);
+    }
+
+    const oldSafeAutoTaskIds = (oldAutoTasks || [])
+      .filter((task: Record<string, unknown>) => ["weekly_standard", "reservation_guest_ready", "reservation_housekeeping"].includes(String(task.source_type || "")))
+      .filter((task: Record<string, unknown>) => task.manually_modified !== true)
+      .filter((task: Record<string, unknown>) => String(task.status || "Scheduled").toLowerCase() === "scheduled")
+      .filter((task: Record<string, unknown>) => !task.completed_at && task.invoiced !== true)
+      .filter((task: Record<string, unknown>) => !task.invoice_id && !task.invoiced_invoice_id)
+      .filter((task: Record<string, unknown>) => task.same_day_surcharge_reconciled !== true && !task.same_day_surcharge_invoice_id)
+      .map((task: Record<string, unknown>) => String(task.id));
+
+    if (oldSafeAutoTaskIds.length) {
+      const { error: cleanupCleaningError } = await supabase
+        .from("cleaning_tasks")
+        .delete()
+        .eq("property_id", propertyId)
+        .in("id", oldSafeAutoTaskIds);
+      if (cleanupCleaningError) {
+        console.error("sync-ical fatal error", cleanupCleaningError);
+        return createSuccessResponse(reservationsCreated, tasksCreated);
+      }
     }
 
     const { error: cleanupReservationsError } = await supabase
@@ -371,7 +411,7 @@ Deno.serve(async (req: Request) => {
 
     const { data: existingIcalReservations, error: existingIcalError } = await supabase
       .from("reservations")
-      .select("id, check_in, check_out, reservation_uid, status")
+      .select("id, guest_name, check_in, check_out, reservation_uid, status")
       .eq("property_id", propertyId)
       .eq("source", "ical")
       .gte("check_out", cutoffDate);
@@ -381,7 +421,7 @@ Deno.serve(async (req: Request) => {
       return createSuccessResponse(reservationsCreated, tasksCreated, { reservationsParsed, activeReservations: activeReservationCount, oldIgnored, weeklyTasksCreated, guestReadyTasksCreated });
     }
 
-    const existingIcalRows = (existingIcalReservations || []) as Array<{ id: string; check_in: string; check_out: string | null; reservation_uid: string | null; status: string | null }>;
+    const existingIcalRows = (existingIcalReservations || []) as Array<{ id: string; guest_name: string | null; check_in: string; check_out: string | null; reservation_uid: string | null; status: string | null }>;
     // Legacy rows created before this column existed have status = NULL; treat that as "active" rather than excluding them.
     const isRowAlreadyCancelled = (row: { status: string | null }) => String(row.status || "active").toLowerCase() === "cancelled";
 
@@ -403,6 +443,35 @@ Deno.serve(async (req: Request) => {
       console.log("[RESERVATION CANCEL APPLIED]", staleReservationIds.length, "stale reservation(s) marked cancelled");
     }
 
+    const existingReservationMap = new Map(existingIcalRows.map((row) => [getReservationIdentityKey(row), row]));
+    for (const reservation of activeReservations) {
+      const existingReservation = existingReservationMap.get(getReservationIdentityKey(reservation));
+      if (!existingReservation) continue;
+      const guestName = reservation.summary || null;
+      if (
+        existingReservation.check_in === reservation.check_in
+        && existingReservation.check_out === reservation.check_out
+        && existingReservation.guest_name === guestName
+        && !isRowAlreadyCancelled(existingReservation)
+      ) continue;
+
+      const { error: reservationUpdateError } = await supabase
+        .from("reservations")
+        .update({
+          guest_name: guestName,
+          check_in: reservation.check_in,
+          check_out: reservation.check_out,
+          status: "active",
+          cancelled_at: null,
+          imported_at: new Date().toISOString(),
+        })
+        .eq("id", existingReservation.id);
+      if (reservationUpdateError) {
+        console.error("sync-ical fatal error", reservationUpdateError?.message || reservationUpdateError);
+        return createSuccessResponse(reservationsCreated, tasksCreated, { reservationsParsed, activeReservations: activeReservationCount, oldIgnored, weeklyTasksCreated, guestReadyTasksCreated, housekeepingTasksCreated, housekeepingTasksUpdated });
+      }
+    }
+
     if (!activeReservations.length) {
       return createSuccessResponse(reservationsCreated, tasksCreated, { reservationsParsed, activeReservations: activeReservationCount, oldIgnored, weeklyTasksCreated, guestReadyTasksCreated });
     }
@@ -412,7 +481,6 @@ Deno.serve(async (req: Request) => {
     const staleIdSet = new Set(staleReservationIds);
     const existingActiveKeys = new Set(
       existingIcalRows
-        .filter((row) => !isRowAlreadyCancelled(row))
         .filter((row) => !staleIdSet.has(row.id))
         .map((row) => getReservationIdentityKey(row))
     );
@@ -440,6 +508,114 @@ Deno.serve(async (req: Request) => {
       }
       reservationsCreated = newReservations.length;
       console.log("STEP 3 reservations inserted");
+    }
+
+    if (housekeepingServiceActive) {
+      const housekeepingSourceKeys = activeReservations
+        .filter((reservation) => reservation.check_out)
+        .map((reservation) => getHousekeepingSourceKey(propertyId, reservation));
+      const { data: existingHousekeepingTasks, error: housekeepingLookupError } = housekeepingSourceKeys.length
+        ? await supabase
+            .from("cleaning_tasks")
+            .select("id, source_key, service_date, manually_modified, status, completed_at, invoiced, invoice_id, invoiced_invoice_id, same_day_surcharge_reconciled, same_day_surcharge_invoice_id")
+            .eq("property_id", propertyId)
+            .eq("source_type", "reservation_housekeeping")
+            .in("source_key", housekeepingSourceKeys)
+        : { data: [], error: null };
+
+      if (housekeepingLookupError) {
+        console.error("sync-ical fatal error", housekeepingLookupError?.message || housekeepingLookupError);
+        return createSuccessResponse(reservationsCreated, tasksCreated, { reservationsParsed, activeReservations: activeReservationCount, oldIgnored, weeklyTasksCreated, guestReadyTasksCreated, housekeepingTasksCreated, housekeepingTasksUpdated });
+      }
+
+      type HousekeepingTaskRecord = {
+        id: string;
+        source_key: string;
+        service_date: string;
+        manually_modified: boolean | null;
+        status: string | null;
+        completed_at: string | null;
+        invoiced: boolean | null;
+        invoice_id: string | null;
+        invoiced_invoice_id: string | null;
+        same_day_surcharge_reconciled: boolean | null;
+        same_day_surcharge_invoice_id: string | null;
+      };
+      const housekeepingTaskMap = new Map(
+        ((existingHousekeepingTasks || []) as HousekeepingTaskRecord[]).map((task) => [task.source_key, task])
+      );
+      const housekeepingTasksToCreate: Array<Record<string, unknown>> = [];
+      const pendingHousekeepingSourceKeys = new Set<string>();
+
+      for (const reservation of activeReservations) {
+        if (!reservation.check_out) continue;
+        const sourceKey = getHousekeepingSourceKey(propertyId, reservation);
+        if (pendingHousekeepingSourceKeys.has(sourceKey)) continue;
+        const existingTask = housekeepingTaskMap.get(sourceKey);
+        if (existingTask) {
+          const status = String(existingTask.status || "Scheduled").toLowerCase();
+          const editableStatus = ["scheduled", "in progress", "in_progress"].includes(status);
+          const locked = !editableStatus
+            || existingTask.manually_modified
+            || Boolean(existingTask.completed_at)
+            || existingTask.invoiced === true
+            || Boolean(existingTask.invoice_id)
+            || Boolean(existingTask.invoiced_invoice_id)
+            || existingTask.same_day_surcharge_reconciled === true
+            || Boolean(existingTask.same_day_surcharge_invoice_id);
+          if (!locked && existingTask.service_date !== reservation.check_out) {
+            const { error: housekeepingUpdateError } = await supabase
+              .from("cleaning_tasks")
+              .update({
+                service_date: reservation.check_out,
+                scheduled_date: reservation.check_out,
+                suggested_date: reservation.check_out,
+                notes: `Auto-created from iCal sync for checkout ${reservation.check_out}.`,
+              })
+              .eq("id", existingTask.id);
+            if (housekeepingUpdateError) {
+              console.error("sync-ical fatal error", housekeepingUpdateError?.message || housekeepingUpdateError);
+              return createSuccessResponse(reservationsCreated, tasksCreated, { reservationsParsed, activeReservations: activeReservationCount, oldIgnored, weeklyTasksCreated, guestReadyTasksCreated, housekeepingTasksCreated, housekeepingTasksUpdated });
+            }
+            housekeepingTasksUpdated += 1;
+          }
+          continue;
+        }
+
+        housekeepingTasksToCreate.push({
+          property_id: propertyId,
+          service_date: reservation.check_out,
+          scheduled_date: reservation.check_out,
+          suggested_date: reservation.check_out,
+          service_type: "Housekeeping",
+          service_branch: "housekeeping",
+          status: "Scheduled",
+          off_cycle: false,
+          guest_ready: false,
+          charge: 0,
+          notes: `Auto-created from iCal sync for checkout ${reservation.check_out}.`,
+          source_type: "reservation_housekeeping",
+          source_key: sourceKey,
+          manually_modified: false,
+        });
+        pendingHousekeepingSourceKeys.add(sourceKey);
+      }
+
+      if (housekeepingTasksToCreate.length) {
+        const { error: housekeepingInsertError } = await supabase
+          .from("cleaning_tasks")
+          .insert(housekeepingTasksToCreate);
+        if (housekeepingInsertError) {
+          console.error("sync-ical fatal error", housekeepingInsertError?.message || housekeepingInsertError);
+          return createSuccessResponse(reservationsCreated, tasksCreated, { reservationsParsed, activeReservations: activeReservationCount, oldIgnored, weeklyTasksCreated, guestReadyTasksCreated, housekeepingTasksCreated, housekeepingTasksUpdated });
+        }
+        housekeepingTasksCreated += housekeepingTasksToCreate.length;
+        tasksCreated += housekeepingTasksToCreate.length;
+      }
+    }
+
+    if (!poolServiceActive) {
+      return createSuccessResponse(reservationsCreated, tasksCreated, { reservationsParsed, activeReservations: activeReservationCount, oldIgnored, weeklyTasksCreated, guestReadyTasksCreated, housekeepingTasksCreated, housekeepingTasksUpdated });
     }
 
     const standardDay = property.standard_service_day || "Wednesday";
@@ -834,12 +1010,12 @@ Deno.serve(async (req: Request) => {
     }
 
     console.log("STEP 6 returning success");
-    return createSuccessResponse(reservationsCreated, tasksCreated, { reservationsParsed, activeReservations: activeReservationCount, oldIgnored, weeklyTasksCreated, guestReadyTasksCreated });
+    return createSuccessResponse(reservationsCreated, tasksCreated, { reservationsParsed, activeReservations: activeReservationCount, oldIgnored, weeklyTasksCreated, guestReadyTasksCreated, housekeepingTasksCreated, housekeepingTasksUpdated });
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     const errorStack = error instanceof Error ? error.stack || "no stack" : "no stack";
     console.error("sync-ical fatal error", errorMessage);
     console.error("sync-ical fatal stack", errorStack);
-    return createSuccessResponse(reservationsCreated, tasksCreated, { reservationsParsed, activeReservations: activeReservationCount, oldIgnored, weeklyTasksCreated, guestReadyTasksCreated });
+    return createSuccessResponse(reservationsCreated, tasksCreated, { reservationsParsed, activeReservations: activeReservationCount, oldIgnored, weeklyTasksCreated, guestReadyTasksCreated, housekeepingTasksCreated, housekeepingTasksUpdated });
   }
 });

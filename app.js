@@ -35,6 +35,7 @@ const COMPANY_BRANCH_OPTIONS = [COMPANY_BRANCH_GUEST_READY, COMPANY_BRANCH_WEEKE
 const SERVICE_BRANCH_POOL = "pool";
 const SERVICE_BRANCH_LAWN = "lawn";
 const SERVICE_BRANCH_MAINTENANCE = "maintenance";
+const SERVICE_BRANCH_HOUSEKEEPING = "housekeeping";
 const BUSINESS_TIME_ZONE = "America/New_York";
 const LAST_AUTO_ICAL_SYNC_STORAGE_KEY = "guestReadyLastAutoIcalSync";
 const AUTO_ICAL_SYNC_COOLDOWN_MS = 10 * 60 * 1000;
@@ -112,7 +113,7 @@ async function loadCurrentAppAccess() {
 
 function normalizeServiceBranch(value) {
   const normalized = String(value || "").trim().toLowerCase();
-  return [SERVICE_BRANCH_POOL, SERVICE_BRANCH_LAWN, SERVICE_BRANCH_MAINTENANCE].includes(normalized)
+  return [SERVICE_BRANCH_POOL, SERVICE_BRANCH_LAWN, SERVICE_BRANCH_MAINTENANCE, SERVICE_BRANCH_HOUSEKEEPING].includes(normalized)
     ? normalized
     : SERVICE_BRANCH_POOL;
 }
@@ -126,6 +127,7 @@ function getServiceBranchLabel(value) {
   const branch = normalizeServiceBranch(value);
   if (branch === SERVICE_BRANCH_LAWN) return "Lawn";
   if (branch === SERVICE_BRANCH_MAINTENANCE) return "Maintenance";
+  if (branch === SERVICE_BRANCH_HOUSEKEEPING) return "Housekeeping";
   return "Pool";
 }
 
@@ -141,6 +143,10 @@ function isMaintenanceTask(task) {
   return normalizeServiceBranch(task?.service_branch) === SERVICE_BRANCH_MAINTENANCE;
 }
 
+function isHousekeepingTask(task) {
+  return normalizeServiceBranch(task?.service_branch) === SERVICE_BRANCH_HOUSEKEEPING;
+}
+
 function taskMatchesActiveWorkspace(task) {
   return normalizeServiceBranch(task?.service_branch) === activeServiceWorkspace;
 }
@@ -148,6 +154,7 @@ function taskMatchesActiveWorkspace(task) {
 function propertySupportsServiceBranch(property, branch = activeServiceWorkspace) {
   if (branch === SERVICE_BRANCH_LAWN) return property?.lawn_service_active === true;
   if (branch === SERVICE_BRANCH_MAINTENANCE) return true;
+  if (branch === SERVICE_BRANCH_HOUSEKEEPING) return property?.housekeeping_service_active === true;
   return property?.pool_service_active !== false;
 }
 
@@ -338,6 +345,7 @@ const propertyInvoiceNotes = document.getElementById("propertyInvoiceNotes");
 const propertyCompanyBranch = document.getElementById("propertyCompanyBranch");
 const propertyStatus = document.getElementById("propertyStatus");
 const propertyPoolServiceActive = document.getElementById("propertyPoolServiceActive");
+const propertyHousekeepingServiceActive = document.getElementById("propertyHousekeepingServiceActive");
 const propertyServiceFrequency = document.getElementById("propertyServiceFrequency");
 const propertyBiweeklyAnchorDateRow = document.getElementById("propertyBiweeklyAnchorDateRow");
 const propertyBiweeklyAnchorDate = document.getElementById("propertyBiweeklyAnchorDate");
@@ -1386,7 +1394,8 @@ function setActiveServiceWorkspace(branch) {
 
   const isLawn = activeServiceWorkspace === SERVICE_BRANCH_LAWN;
   const isMaintenance = activeServiceWorkspace === SERVICE_BRANCH_MAINTENANCE;
-  const workspaceLabel = isLawn ? "Lawn" : isMaintenance ? "Maintenance" : "Pool Service";
+  const isHousekeeping = activeServiceWorkspace === SERVICE_BRANCH_HOUSEKEEPING;
+  const workspaceLabel = isLawn ? "Lawn" : isMaintenance ? "Maintenance" : isHousekeeping ? "Housekeeping" : "Pool Service";
   const todayHeader = document.querySelector("#todayView .view-header");
   const weekHeader = document.querySelector("#weekView .view-header");
   const propertiesHeader = document.querySelector("#propertiesView .view-header");
@@ -2349,6 +2358,7 @@ function openEditModal(id) {
   if (propertyCompanyBranch) propertyCompanyBranch.value = normalizeCompanyBranch(property.company_branch);
   if (propertyStatus) propertyStatus.value = isPropertyActive(property) ? "active" : "inactive";
   if (propertyPoolServiceActive) propertyPoolServiceActive.value = property.pool_service_active === false ? "no" : "yes";
+  if (propertyHousekeepingServiceActive) propertyHousekeepingServiceActive.value = property.housekeeping_service_active === true ? "yes" : "no";
   if (propertyServiceFrequency) propertyServiceFrequency.value = getPropertyFrequencyForScheduling(property);
   if (propertyBiweeklyAnchorDate) {
     propertyBiweeklyAnchorDate.value = getBiweeklyAnchorDateForScheduling(property);
@@ -2641,7 +2651,11 @@ function openCleaningModal(propertyId = null, prefilledDate = null) {
 
   cleaningDate.value = prefilledDate || new Date().toISOString().split("T")[0];
   if (cleaningServiceBranch) cleaningServiceBranch.value = activeServiceWorkspace;
-  cleaningServiceType.value = activeServiceWorkspace === SERVICE_BRANCH_LAWN ? "Lawn Service" : "Manual";
+  cleaningServiceType.value = activeServiceWorkspace === SERVICE_BRANCH_LAWN
+    ? "Lawn Service"
+    : activeServiceWorkspace === SERVICE_BRANCH_HOUSEKEEPING
+      ? "Housekeeping"
+      : "Manual";
   cleaningServiceType.disabled = activeServiceWorkspace !== SERVICE_BRANCH_POOL;
   if (cleaningWeeklyServiceLevel) cleaningWeeklyServiceLevel.value = WEEKLY_SERVICE_LEVEL_FULL;
   cleaningStatus.value = "Scheduled";
@@ -4818,6 +4832,7 @@ async function saveProperty() {
   const selectedPropertyActive = String(propertyStatus?.value || "active") !== "inactive";
   const selectedPoolServiceActive = String(propertyPoolServiceActive?.value || "yes") === "yes";
   const selectedLawnServiceActive = String(propertyLawnServiceActive?.value || "no") === "yes";
+  const selectedHousekeepingServiceActive = String(propertyHousekeepingServiceActive?.value || "no") === "yes";
   const selectedLawnFrequency = normalizeServiceFrequency(propertyLawnServiceFrequency?.value);
   const selectedLawnAnchorDate = selectedLawnFrequency === SERVICE_FREQUENCY_BIWEEKLY
     ? normalizeBiweeklyAnchorDate(propertyLawnBiweeklyAnchorDate?.value)
@@ -4900,6 +4915,7 @@ async function saveProperty() {
     service_frequency: selectedServiceFrequency,
     biweekly_anchor_date: selectedBiweeklyAnchorDate,
     pool_service_active: selectedPoolServiceActive,
+    housekeeping_service_active: selectedHousekeepingServiceActive,
     lawn_service_active: selectedLawnServiceActive,
     lawn_service_frequency: selectedLawnFrequency,
     lawn_service_day: String(propertyLawnServiceDay?.value || "Wednesday"),
@@ -4947,6 +4963,7 @@ async function saveProperty() {
     "company_branch",
     "service_frequency",
     "biweekly_anchor_date",
+    "housekeeping_service_active",
     "active",
   ];
 
@@ -5089,7 +5106,12 @@ function syncAllIcal({ automatic = false } = {}) {
 
 async function runSyncAllIcal({ automatic }) {
   const allProperties = properties;
-  const icalProperties = allProperties.filter((p) => p.ical_url && isPropertyActive(p) && propertySupportsServiceBranch(p, SERVICE_BRANCH_POOL));
+  const icalProperties = allProperties.filter((p) => p.ical_url
+    && isPropertyActive(p)
+    && (
+      propertySupportsServiceBranch(p, SERVICE_BRANCH_POOL)
+      || propertySupportsServiceBranch(p, SERVICE_BRANCH_HOUSEKEEPING)
+    ));
 
   if (icalProperties.length === 0) {
     syncAllStatus.textContent = "No active properties with an iCal URL configured.";
@@ -5116,8 +5138,8 @@ async function runSyncAllIcal({ automatic }) {
       results.push({ propertyName: p.property_name, skipped: true, skippedReason: "Property inactive" });
       continue;
     }
-    if (!propertySupportsServiceBranch(p, SERVICE_BRANCH_POOL)) {
-      results.push({ propertyName: p.property_name, skipped: true, skippedReason: "Pool Service inactive" });
+    if (!propertySupportsServiceBranch(p, SERVICE_BRANCH_POOL) && !propertySupportsServiceBranch(p, SERVICE_BRANCH_HOUSEKEEPING)) {
+      results.push({ propertyName: p.property_name, skipped: true, skippedReason: "Pool and Housekeeping inactive" });
     }
   }
 
@@ -5139,10 +5161,16 @@ async function runSyncAllIcal({ automatic }) {
       if (error) {
         result.error = error.message || String(error);
         console.log(`[SyncAll] ERROR for "${property.property_name}":`, result.error);
+      } else if (
+        propertySupportsServiceBranch(property, SERVICE_BRANCH_HOUSEKEEPING)
+        && !Object.prototype.hasOwnProperty.call(data || {}, "housekeepingTasksCreated")
+      ) {
+        result.error = "Housekeeping sync is not deployed. Deploy the updated sync-ical Edge Function, then sync again.";
+        console.log(`[SyncAll] OUTDATED FUNCTION for "${property.property_name}":`, result.error);
       } else {
         result.success = true;
         result.data = data;
-        console.log(`[SyncAll] SUCCESS for "${property.property_name}": parsed=${data?.reservationsParsed ?? "?"} active=${data?.activeReservations ?? "?"} ignored=${data?.oldIgnored ?? "?"} saved=${data?.reservationsCreated ?? 0} weekly=${data?.weeklyTasksCreated ?? 0} guestReady=${data?.guestReadyTasksCreated ?? 0}`);
+        console.log(`[SyncAll] SUCCESS for "${property.property_name}": parsed=${data?.reservationsParsed ?? "?"} active=${data?.activeReservations ?? "?"} ignored=${data?.oldIgnored ?? "?"} saved=${data?.reservationsCreated ?? 0} weekly=${data?.weeklyTasksCreated ?? 0} guestReady=${data?.guestReadyTasksCreated ?? 0} housekeepingCreated=${data?.housekeepingTasksCreated ?? 0} housekeepingUpdated=${data?.housekeepingTasksUpdated ?? 0}`);
       }
     } catch (invokeError) {
       result.error = invokeError?.message || String(invokeError);
@@ -5191,7 +5219,7 @@ function renderSyncReport(results) {
       return `
         <tr class="sync-row-skipped">
           <td>${r.propertyName}</td>
-          <td colspan="8" class="sync-skipped-label">Skipped — ${r.skippedReason || "Not eligible"}</td>
+          <td colspan="10" class="sync-skipped-label">Skipped — ${r.skippedReason || "Not eligible"}</td>
         </tr>`;
     }
     if (!r.success) {
@@ -5199,7 +5227,7 @@ function renderSyncReport(results) {
         <tr class="sync-row-error">
           <td>${r.propertyName}</td>
           <td>✓</td>
-          <td colspan="6">—</td>
+          <td colspan="8">—</td>
           <td class="sync-error-msg">${r.error || "Unknown error"}</td>
         </tr>`;
     }
@@ -5214,6 +5242,8 @@ function renderSyncReport(results) {
         <td>${d.reservationsCreated ?? 0}</td>
         <td>${d.weeklyTasksCreated ?? 0}</td>
         <td>${d.guestReadyTasksCreated ?? 0}</td>
+        <td>${d.housekeepingTasksCreated ?? 0}</td>
+        <td>${d.housekeepingTasksUpdated ?? 0}</td>
         <td class="sync-ok-label">OK</td>
       </tr>`;
   }).join("");
@@ -5235,6 +5265,8 @@ function renderSyncReport(results) {
             <th>Saved</th>
             <th>Weekly Tasks</th>
             <th>Guest Ready Tasks</th>
+            <th>Housekeeping Created</th>
+            <th>Housekeeping Updated</th>
             <th>Result</th>
           </tr>
         </thead>
@@ -5263,8 +5295,11 @@ async function syncPropertyIcal(propertyId) {
     return;
   }
 
-  if (!propertySupportsServiceBranch(property, SERVICE_BRANCH_POOL)) {
-    statusMessage.textContent = "Pool Service is inactive for this property.";
+  if (
+    !propertySupportsServiceBranch(property, SERVICE_BRANCH_POOL)
+    && !propertySupportsServiceBranch(property, SERVICE_BRANCH_HOUSEKEEPING)
+  ) {
+    statusMessage.textContent = "Pool Service and Housekeeping are inactive for this property.";
     return;
   }
 
@@ -5293,13 +5328,21 @@ async function syncPropertyIcal(propertyId) {
     return;
   }
 
+  if (
+    propertySupportsServiceBranch(property, SERVICE_BRANCH_HOUSEKEEPING)
+    && !Object.prototype.hasOwnProperty.call(data || {}, "housekeepingTasksCreated")
+  ) {
+    statusMessage.textContent = "Housekeeping sync is not deployed. Deploy the updated sync-ical Edge Function, then sync again.";
+    return;
+  }
+
   try {
     await loadData();
   } catch (loadError) {
     console.log("[SynciCal] loadData() threw after sync — suppressing to preserve result message:", loadError);
   }
 
-  const successMsg = `iCal sync complete: ${data?.reservationsCreated ?? 0} reservation(s) saved, ${data?.tasksCreated ?? 0} Guest Ready task(s) created.`;
+  const successMsg = `iCal sync complete: ${data?.reservationsCreated ?? 0} reservation(s) saved, ${data?.guestReadyTasksCreated ?? 0} Guest Ready task(s), ${data?.housekeepingTasksCreated ?? 0} Housekeeping task(s) created, ${data?.housekeepingTasksUpdated ?? 0} Housekeeping task(s) updated.`;
   console.log("[SynciCal] Success message:", successMsg);
   statusMessage.textContent = successMsg;
 }
@@ -6042,6 +6085,7 @@ function clearPropertyForm() {
   if (propertyCompanyBranch) propertyCompanyBranch.value = COMPANY_BRANCH_GUEST_READY;
   if (propertyStatus) propertyStatus.value = "active";
   if (propertyPoolServiceActive) propertyPoolServiceActive.value = "yes";
+  if (propertyHousekeepingServiceActive) propertyHousekeepingServiceActive.value = "no";
   if (propertyServiceFrequency) propertyServiceFrequency.value = SERVICE_FREQUENCY_WEEKLY;
   if (propertyBiweeklyAnchorDate) propertyBiweeklyAnchorDate.value = "";
   if (propertyLawnServiceActive) propertyLawnServiceActive.value = "no";
@@ -6450,9 +6494,13 @@ function reservationMatchesTaskProperty(reservation, taskProperty) {
 }
 
 function getSameDayTurnoverForTask(task) {
-  if (!isTaskGuestReady(task)) return null;
+  if (!isTaskGuestReady(task) && !isHousekeepingTask(task)) return null;
 
-  const taskDate = normalizeDateKey(task?.service_date || task?.scheduled_date || task?.serviceDate || task?.date);
+  const taskDate = normalizeDateKey(
+    isHousekeepingTask(task)
+      ? task?.suggested_date || task?.original_service_date || task?.service_date || task?.scheduled_date
+      : task?.service_date || task?.scheduled_date || task?.serviceDate || task?.date
+  );
   const taskProperty = getTaskPropertyMatchInfo(task);
   const hasPropertyMatchKey = Boolean(taskProperty.propertyId || taskProperty.propertyNameFromProperty || taskProperty.taskPropertyName);
 
@@ -6523,6 +6571,40 @@ function getSameDayTurnoverForTask(task) {
   }
 
   return null;
+}
+
+function getHousekeepingTurnoverContext(task) {
+  if (!isHousekeepingTask(task)) return null;
+
+  const checkoutDate = normalizeDateKey(task?.suggested_date || task?.original_service_date || task?.service_date || task?.scheduled_date);
+  const taskProperty = getTaskPropertyMatchInfo(task);
+  if (!checkoutDate || !taskProperty.propertyId) return null;
+
+  const nextCheckInDate = reservations
+    .filter((reservation) => reservationMatchesTaskProperty(reservation, taskProperty))
+    .map((reservation) => normalizeDateKey(reservation?.check_in ?? reservation?.checkIn ?? reservation?.startDate))
+    .filter((checkInDate) => checkInDate && checkInDate >= checkoutDate)
+    .sort()[0] || null;
+
+  return {
+    checkoutDate,
+    nextCheckInDate,
+    sameDayTurnover: nextCheckInDate === checkoutDate,
+    urgent: Boolean(nextCheckInDate && nextCheckInDate <= getBusinessDateValue() && String(task?.status || "Scheduled").toLowerCase() !== "completed"),
+  };
+}
+
+function getHousekeepingOperationalMarkup(task, { compact = false } = {}) {
+  const context = getHousekeepingTurnoverContext(task);
+  if (!context) return "";
+  if (compact) {
+    return context.nextCheckInDate
+      ? `<div class="task-line"><small>Checkout: ${context.checkoutDate} · Next check-in: ${context.nextCheckInDate}</small></div>`
+      : `<div class="task-line"><small>Checkout: ${context.checkoutDate}</small></div>`;
+  }
+  return `
+    <div><strong>Checkout Date:</strong> ${context.checkoutDate}</div>
+    ${context.nextCheckInDate ? `<div><strong>Next Check-In:</strong> ${context.nextCheckInDate}</div>` : ""}`;
 }
 
 function isSameDayTurnoverTask(task) {
@@ -12122,6 +12204,7 @@ function renderTaskCard(task) {
   const carryForwardInfo = getCarryForwardInfo(task);
   const carryForwardBadge = getCarryForwardBadgeMarkup(task);
   const carryForwardHistory = getCarryForwardHistoryMarkup(task);
+  const housekeepingOperationalMarkup = getHousekeepingOperationalMarkup(task);
 
   return `
     <div class="${cardClass} ${carryForwardInfo?.urgent ? "carried-forward-urgent-card" : carryForwardInfo ? "carried-forward-card" : ""}">
@@ -12150,6 +12233,7 @@ function renderTaskCard(task) {
         ${laborSnapshotLine}
         ${partsCostLine}
         ${staffOperationalMarkup}
+        ${housekeepingOperationalMarkup}
         ${task.check_in_date ? `<div><strong>Check-In:</strong> ${task.check_in_date}</div>` : ""}
         ${carryForwardHistory}
         <div><strong>Status:</strong> <span class="status-badge ${badgeClass}">${status}</span></div>
@@ -12213,16 +12297,22 @@ function getGuestProtectionAlerts() {
 
 function renderGuestProtectionAlerts() {
   const alerts = getGuestProtectionAlerts();
+  const urgentHousekeepingTasks = cleaningTasks.filter((task) => getHousekeepingTurnoverContext(task)?.urgent);
 
-  if (alerts.length === 0) {
+  if (alerts.length === 0 && urgentHousekeepingTasks.length === 0) {
     guestProtectionAlertsContainer.innerHTML = "";
     return;
   }
 
   guestProtectionAlertsContainer.innerHTML = `
-    <div class="guest-protection-summary summary-red">
-      🚨 ${alerts.length} Same-Day Turnover Alert${alerts.length !== 1 ? "s" : ""} &mdash; check Week View for details.
-    </div>
+    ${alerts.length ? `
+      <div class="guest-protection-summary summary-red">
+        🚨 ${alerts.length} Same-Day Turnover Alert${alerts.length !== 1 ? "s" : ""} &mdash; check Week View for details.
+      </div>` : ""}
+    ${urgentHousekeepingTasks.length ? `
+      <div class="guest-protection-summary summary-red">
+        URGENT: ${urgentHousekeepingTasks.length} unfinished Housekeeping turnover${urgentHousekeepingTasks.length !== 1 ? "s" : ""} at or past guest check-in.
+      </div>` : ""}
   `;
 }
 
@@ -12232,6 +12322,11 @@ function getAlertBadgeForTask(task) {
     const pName = String(turnover.propertyName || getPropertyName(task.property_id) || "Unknown Property").replace(/'/g, "\\'");
     return `<span class="task-alert-badge badge-alert-red" style="cursor:pointer"
       onclick="openAlertDetail('${pName}','${turnover.turnoverDate}','${turnover.checkOutDate}','${turnover.checkInDate}')">🚨 Same-Day Turnover</span>`;
+  }
+
+  const housekeepingContext = getHousekeepingTurnoverContext(task);
+  if (housekeepingContext?.urgent) {
+    return `<span class="task-alert-badge badge-alert-red">URGENT: Guest Check-In Reached</span>`;
   }
 
   return "";
@@ -12303,11 +12398,14 @@ function renderOperationsRemindersWidget() {
 }
 
 function renderTaskViews() {
-  if (activeServiceWorkspace === SERVICE_BRANCH_POOL) {
+  if (activeServiceWorkspace === SERVICE_BRANCH_POOL || activeServiceWorkspace === SERVICE_BRANCH_HOUSEKEEPING) {
     renderGuestProtectionAlerts();
-    renderOperationsRemindersWidget();
   } else {
     guestProtectionAlertsContainer.innerHTML = "";
+  }
+  if (activeServiceWorkspace === SERVICE_BRANCH_POOL) {
+    renderOperationsRemindersWidget();
+  } else {
     operationsRemindersWidget.innerHTML = "";
   }
 
@@ -12719,6 +12817,7 @@ function renderWeekViewListTaskCard(task) {
       ${laborSnapshotLine}
       ${partsCostLine}
       ${staffOperationalMarkup}
+      ${getHousekeepingOperationalMarkup(task, { compact: true })}
       ${task.check_in_date ? `<div class="task-line"><small>Prior to check-in: ${task.check_in_date}</small></div>` : ""}
       ${carryForwardHistory}
       <div class="task-line"><small>Status: ${status}</small></div>
@@ -13063,6 +13162,7 @@ function renderProperties() {
               ${technicianMarkup}
               ${laborSnapshotLine}
               ${partsCostLine}
+              ${getHousekeepingOperationalMarkup(task, { compact: true })}
               ${carryForwardHistory}
               <div class="task-line"><small>Status: ${task.status}</small></div>
               ${task.completed_at ? `<div class="task-line"><small>Completed: ${new Date(task.completed_at).toLocaleString()}</small></div>` : ""}
@@ -13097,6 +13197,7 @@ function renderProperties() {
           <div><strong>Billing Email:</strong> ${property.billing_email || "Not entered"}</div>
           <div><strong>Account / Reference:</strong> ${property.billing_account_reference || "Not entered"}</div>
           <div><strong>Address:</strong> ${property.address || "Not entered"}</div>
+          <div><strong>Housekeeping:</strong> ${property.housekeeping_service_active === true ? "Active" : "Inactive"}</div>
           ${activeServiceWorkspace === SERVICE_BRANCH_LAWN ? `
             <div><strong>Lawn Day:</strong> ${property.lawn_service_day || "Wednesday"}</div>
             <div><strong>Lawn Frequency:</strong> ${getServiceFrequencyLabel(property.lawn_service_frequency)}</div>
@@ -13126,7 +13227,7 @@ function renderProperties() {
 
         <div class="card-actions">
           <button onclick="openCleaningModal('${property.id}')">+ ${getServiceBranchLabel(activeServiceWorkspace)} Task</button>
-          <button onclick="openPipelineJobModal('${property.id}')">+ Add to Pipeline</button>
+          ${activeServiceWorkspace !== SERVICE_BRANCH_HOUSEKEEPING ? `<button onclick="openPipelineJobModal('${property.id}')">+ Add to Pipeline</button>` : ""}
           <button onclick="openEditModal('${property.id}')">Edit</button>
           <button class="delete-btn" onclick="deleteProperty('${property.id}')">Delete</button>
         </div>
@@ -13845,7 +13946,8 @@ function renderManagerProperties() {
               ${renderSdsReconcileControl(task)}
             </div>
             ${getCarryForwardBadgeMarkup(task)}
-            ${isSameDayCheckInGuestReadyTask(task) ? '<span class="task-alert-badge badge-alert-red">Same-Day Check-In</span>' : ""}
+            ${getAlertBadgeForTask(task)}
+            ${getHousekeepingOperationalMarkup(task, { compact: true })}
             ${getCarryForwardHistoryMarkup(task)}
             <div class="task-line"><small>Status: ${escapeHtml(task.status || "Scheduled")}</small></div>
             ${task.service_type === "Weekly Standard" ? `<div class="task-line"><small>Service Level: ${escapeHtml(getWeeklyServiceLevelLabel(getWeeklyServiceLevelForTask(task)))}</small></div>` : ""}
@@ -13885,6 +13987,7 @@ function renderManagerProperties() {
           <div><strong>Access / Gate:</strong> ${escapeHtml(property.gate_access_instructions || "Not entered")}</div>
           <div><strong>Service Notes:</strong> ${escapeHtml(property.service_notes || "Not entered")}</div>
           <div><strong>Equipment / Service:</strong> ${escapeHtml(property.equipment_service_info || "Not entered")}</div>
+          <div><strong>Housekeeping:</strong> ${property.housekeeping_service_active === true ? "Active" : "Inactive"}</div>
           ${activeServiceWorkspace === SERVICE_BRANCH_POOL ? `
             <div><strong>SafetyCulture Checklist:</strong> ${checklistUrl ? `<a href="${escapeHtml(checklistUrl)}" target="_blank" rel="noopener noreferrer">Open Checklist</a>` : "Not entered"}</div>
             <div><strong>Standard Service Day:</strong> ${escapeHtml(property.standard_service_day || "Wednesday")}</div>

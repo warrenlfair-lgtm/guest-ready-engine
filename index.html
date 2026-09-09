@@ -71,6 +71,7 @@
     <button type="button" class="service-workspace-btn active" data-service-workspace="pool">Pool Service</button>
     <button type="button" class="service-workspace-btn" data-service-workspace="lawn">Lawn</button>
     <button type="button" class="service-workspace-btn" data-service-workspace="maintenance">Maintenance</button>
+    <button type="button" class="service-workspace-btn" data-service-workspace="housekeeping">Housekeeping</button>
   </div>
 
   <div class="top-actions admin-only">
@@ -144,6 +145,7 @@
             <option value="pool">Pool Service</option>
             <option value="lawn">Lawn</option>
             <option value="maintenance">Maintenance</option>
+            <option value="housekeeping">Housekeeping</option>
           </select>
         </div>
         <div id="monthAddTaskSlot"></div>
@@ -1006,6 +1008,16 @@
         <input id="propertyLawnLaborAmount" type="number" min="0" step="0.01" value="0">
       </div>
 
+      <div class="property-service-section">
+        <h3>Housekeeping</h3>
+
+        <label>Housekeeping Active</label>
+        <select id="propertyHousekeepingServiceActive">
+          <option value="no" selected>No</option>
+          <option value="yes">Yes</option>
+        </select>
+      </div>
+
       <label>Taxable</label>
       <select id="propertyTaxable">
         <option value="yes">Yes</option>
@@ -1148,6 +1160,7 @@
           <option value="pool">Pool</option>
           <option value="lawn">Lawn</option>
           <option value="maintenance">Maintenance</option>
+          <option value="housekeeping">Housekeeping</option>
         </select>
       </div>
 
@@ -1156,6 +1169,7 @@
         <option value="Weekly Standard">Weekly Standard</option>
         <option value="Guest Ready">Guest Ready</option>
           <option value="Lawn Service">Lawn Service</option>
+        <option value="Housekeeping">Housekeeping</option>
         <option value="Manual">Manual</option>
         <option value="Off-Cycle">Off-Cycle</option>
       </select>
