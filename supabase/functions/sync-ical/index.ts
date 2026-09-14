@@ -157,6 +157,12 @@ function normalizeDateKey(value: string | null | undefined) {
   return match ? match[1] : "";
 }
 
+function isAutoTaskDateOnOrAfterPropertyStart(serviceDate: string, propertyStartDate: string) {
+  const normalizedServiceDate = normalizeDateKey(serviceDate);
+  const normalizedPropertyStartDate = normalizeDateKey(propertyStartDate);
+  return Boolean(normalizedServiceDate) && (!normalizedPropertyStartDate || normalizedServiceDate >= normalizedPropertyStartDate);
+}
+
 function isDateOnBiweeklyCycle(serviceDate: string, anchorDate: string) {
   const normalizedServiceDate = normalizeDateKey(serviceDate);
   const normalizedAnchorDate = normalizeDateKey(anchorDate);
@@ -319,7 +325,9 @@ Deno.serve(async (req: Request) => {
       coverage_rule: string | null;
       service_frequency: string | null;
       biweekly_anchor_date: string | null;
+      task_generation_start_date: string;
     };
+    const propertyStartDate = normalizeDateKey(property.task_generation_start_date);
     const poolServiceActive = property.pool_service_active !== false;
     const housekeepingServiceActive = property.housekeeping_service_active === true;
     if (property.active === false || (!poolServiceActive && !housekeepingServiceActive)) {
@@ -556,6 +564,7 @@ Deno.serve(async (req: Request) => {
 
       for (const reservation of activeReservations) {
         if (!reservation.check_out) continue;
+        if (!isAutoTaskDateOnOrAfterPropertyStart(reservation.check_out, propertyStartDate)) continue;
         const sourceKey = getHousekeepingSourceKey(propertyId, reservation);
         if (pendingHousekeepingSourceKeys.has(sourceKey)) continue;
         const existingTask = housekeepingTaskMap.get(sourceKey);
@@ -648,6 +657,9 @@ Deno.serve(async (req: Request) => {
     for (const reservation of activeReservations) {
       if (!reservation.check_in) continue;
       const service_date = getServiceDateForWeek(reservation.check_in, standardDay);
+      if (!isAutoTaskDateOnOrAfterPropertyStart(service_date, propertyStartDate)) {
+        continue;
+      }
       if (useBiweekly && !isDateOnBiweeklyCycle(service_date, biweeklyAnchorDate)) {
         continue;
       }
@@ -776,7 +788,8 @@ Deno.serve(async (req: Request) => {
       const isSameDayAsStandard = reservation.check_in === service_date;
       const source_key = `wk:${propertyId}:${service_date}`;
       const weeklyTask = existingWeeklyTaskMap.get(source_key);
-      const shouldUseWeeklyForReservation = !useBiweekly || isDateOnBiweeklyCycle(service_date, biweeklyAnchorDate);
+      const shouldUseWeeklyForReservation = isAutoTaskDateOnOrAfterPropertyStart(service_date, propertyStartDate)
+        && (!useBiweekly || isDateOnBiweeklyCycle(service_date, biweeklyAnchorDate));
 
       if (shouldUseWeeklyForReservation && guestReadyWithinWindow) {
         suppressedWeeklySourceKeys.add(source_key);
@@ -824,6 +837,10 @@ Deno.serve(async (req: Request) => {
             }
           }
         }
+      }
+
+      if (!isAutoTaskDateOnOrAfterPropertyStart(guestReadyServiceDate, propertyStartDate)) {
+        continue;
       }
 
       const guestReadyCharge = getGuestReadyCharge(guestReadyServiceDate, standardDay, coverageRule, property.default_off_cycle_charge);
@@ -902,6 +919,7 @@ Deno.serve(async (req: Request) => {
     }
 
     const weeklyTasksToCreate = Array.from(pendingWeeklyTasks.entries())
+      .filter(([service_date]) => isAutoTaskDateOnOrAfterPropertyStart(service_date, propertyStartDate))
       .filter(([service_date]) => !suppressedWeeklySourceKeys.has(`wk:${propertyId}:${service_date}`))
       .map(([service_date, payload]) => ({
       property_id: propertyId,

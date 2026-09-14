@@ -169,6 +169,12 @@ function getBusinessDateValue(date = new Date()) {
   return `${values.year}-${values.month}-${values.day}`;
 }
 
+function isAutoTaskDateOnOrAfterPropertyStart(property, serviceDate) {
+  const normalizedServiceDate = normalizeDateKey(serviceDate);
+  const propertyStartDate = normalizeDateKey(property?.task_generation_start_date || property?.created_at);
+  return Boolean(normalizedServiceDate) && (!propertyStartDate || normalizedServiceDate >= propertyStartDate);
+}
+
 function getTaskRescheduleTargetBlockReason(selectedDate) {
   const normalizedDate = normalizeDateKey(selectedDate);
   if (!normalizedDate) return "A valid service date is required.";
@@ -3654,6 +3660,10 @@ async function ensureWeeklyStandardTasksForMonth(monthType) {
     const serviceDates = getWeeklyGenerationServiceDatesForProperty(property, monthType);
 
     for (const serviceDate of serviceDates) {
+      if (!isAutoTaskDateOnOrAfterPropertyStart(property, serviceDate)) {
+        continue;
+      }
+
       if (hasExistingWeeklyTask(property.id, serviceDate)) {
         continue;
       }
@@ -3740,6 +3750,7 @@ async function ensureLawnTasksForMonth(monthType) {
       if (frequency === SERVICE_FREQUENCY_BIWEEKLY && !normalizeBiweeklyAnchorDate(property.lawn_biweekly_anchor_date)) return;
 
       getLawnGenerationServiceDatesForProperty(property, monthType).forEach((serviceDate) => {
+        if (!isAutoTaskDateOnOrAfterPropertyStart(property, serviceDate)) return;
         if (hasExistingLawnTask(property.id, serviceDate)) return;
         tasksToCreate.push({
           property_id: property.id,
@@ -4938,6 +4949,10 @@ async function saveProperty() {
     lawn_labor_amount: Math.max(0, Number(propertyLawnLaborAmount?.value || 0)),
     active: selectedPropertyActive
   };
+
+  if (!editingPropertyId) {
+    propertyData.task_generation_start_date = getBusinessDateValue();
+  }
 
   if (!propertyData.property_name) {
     alert("Property name is required.");
