@@ -2590,6 +2590,56 @@ function getFutureAutoWeeklyTasksOutsideSchedule(propertyId, nextSchedule, fromD
   });
 }
 
+function getDeactivatedPropertyServiceBranches(existingProperty, nextBranchState) {
+  if (!existingProperty) return [];
+
+  return [
+    {
+      branch: SERVICE_BRANCH_POOL,
+      label: "Pool Service",
+      wasActive: existingProperty.pool_service_active !== false,
+      isActive: nextBranchState.pool,
+    },
+    {
+      branch: SERVICE_BRANCH_LAWN,
+      label: "Lawn",
+      wasActive: existingProperty.lawn_service_active === true,
+      isActive: nextBranchState.lawn,
+    },
+    {
+      branch: SERVICE_BRANCH_HOUSEKEEPING,
+      label: "Housekeeping",
+      wasActive: existingProperty.housekeeping_service_active === true,
+      isActive: nextBranchState.housekeeping,
+    },
+  ].filter((entry) => entry.wasActive && !entry.isActive);
+}
+
+async function cleanupDeactivatedPropertyServiceBranches(propertyId, deactivatedBranches) {
+  const results = [];
+
+  for (const entry of deactivatedBranches) {
+    const { data, error } = await supabaseClient.rpc("cleanup_deactivated_property_branch_tasks", {
+      selected_property_id: propertyId,
+      selected_service_branch: entry.branch,
+    });
+    if (error) {
+      results.push({ ...entry, error });
+      continue;
+    }
+
+    const result = Array.isArray(data) ? data[0] : data;
+    results.push({
+      ...entry,
+      removedCount: Number(result?.removed_count || 0),
+      preservedInProgressCount: Number(result?.preserved_in_progress_count || 0),
+      error: null,
+    });
+  }
+
+  return results;
+}
+
 const WEEKLY_SERVICE_LEVEL_FULL = "full_service";
 const WEEKLY_SERVICE_LEVEL_HEALTH = "health_check";
 
@@ -4873,6 +4923,11 @@ async function saveProperty() {
   }
 
   const existingProperty = editingPropertyId ? properties.find((property) => property.id === editingPropertyId) : null;
+  const deactivatedServiceBranches = getDeactivatedPropertyServiceBranches(existingProperty, {
+    pool: selectedPoolServiceActive,
+    lawn: selectedLawnServiceActive,
+    housekeeping: selectedHousekeepingServiceActive,
+  });
   const deactivatingProperty = Boolean(existingProperty)
     && isPropertyActive(existingProperty)
     && !selectedPropertyActive;
@@ -4895,7 +4950,7 @@ async function saveProperty() {
       || existingStandardDay !== (String(standardDay.value || "").trim() || "Wednesday")
     );
 
-  const staleFutureAutoWeeklyTasks = scheduleChanged && !deactivatingProperty
+  const staleFutureAutoWeeklyTasks = scheduleChanged && !deactivatingProperty && selectedPoolServiceActive
     ? getFutureAutoWeeklyTasksOutsideSchedule(editingPropertyId, nextSchedule, todayKey)
     : [];
 
@@ -5025,6 +5080,10 @@ async function saveProperty() {
     return;
   }
 
+  const branchCleanupResults = deactivatedServiceBranches.length
+    ? await cleanupDeactivatedPropertyServiceBranches(editingPropertyId, deactivatedServiceBranches)
+    : [];
+
   if (staleFutureAutoWeeklyTasks.length > 0) {
     const staleTaskIds = staleFutureAutoWeeklyTasks.map((task) => task.id).filter(Boolean);
     if (staleTaskIds.length > 0) {
@@ -5042,6 +5101,19 @@ async function saveProperty() {
   clearPropertyForm();
   closePropertyModal();
   await loadData();
+
+  if (branchCleanupResults.length > 0) {
+    statusMessage.textContent = branchCleanupResults.map((entry) => {
+      if (entry.error) {
+        return `${entry.label} disabled, but automatic task cleanup failed: ${entry.error.message}`;
+      }
+      const removedLabel = `${entry.removedCount} scheduled auto-generated task${entry.removedCount === 1 ? "" : "s"} removed.`;
+      const preservedLabel = entry.preservedInProgressCount > 0
+        ? ` ${entry.preservedInProgressCount} in-progress task${entry.preservedInProgressCount === 1 ? " was" : "s were"} preserved.`
+        : "";
+      return `${entry.label} disabled. ${removedLabel}${preservedLabel}`;
+    }).join(" ");
+  }
 }
 
 async function deleteProperty(id) {
