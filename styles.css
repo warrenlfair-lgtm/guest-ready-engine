@@ -1298,6 +1298,15 @@ button:hover {
     padding: 0 16px 14px;
 }
 
+.schedule-history-modal-section {
+    margin: 10px 0 14px;
+    padding-top: 2px;
+}
+
+.schedule-history-modal-section .schedule-history-panel {
+    margin-top: 0;
+}
+
 .edit-task-modal-body .chemical-usage-list {
     max-height: 260px;
     overflow-y: auto;
@@ -2052,6 +2061,66 @@ textarea{
     color: #78350f;
     font-size: 12px;
     line-height: 1.55;
+}
+
+.schedule-changed-badge {
+    display: inline-block;
+    width: fit-content;
+    margin: 3px 0;
+    padding: 2px 6px;
+    border: 1px solid #94a3b8;
+    border-radius: 3px;
+    background: #f8fafc;
+    color: #334155;
+    font-size: 10px;
+    font-weight: 800;
+    line-height: 1.35;
+}
+
+.schedule-history-details {
+    margin: 8px 0;
+    font-size: 12px;
+}
+
+.schedule-history-details summary {
+    cursor: pointer;
+    color: #334155;
+    font-weight: 700;
+}
+
+.schedule-history-details summary .schedule-changed-badge {
+    margin-right: 5px;
+}
+
+.schedule-history-panel {
+    margin-top: 7px;
+    padding: 9px 10px;
+    border-left: 3px solid #64748b;
+    background: #f8fafc;
+    color: #1f2937;
+}
+
+.schedule-history-title {
+    margin-bottom: 5px;
+    color: #0f172a;
+    font-size: 11px;
+    font-weight: 800;
+    text-transform: uppercase;
+}
+
+.schedule-history-original {
+    margin-bottom: 7px;
+}
+
+.schedule-history-entry {
+    padding: 7px 0;
+    border-top: 1px solid #cbd5e1;
+    line-height: 1.45;
+}
+
+.schedule-history-meta,
+.schedule-history-actor {
+    color: #64748b;
 }
 
 .carried-forward-card {

@@ -11,6 +11,7 @@ let invoiceItems = [];
 let expenses = [];
 let appUsers = [];
 let propertyContractRevenueHistory = [];
+let taskScheduleHistoryByTaskId = new Map();
 let pipelineJobs = [];
 let pipelineApprovals = [];
 let propertyContractRevenueHistoryAvailable = true;
@@ -380,6 +381,7 @@ const cleaningPartsCost = document.getElementById("cleaningPartsCost");
 const cleaningWeeklyServiceLevelRow = document.getElementById("cleaningWeeklyServiceLevelRow");
 const cleaningWeeklyServiceLevel = document.getElementById("cleaningWeeklyServiceLevel");
 const cleaningNotes = document.getElementById("cleaningNotes");
+const cleaningScheduleHistory = document.getElementById("cleaningScheduleHistory");
 const serviceWorkspaceButtons = Array.from(document.querySelectorAll(".service-workspace-btn"));
 const addChemicalBtn = document.getElementById("addChemicalBtn");
 const chemicalUsageTaskHint = document.getElementById("chemicalUsageTaskHint");
@@ -2739,6 +2741,10 @@ function openCleaningModal(propertyId = null, prefilledDate = null) {
   }
   if (cleaningPartsCost) cleaningPartsCost.value = 0;
   cleaningNotes.value = "";
+  if (cleaningScheduleHistory) {
+    cleaningScheduleHistory.innerHTML = "";
+    cleaningScheduleHistory.classList.add("hidden");
+  }
   syncCleaningServiceTypeDependentFields();
   renderCleaningSafetyCultureAccess();
   clearChemicalUsageForm();
@@ -2797,6 +2803,7 @@ function openEditCleaning(taskId) {
   }
   if (cleaningPartsCost) cleaningPartsCost.value = Math.max(0, Number(task.parts_cost || 0));
   cleaningNotes.value = stripManualBillingOverrideTag(task.notes || "");
+  renderCleaningScheduleHistory(task);
   syncCleaningServiceTypeDependentFields();
   renderCleaningSafetyCultureAccess();
   clearChemicalUsageForm();
@@ -3080,6 +3087,7 @@ async function loadData() {
   await loadProperties();
   await loadPropertyContractRevenueHistory();
   await loadCleaningTasks();
+  await loadTaskScheduleHistory();
   await loadReservations();
   await loadOperationsReminders();
   await loadChemicals();
@@ -3177,6 +3185,7 @@ async function loadStaffOperationalData() {
   invoiceItems = [];
   expenses = [];
   propertyContractRevenueHistory = [];
+  taskScheduleHistoryByTaskId = new Map();
 
   applyCompanyProfileToApp();
   initializeChemicalUsageOptions();
@@ -3213,6 +3222,8 @@ async function loadManagerOperationalData() {
   invoiceItems = [];
   expenses = [];
   propertyContractRevenueHistory = [];
+
+  await loadTaskScheduleHistory();
 
   applyCompanyProfileToApp();
   initializeChemicalUsageOptions();
@@ -4834,6 +4845,33 @@ async function loadCleaningTasks() {
   console.log("All tasks returned from Supabase:", cleaningTasks);
 }
 
+async function loadTaskScheduleHistory() {
+  if (!(isAdminUser() || isManagerUser())) {
+    taskScheduleHistoryByTaskId = new Map();
+    return;
+  }
+
+  const { data, error } = await supabaseClient
+    .from("task_schedule_history")
+    .select("id, task_id, property_id, from_date, to_date, move_type, changed_by, changed_by_label, changed_at")
+    .order("changed_at", { ascending: true });
+
+  if (error) {
+    taskScheduleHistoryByTaskId = new Map();
+    if (!String(error.message || "").toLowerCase().includes("task_schedule_history")) {
+      console.warn("Could not load task schedule history:", error.message);
+    }
+    return;
+  }
+
+  const historyByTaskId = new Map();
+  (data || []).forEach((entry) => {
+    if (!historyByTaskId.has(entry.task_id)) historyByTaskId.set(entry.task_id, []);
+    historyByTaskId.get(entry.task_id).push(entry);
+  });
+  taskScheduleHistoryByTaskId = historyByTaskId;
+}
+
 async function debugCleaningTasks() {
   const { data, error } = await supabaseClient
     .from("cleaning_tasks")
@@ -5529,6 +5567,7 @@ async function saveCleaningTask() {
         const rescheduleResult = await supabaseClient.rpc("manager_reschedule_task", {
           target_task_id: editingCleaningId,
           selected_service_date: selectedServiceDate,
+          selected_move_type: "manual_edit",
         });
         if (rescheduleResult.error) {
           alert("Could not reschedule task: " + rescheduleResult.error.message);
@@ -5686,7 +5725,10 @@ async function saveCleaningTask() {
 
   // If a task's date is being changed, flag it as manually modified
   // so that future syncs do not overwrite it or recreate it on the original date.
-  const isManuallyMoving = editingCleaningId && existingTask?.service_date !== serviceDate;
+  const isManuallyMoving = Boolean(
+    editingCleaningId
+    && normalizeDateKey(existingTask?.service_date || existingTask?.scheduled_date) !== serviceDate
+  );
   const shouldApplyManualBillingOverride = Boolean(editingCleaningId && charge > 0);
   const notesWithOverride = applyManualBillingOverrideTag(cleaningNotes.value.trim(), shouldApplyManualBillingOverride);
   const selectedModalTechnician = findActiveTechnicianByName(cleaningTechnician.value.trim());
@@ -5762,8 +5804,10 @@ async function saveCleaningTask() {
     : (hasManualLaborInput ? manualLaborAmount : Number(existingTask?.labor_amount || 0));
   const task = {
     property_id: selectedCleaningPropertyId,
-    service_date: serviceDate,
-    scheduled_date: serviceDate,
+    ...(!editingCleaningId ? {
+      service_date: serviceDate,
+      scheduled_date: serviceDate,
+    } : {}),
     service_type: serviceType,
     service_branch: existingTask ? existingServiceBranch : serviceBranch,
     weekly_service_level: weeklyServiceLevel,
@@ -5782,16 +5826,23 @@ async function saveCleaningTask() {
     notes: notesWithOverride,
     guest_ready: serviceType === "Guest Ready",
     completed_at: completedAt,
-    ...(isManuallyMoving ? {
-      manually_modified: true,
-      original_service_date: existingTask.original_service_date || normalizeDateKey(existingTask.service_date || existingTask.scheduled_date),
-      overdue_reference_date: serviceDate,
-    } : {}),
     // Only persist an explicit manual SDS override; a blank/0 field leaves any existing reconciled snapshot untouched.
     ...(sdsAmountInput !== null && sdsAmountInput > 0 ? { same_day_surcharge_amount: sdsAmountInput } : {})
   };
 
   let result;
+
+  if (isManuallyMoving) {
+    const rescheduleResult = await supabaseClient.rpc("manager_reschedule_task", {
+      target_task_id: editingCleaningId,
+      selected_service_date: serviceDate,
+      selected_move_type: "manual_edit",
+    });
+    if (rescheduleResult.error) {
+      alert("Could not reschedule task: " + rescheduleResult.error.message);
+      return;
+    }
+  }
 
   if (editingCleaningId) {
     result = await supabaseClient
@@ -12320,6 +12371,92 @@ function getCarryForwardHistoryMarkup(task) {
     </div>`;
 }
 
+
+function getTaskScheduleHistoryEntries(taskId) {
+  return taskScheduleHistoryByTaskId.get(taskId) || [];
+}
+
+function getScheduleMoveTypeLabel(moveType) {
+  const labels = {
+    manual_edit: "Manually Moved",
+    calendar_drag: "Calendar Drag",
+    carry_forward: "Auto Carried Forward",
+    ical_update: "iCal Schedule Update",
+    system_reschedule: "System Reschedule",
+  };
+  return labels[moveType] || "Schedule Updated";
+}
+
+function formatScheduleHistoryActor(label) {
+  const normalized = String(label || "System").trim();
+  if (!normalized || normalized.toLowerCase() === "system") return "System";
+  const localPart = normalized.split("@")[0];
+  return localPart
+    .split(/[._-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ") || normalized;
+}
+
+function formatScheduleHistoryTimestamp(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Time unavailable";
+  return new Intl.DateTimeFormat(undefined, {
+    timeZone: BUSINESS_TIME_ZONE,
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function getScheduleHistoryMarkup(task, { compact = false, expanded = false } = {}) {
+  const entries = getTaskScheduleHistoryEntries(task?.id);
+  if (!entries.length) return "";
+
+  const latestEntry = entries[entries.length - 1];
+  const latestFromDate = formatOperationalDateLabel(latestEntry.from_date);
+  const originalDate = normalizeDateKey(task?.original_service_date || entries[0].from_date);
+  if (compact) {
+    const tooltip = `Originally scheduled ${formatOperationalDateLabel(originalDate)}. Last moved from ${latestFromDate}.`;
+    return `<span class="schedule-changed-badge" title="${escapeHtml(tooltip)}">Schedule Changed</span>`;
+  }
+
+  const historyRows = entries.map((entry) => `
+    <div class="schedule-history-entry">
+      <div class="schedule-history-meta">${escapeHtml(formatScheduleHistoryTimestamp(entry.changed_at))}</div>
+      <div><strong>${escapeHtml(getScheduleMoveTypeLabel(entry.move_type))}</strong></div>
+      <div>${escapeHtml(formatOperationalDateLabel(entry.from_date))} &rarr; ${escapeHtml(formatOperationalDateLabel(entry.to_date))}</div>
+      <div class="schedule-history-actor">By ${escapeHtml(formatScheduleHistoryActor(entry.changed_by_label))}</div>
+    </div>
+  `).join("");
+
+  const historyPanel = `
+    <div class="schedule-history-panel">
+      <div class="schedule-history-title">Schedule History</div>
+      <div class="schedule-history-original"><strong>Originally Scheduled:</strong> ${escapeHtml(formatOperationalDateLabel(originalDate))}</div>
+      ${historyRows}
+    </div>
+  `;
+
+  if (expanded) return historyPanel;
+
+  return `
+    <details class="schedule-history-details">
+      <summary><span class="schedule-changed-badge">Schedule Changed</span> Moved from ${escapeHtml(latestFromDate)}</summary>
+      ${historyPanel}
+    </details>
+  `;
+}
+
+function renderCleaningScheduleHistory(task) {
+  if (!cleaningScheduleHistory) return;
+  const canViewAudit = isAdminUser() || isManagerUser();
+  const markup = canViewAudit ? getScheduleHistoryMarkup(task, { expanded: true }) : "";
+  cleaningScheduleHistory.innerHTML = markup;
+  cleaningScheduleHistory.classList.toggle("hidden", !markup);
+}
 function renderTaskCard(task) {
   const status = task.status || "Scheduled";
   const cardClass = (task.status === "Completed"
@@ -12347,6 +12484,7 @@ function renderTaskCard(task) {
   const carryForwardInfo = getCarryForwardInfo(task);
   const carryForwardBadge = getCarryForwardBadgeMarkup(task);
   const carryForwardHistory = getCarryForwardHistoryMarkup(task);
+  const scheduleHistory = getScheduleHistoryMarkup(task);
   const housekeepingOperationalMarkup = getHousekeepingOperationalMarkup(task);
 
   return `
@@ -12379,6 +12517,7 @@ function renderTaskCard(task) {
         ${housekeepingOperationalMarkup}
         ${task.check_in_date ? `<div><strong>Check-In:</strong> ${task.check_in_date}</div>` : ""}
         ${carryForwardHistory}
+        ${scheduleHistory}
         <div><strong>Status:</strong> <span class="status-badge ${badgeClass}">${status}</span></div>
       </div>
       <div class="task-card-actions">
@@ -12681,6 +12820,7 @@ async function confirmMonthTaskMove() {
     const result = await supabaseClient.rpc("manager_reschedule_task", {
       target_task_id: taskId,
       selected_service_date: newDate,
+      selected_move_type: "calendar_drag",
     });
     error = result.error;
   } else {
@@ -12702,6 +12842,7 @@ async function confirmMonthTaskMove() {
     await loadManagerOperationalData();
   } else {
     await loadCleaningTasks();
+    await loadTaskScheduleHistory();
   }
   showView("month");
   await loadMonthTasks();
@@ -12775,6 +12916,7 @@ function renderMonthView() {
         : "";
       const carryForwardInfo = getCarryForwardInfo(task);
       const carryForwardBadge = getCarryForwardBadgeMarkup(task, { compact: true });
+            const scheduleHistoryBadge = getScheduleHistoryMarkup(task, { compact: true });
       const guestReadyBadge = isTaskGuestReady(task)
         ? `<span class="month-task-gr-pill" title="Guest Ready">GR</span>`
         : "";
@@ -12788,6 +12930,7 @@ function renderMonthView() {
         <div class="month-task-card ${branchClass} ${carryForwardInfo?.urgent ? "carried-forward-urgent-card" : carryForwardInfo ? "carried-forward-card" : ""} ${rescheduleEnabled ? "month-task-draggable" : "month-task-locked"}" ${dragAttributes} title="${escapeHtml(dragTitle)}" onclick="event.stopPropagation(); openEditCleaning('${task.id}')">
           <div class="month-task-property-name">${escapeHtml(propertyName)}</div>
           ${carryForwardBadge}
+          ${scheduleHistoryBadge}
           <div class="month-task-meta-line">
             <span>${escapeHtml(getServiceTypeDisplayLabel(task.service_type))}</span>
             ${sameDayBadge || guestReadyBadge}
@@ -12932,6 +13075,7 @@ function renderWeekViewListTaskCard(task) {
   const carryForwardInfo = getCarryForwardInfo(task);
   const carryForwardBadge = getCarryForwardBadgeMarkup(task);
   const carryForwardHistory = getCarryForwardHistoryMarkup(task);
+  const scheduleHistory = getScheduleHistoryMarkup(task);
 
   return `
     <div class="${taskClass} ${carryForwardInfo?.urgent ? "carried-forward-urgent-card" : carryForwardInfo ? "carried-forward-card" : ""}">
@@ -12963,6 +13107,7 @@ function renderWeekViewListTaskCard(task) {
       ${getHousekeepingOperationalMarkup(task, { compact: true })}
       ${task.check_in_date ? `<div class="task-line"><small>Prior to check-in: ${task.check_in_date}</small></div>` : ""}
       ${carryForwardHistory}
+      ${scheduleHistory}
       <div class="task-line"><small>Status: ${status}</small></div>
       ${!isStaffUser() && task.notes ? `<div class="task-line"><small>Notes: ${stripManualBillingOverrideTag(task.notes)}</small></div>` : ""}
       ${task.completed_at ? `<div class="task-line"><small>Completed: ${new Date(task.completed_at).toLocaleString()}</small></div>` : ""}
@@ -13027,6 +13172,7 @@ function renderWeekViewCalendar(weekTasks) {
                     const carryForwardInfo = getCarryForwardInfo(task);
                     const carryForwardBadge = getCarryForwardBadgeMarkup(task);
                     const carryForwardHistory = getCarryForwardHistoryMarkup(task);
+                    const scheduleHistoryBadge = getScheduleHistoryMarkup(task, { compact: true });
                     const showReconcile = shouldShowReconcileForTask(task);
                     const invoiceMarkerClass = task.invoiced ? "invoice-marker-checked" : "invoice-marker-unchecked";
                     const sdsReconcileControl = renderSdsReconcileControl(task);
@@ -13047,6 +13193,7 @@ function renderWeekViewCalendar(weekTasks) {
                         ${carryForwardBadge}
                         ${alertBadge}
                         ${carryForwardHistory}
+                        ${scheduleHistoryBadge}
                         <div class="calendar-task-status">
                           <span>Status:</span>
                           ${statusBadge}
