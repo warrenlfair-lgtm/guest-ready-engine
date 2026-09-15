@@ -224,7 +224,7 @@ BEGIN
   INTO skipped_guest_ready_count
   FROM public.cleaning_tasks task
   WHERE COALESCE(task.service_date, task.scheduled_date) < business_date
-    AND COALESCE(task.original_service_date, task.service_date, task.scheduled_date) >= activation_date
+    AND COALESCE(task.service_date, task.scheduled_date) >= activation_date
     AND lower(COALESCE(task.status, 'scheduled')) IN ('scheduled', 'in progress', 'in_progress')
     AND task.completed_at IS NULL
     AND task.invoiced IS DISTINCT FROM true
@@ -244,7 +244,7 @@ BEGIN
       COALESCE(task.service_date, task.scheduled_date) AS previous_service_date
     FROM public.cleaning_tasks task
     WHERE COALESCE(task.service_date, task.scheduled_date) < business_date
-      AND COALESCE(task.original_service_date, task.service_date, task.scheduled_date) >= activation_date
+      AND COALESCE(task.service_date, task.scheduled_date) >= activation_date
       AND lower(COALESCE(task.status, 'scheduled')) IN ('scheduled', 'in progress', 'in_progress')
       AND task.completed_at IS NULL
       AND task.invoiced IS DISTINCT FROM true
