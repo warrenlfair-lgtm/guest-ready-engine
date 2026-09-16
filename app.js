@@ -44,6 +44,8 @@ let activeServiceWorkspace = SERVICE_BRANCH_POOL;
 let currentMonthViewYear = new Date().getFullYear();
 let currentMonthViewMonth = new Date().getMonth();
 let monthBranchFilter = "all";
+let selectedDailyRouteDate = null;
+let selectedDailyRouteTechnicianKey = "all";
 let draggedMonthTaskId = null;
 let pendingMonthTaskMove = null;
 let draggedTodayTaskId = null;
@@ -400,6 +402,12 @@ const cancelChemicalBtn = document.getElementById("cancelChemicalBtn");
 const saveChemicalBtn = document.getElementById("saveChemicalBtn");
 const viewButtons = Array.from(document.querySelectorAll(".view-btn"));
 const todayTasksContainer = document.getElementById("todayTasks");
+const previousRouteDateBtn = document.getElementById("previousRouteDateBtn");
+const nextRouteDateBtn = document.getElementById("nextRouteDateBtn");
+const todayRouteDateBtn = document.getElementById("todayRouteDateBtn");
+const tomorrowRouteDateBtn = document.getElementById("tomorrowRouteDateBtn");
+const dailyRouteDateLabel = document.getElementById("dailyRouteDateLabel");
+const dailyRouteTechnicianSelect = document.getElementById("dailyRouteTechnicianSelect");
 const carryForwardSummary = document.getElementById("carryForwardSummary");
 const guestProtectionAlertsContainer = document.getElementById("guestProtectionAlerts");
 const operationsRemindersWidget = document.getElementById("operationsRemindersWidget");
@@ -726,6 +734,15 @@ viewButtons.forEach((button) => {
   button.addEventListener("click", async () => {
     await navigateToView(button.dataset.view);
   });
+});
+
+previousRouteDateBtn?.addEventListener("click", () => changeDailyRouteDate(-1));
+nextRouteDateBtn?.addEventListener("click", () => changeDailyRouteDate(1));
+todayRouteDateBtn?.addEventListener("click", () => setDailyRouteDate(getBusinessDateValue()));
+tomorrowRouteDateBtn?.addEventListener("click", () => setDailyRouteDate(addDaysToDateKey(getBusinessDateValue(), 1)));
+dailyRouteTechnicianSelect?.addEventListener("change", (event) => {
+  selectedDailyRouteTechnicianKey = event.target.value || "all";
+  renderTaskViews();
 });
 
 if (addPipelineJobBtn) addPipelineJobBtn.addEventListener("click", () => openPipelineJobModal());
@@ -1222,6 +1239,8 @@ async function ensureDataLoadedForUser(userId) {
   if (currentSessionUserId === userId) return dataLoadPromise || undefined;
   if (dataLoadPromise) return dataLoadPromise;
 
+  selectedDailyRouteDate = getBusinessDateValue();
+  selectedDailyRouteTechnicianKey = "all";
   currentSessionUserId = userId;
   dataLoadPromise = loadData()
     .catch((error) => {
@@ -1412,7 +1431,12 @@ function setActiveServiceWorkspace(branch) {
   const todayHeader = document.querySelector("#todayView .view-header");
   const weekHeader = document.querySelector("#weekView .view-header");
   const propertiesHeader = document.querySelector("#propertiesView .view-header");
-  if (todayHeader) todayHeader.innerHTML = "<h2>Today's Technician Routes</h2><p>All operational branches, grouped and ordered by assigned technician.</p>";
+  if (todayHeader) {
+    const heading = todayHeader.querySelector("h2");
+    const description = todayHeader.querySelector("p");
+    if (heading) heading.textContent = "Daily Technician Routes";
+    if (description) description.textContent = "All operational branches, grouped and ordered by assigned technician.";
+  }
   if (weekHeader) weekHeader.querySelector("h2").textContent = `${workspaceLabel} Week`;
   if (weekHeader) weekHeader.querySelector("p").textContent = `${workspaceLabel} tasks due in the next 7 days grouped by date.`;
   if (propertiesHeader) propertiesHeader.querySelector("p").textContent = `Manage ${workspaceLabel} properties and tasks.`;
@@ -6458,19 +6482,58 @@ function togglePropertyCardCollapse(propertyId) {
   renderProperties();
 }
 
-function getTodayCleaningTasks() {
-  const todayString = getBusinessDateValue();
+function addDaysToDateKey(dateKey, dayCount) {
+  const date = parseDateString(dateKey);
+  date.setUTCDate(date.getUTCDate() + dayCount);
+  return formatIsoDateUtc(date);
+}
 
-  console.log("[TodayView] Today date string:", todayString);
+function getSelectedDailyRouteDate() {
+  if (!selectedDailyRouteDate) selectedDailyRouteDate = getBusinessDateValue();
+  return selectedDailyRouteDate;
+}
 
-  const todayTasks = cleaningTasks.filter((task) => {
+function setDailyRouteDate(dateKey) {
+  const normalizedDate = normalizeDateKey(dateKey);
+  if (!normalizedDate) return;
+  selectedDailyRouteDate = normalizedDate;
+  selectedDailyRouteTechnicianKey = "all";
+  renderTaskViews();
+}
+
+function changeDailyRouteDate(dayCount) {
+  setDailyRouteDate(addDaysToDateKey(getSelectedDailyRouteDate(), dayCount));
+}
+
+function getDailyRouteDateLabel(dateKey) {
+  const businessDate = getBusinessDateValue();
+  const tomorrow = addDaysToDateKey(businessDate, 1);
+  const dateLabel = new Intl.DateTimeFormat("en-US", {
+    timeZone: "UTC",
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  }).format(parseDateString(dateKey));
+  if (dateKey === businessDate) return `TODAY - ${dateLabel}`;
+  if (dateKey === tomorrow) return `TOMORROW - ${dateLabel}`;
+  return dateLabel;
+}
+
+function canEditSelectedDailyRoute() {
+  const selectedDate = getSelectedDailyRouteDate();
+  const businessDate = getBusinessDateValue();
+  if (selectedDate < businessDate) return false;
+  if (isAdminUser() || isManagerUser()) return true;
+  return isStaffUser() && selectedDate === businessDate;
+}
+
+function getDailyRouteTasks() {
+  const selectedDate = getSelectedDailyRouteDate();
+  const routeTasks = cleaningTasks.filter((task) => {
     if (!isTaskVisibleInOperationalSchedule(task, { matchActiveWorkspace: false })) return false;
-    return normalizeDateKey(task.service_date || task.scheduled_date) === todayString;
+    return normalizeDateKey(task.service_date || task.scheduled_date) === selectedDate;
   });
-
-  console.log("[TodayView] Tasks matching today:", todayTasks.length, todayTasks.map(t => ({ id: t.id, service_date: t.service_date, service_type: t.service_type })));
-
-  return todayTasks;
+  return routeTasks;
 }
 
 function getTodayRouteTechnicianKey(task) {
@@ -6527,7 +6590,9 @@ async function saveTodayRouteOrder(routeElement) {
   if (!taskIds.length) return;
 
   routeElement.classList.add("today-route-saving");
-  const { error } = await supabaseClient.rpc("save_today_route_order", {
+  if (!canEditSelectedDailyRoute()) return;
+  const { error } = await supabaseClient.rpc("save_daily_route_order", {
+    selected_service_date: getSelectedDailyRouteDate(),
     ordered_task_ids: taskIds,
   });
   routeElement.classList.remove("today-route-saving");
@@ -12737,7 +12802,7 @@ function renderCleaningScheduleHistory(task) {
   cleaningScheduleHistory.innerHTML = markup;
   cleaningScheduleHistory.classList.toggle("hidden", !markup);
 }
-function renderTaskCard(task, { stopNumber = null } = {}) {
+function renderTaskCard(task, { stopNumber = null, routeEditable = true } = {}) {
   const status = task.status || "Scheduled";
   const cardClass = (task.status === "Completed"
     ? "task-card completed"
@@ -12769,13 +12834,13 @@ function renderTaskCard(task, { stopNumber = null } = {}) {
   const routeMarkup = Number.isInteger(stopNumber) && stopNumber > 0
     ? `<div class="today-route-controls">
         <span class="today-route-stop">${status === "Completed" ? "✓ " : ""}STOP ${stopNumber}</span>
-        <button type="button" class="today-route-drag-handle" draggable="true"
+        ${routeEditable ? `<button type="button" class="today-route-drag-handle" draggable="true"
           aria-label="Move Stop ${stopNumber}" title="Drag to reorder this technician's route. Alt+Arrow keys also move stops."
           ondragstart="handleTodayRouteDragStart(event, '${task.id}')" ondragend="handleTodayRouteDragEnd(event)"
           onpointerdown="handleTodayRoutePointerDown(event, '${task.id}')"
           onpointermove="handleTodayRoutePointerMove(event)" onpointerup="handleTodayRoutePointerUp(event)"
           onpointercancel="handleTodayRoutePointerCancel(event)"
-          onkeydown="handleTodayRouteKeyDown(event, '${task.id}')">☰</button>
+          onkeydown="handleTodayRouteKeyDown(event, '${task.id}')">☰</button>` : ""}
       </div>`
     : "";
 
@@ -12973,25 +13038,46 @@ function renderOperationsRemindersWidget() {
 }
 
 function renderTaskViews() {
-  if (activeServiceWorkspace === SERVICE_BRANCH_POOL || activeServiceWorkspace === SERVICE_BRANCH_HOUSEKEEPING) {
+  const selectedRouteDate = getSelectedDailyRouteDate();
+  const isCurrentRouteDate = selectedRouteDate === getBusinessDateValue();
+  if (isCurrentRouteDate && (activeServiceWorkspace === SERVICE_BRANCH_POOL || activeServiceWorkspace === SERVICE_BRANCH_HOUSEKEEPING)) {
     renderGuestProtectionAlerts();
   } else {
     guestProtectionAlertsContainer.innerHTML = "";
   }
-  if (activeServiceWorkspace === SERVICE_BRANCH_POOL) {
+  if (isCurrentRouteDate && activeServiceWorkspace === SERVICE_BRANCH_POOL) {
     renderOperationsRemindersWidget();
   } else {
     operationsRemindersWidget.innerHTML = "";
   }
 
-  const todayTasks = getTodayCleaningTasks();
-  const carriedForwardTasks = todayTasks.filter((task) => getCarryForwardInfo(task));
+  const dailyRouteTasks = getDailyRouteTasks();
+  const routes = getTodayTechnicianRoutes(dailyRouteTasks);
+  const availableRouteKeys = new Set(routes.map((route) => route.routeKey));
+  if (selectedDailyRouteTechnicianKey !== "all" && !availableRouteKeys.has(selectedDailyRouteTechnicianKey)) {
+    selectedDailyRouteTechnicianKey = "all";
+  }
+  if (dailyRouteDateLabel) dailyRouteDateLabel.textContent = getDailyRouteDateLabel(selectedRouteDate);
+  todayRouteDateBtn?.classList.toggle("active", selectedRouteDate === getBusinessDateValue());
+  tomorrowRouteDateBtn?.classList.toggle("active", selectedRouteDate === addDaysToDateKey(getBusinessDateValue(), 1));
+  if (dailyRouteTechnicianSelect) {
+    dailyRouteTechnicianSelect.innerHTML = `
+      <option value="all">All technicians</option>
+      ${routes.map((route) => `<option value="${escapeHtml(route.routeKey)}">${escapeHtml(route.technicianLabel)}</option>`).join("")}
+    `;
+    dailyRouteTechnicianSelect.value = selectedDailyRouteTechnicianKey;
+  }
+  const displayedRoutes = selectedDailyRouteTechnicianKey === "all"
+    ? routes
+    : routes.filter((route) => route.routeKey === selectedDailyRouteTechnicianKey);
+  const carriedForwardTasks = dailyRouteTasks.filter((task) => getCarryForwardInfo(task));
   carryForwardSummary.innerHTML = carriedForwardTasks.length
     ? `<div class="carry-forward-summary">⚠ ${carriedForwardTasks.length} CARRIED-FORWARD TASK${carriedForwardTasks.length === 1 ? " REQUIRES" : "S REQUIRE"} ATTENTION</div>`
     : "";
-  console.log("[TodayView] Rendering", todayTasks.length, "today tasks");
-  todayTasksContainer.innerHTML = todayTasks.length
-    ? getTodayTechnicianRoutes(todayTasks).map((route) => `
+  console.log("[DailyRoute] Rendering", dailyRouteTasks.length, "tasks for", selectedRouteDate);
+  const routeEditable = canEditSelectedDailyRoute();
+  todayTasksContainer.innerHTML = displayedRoutes.length
+    ? displayedRoutes.map((route) => `
         <section class="today-route-group">
           <div class="today-route-heading">
             <h3>${escapeHtml(route.technicianLabel)}</h3>
@@ -13001,13 +13087,13 @@ function renderTaskViews() {
             ${route.tasks.map((task, index) => `
               <div class="today-route-task" data-task-id="${escapeHtml(task.id)}"
                 ondragover="handleTodayRouteDragOver(event)" ondrop="handleTodayRouteDrop(event)">
-                ${renderTaskCard(task, { stopNumber: index + 1 })}
+                ${renderTaskCard(task, { stopNumber: index + 1, routeEditable })}
               </div>
             `).join("")}
           </div>
         </section>
       `).join("")
-    : '<div class="empty">No operational tasks due today.</div>';
+    : `<div class="empty">No operational tasks scheduled for ${escapeHtml(getDailyRouteDateLabel(selectedRouteDate))}.</div>`;
 
   renderWeekView();
   renderMonthView();

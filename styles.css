@@ -1073,6 +1073,49 @@ button:hover {
     margin-bottom: 24px;
 }
 
+.daily-route-header {
+    align-items: flex-start;
+}
+
+.daily-route-controls {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    align-items: flex-end;
+    gap: 10px;
+}
+
+.daily-route-date-nav,
+.daily-route-quick-dates {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.daily-route-date-nav strong {
+    min-width: 168px;
+    color: #0f172a;
+    text-align: center;
+}
+
+.daily-route-quick-dates .active {
+    border-color: #0f766e;
+    background: #ccfbf1;
+    color: #115e59;
+}
+
+.daily-route-technician-filter {
+    display: grid;
+    gap: 4px;
+    color: #475569;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.daily-route-technician-filter select {
+    min-width: 180px;
+}
+
 .today-route-heading {
     display: flex;
     justify-content: space-between;
@@ -1159,6 +1202,42 @@ button:hover {
 
 .today-route-drag-handle:active {
     cursor: grabbing;
+}
+
+@media (max-width: 760px) {
+    .daily-route-header,
+    .daily-route-controls {
+        width: 100%;
+    }
+
+    .daily-route-controls {
+        justify-content: flex-start;
+    }
+
+    .daily-route-date-nav {
+        width: 100%;
+    }
+
+    .daily-route-date-nav strong {
+        flex: 1 1 auto;
+        min-width: 0;
+    }
+
+    .daily-route-step-btn {
+        flex: 0 0 42px;
+        width: 42px;
+        padding-inline: 0;
+        font-size: 20px;
+    }
+
+    .daily-route-step-btn span {
+        display: none;
+    }
+
+    .daily-route-technician-filter,
+    .daily-route-technician-filter select {
+        width: 100%;
+    }
 }
 
 .task-card.completed {

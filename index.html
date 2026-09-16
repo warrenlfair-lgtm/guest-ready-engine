@@ -94,9 +94,28 @@
   </div>
 
   <section id="todayView" class="view-panel active">
-    <div class="view-header">
-      <h2>Today's Technician Routes</h2>
-      <p>All operational branches, grouped and ordered by assigned technician.</p>
+    <div class="view-header daily-route-header">
+      <div>
+        <h2>Daily Technician Routes</h2>
+        <p>All operational branches, grouped and ordered by assigned technician.</p>
+      </div>
+      <div class="daily-route-controls" aria-label="Daily route controls">
+        <div class="daily-route-date-nav">
+          <button type="button" id="previousRouteDateBtn" class="secondary-btn daily-route-step-btn" aria-label="Previous route date">&lsaquo;<span> Previous</span></button>
+          <strong id="dailyRouteDateLabel">Today</strong>
+          <button type="button" id="nextRouteDateBtn" class="secondary-btn daily-route-step-btn" aria-label="Next route date"><span>Next </span>&rsaquo;</button>
+        </div>
+        <div class="daily-route-quick-dates" aria-label="Quick route dates">
+          <button type="button" id="todayRouteDateBtn" class="secondary-btn">Today</button>
+          <button type="button" id="tomorrowRouteDateBtn" class="secondary-btn">Tomorrow</button>
+        </div>
+        <label class="daily-route-technician-filter" for="dailyRouteTechnicianSelect">
+          <span>Technician</span>
+          <select id="dailyRouteTechnicianSelect">
+            <option value="all">All technicians</option>
+          </select>
+        </label>
+      </div>
     </div>
     <div id="carryForwardSummary"></div>
     <div id="guestProtectionAlerts"></div>
