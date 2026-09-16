@@ -1069,6 +1069,98 @@ button:hover {
     box-shadow: 0 3px 10px rgba(0,0,0,.06);
 }
 
+.today-route-group {
+    margin-bottom: 24px;
+}
+
+.today-route-heading {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+    margin-bottom: 10px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #cbd5e1;
+}
+
+.today-route-heading h3 {
+    margin: 0;
+    color: #0f172a;
+    font-size: 18px;
+}
+
+.today-route-heading span {
+    color: #64748b;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.today-route-list {
+    min-height: 12px;
+}
+
+.today-route-list.today-route-saving {
+    opacity: 0.7;
+    pointer-events: none;
+}
+
+.today-route-task {
+    transition: transform 140ms ease, opacity 140ms ease;
+}
+
+.today-route-task.today-route-dragging {
+    opacity: 0.58;
+}
+
+.today-route-task.today-route-touch-dragging {
+    transform: scale(1.01);
+}
+
+.today-route-controls {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin: -4px 0 10px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #e2e8f0;
+}
+
+.today-route-stop {
+    color: #0f172a;
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+}
+
+.today-route-drag-handle {
+    display: grid;
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    place-items: center;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    background: #f8fafc;
+    color: #475569;
+    font-size: 20px;
+    line-height: 1;
+    cursor: grab;
+    touch-action: none;
+    user-select: none;
+}
+
+.today-route-drag-handle:hover,
+.today-route-drag-handle:focus-visible {
+    border-color: #64748b;
+    background: #e2e8f0;
+    color: #0f172a;
+}
+
+.today-route-drag-handle:active {
+    cursor: grabbing;
+}
+
 .task-card.completed {
     background: #ecfdf5;
     border-left-color: #16a34a;
@@ -2622,14 +2714,69 @@ textarea{
     gap: 5px;
     padding: 12px;
     border: 1px solid #dbe2ea;
+    border-top: 3px solid var(--pnl-metric-color, #94a3b8);
     border-radius: 8px;
     background: #f8fafc;
+    transition: background-color 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
 }
 
-.service-pnl-summary-grid span {
+.service-pnl-metric-heading {
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 20px;
+    gap: 6px;
+    align-items: start;
+}
+
+.service-pnl-summary-grid .service-pnl-metric-heading > span {
     color: #475569;
     font-size: 12px;
     font-weight: 600;
+}
+
+.service-pnl-info {
+    display: grid;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    place-items: center;
+    border: 1px solid #94a3b8;
+    border-radius: 50%;
+    background: #ffffff;
+    color: #334155;
+    font-family: Georgia, serif;
+    font-size: 13px;
+    font-weight: 700;
+    line-height: 1;
+    cursor: help;
+}
+
+.service-pnl-info:focus-visible {
+    outline: 2px solid #0f766e;
+    outline-offset: 2px;
+}
+
+.service-pnl-tooltip {
+    position: absolute;
+    z-index: 20;
+    top: 26px;
+    right: 0;
+    display: none;
+    width: min(300px, calc(100vw - 56px));
+    padding: 10px 12px;
+    border: 1px solid #334155;
+    border-radius: 6px;
+    background: #0f172a;
+    box-shadow: 0 8px 20px rgba(15, 23, 42, 0.22);
+    color: #f8fafc;
+    font-size: 12px;
+    font-weight: 400;
+    line-height: 1.45;
+}
+
+.service-pnl-metric-heading:hover .service-pnl-tooltip,
+.service-pnl-metric-heading:focus-within .service-pnl-tooltip {
+    display: block;
 }
 
 .service-pnl-summary-grid strong {
@@ -2639,7 +2786,29 @@ textarea{
 
 .service-pnl-summary-grid .service-pnl-highlight {
     border-color: #99f6e4;
+    border-top-color: var(--pnl-metric-color, #0f766e);
     background: #f0fdfa;
+}
+
+.service-pnl-table th[data-pnl-metric] {
+    box-shadow: inset 0 -3px 0 var(--pnl-metric-color);
+}
+
+.service-pnl-table [data-pnl-metric] {
+    transition: background-color 140ms ease, box-shadow 140ms ease, color 140ms ease;
+}
+
+.service-pnl-summary-grid article.service-pnl-metric-active {
+    border-color: var(--pnl-metric-color);
+    background: color-mix(in srgb, var(--pnl-metric-color) 12%, #ffffff);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--pnl-metric-color) 28%, transparent);
+}
+
+.service-pnl-sheet table [data-pnl-metric].service-pnl-metric-active {
+    background: color-mix(in srgb, var(--pnl-active-color, var(--pnl-metric-color)) 18%, #ffffff) !important;
+    box-shadow: inset 3px 0 0 var(--pnl-active-color, var(--pnl-metric-color));
+    color: #0f172a;
+    font-weight: 700;
 }
 
 .service-pnl-table-wrap {
@@ -4024,6 +4193,11 @@ textarea{
     #invoiceBatchPreviewContainer,
     #invoiceEligibilitySummary,
     #invoicePreviewContainer .invoice-preview-actions {
+        display: none !important;
+    }
+
+    .service-pnl-info,
+    .service-pnl-tooltip {
         display: none !important;
     }
 

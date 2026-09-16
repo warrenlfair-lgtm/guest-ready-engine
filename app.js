@@ -46,6 +46,9 @@ let currentMonthViewMonth = new Date().getMonth();
 let monthBranchFilter = "all";
 let draggedMonthTaskId = null;
 let pendingMonthTaskMove = null;
+let draggedTodayTaskId = null;
+let todayRouteDropCommitted = false;
+let todayRouteTouchState = null;
 
 let companyProfile = { ...DEFAULT_COMPANY_PROFILE };
 let currentSessionUserId = null;
@@ -1409,7 +1412,7 @@ function setActiveServiceWorkspace(branch) {
   const todayHeader = document.querySelector("#todayView .view-header");
   const weekHeader = document.querySelector("#weekView .view-header");
   const propertiesHeader = document.querySelector("#propertiesView .view-header");
-  if (todayHeader) todayHeader.innerHTML = `<h2>${workspaceLabel} Today</h2><p>${workspaceLabel} tasks due today for technicians.</p>`;
+  if (todayHeader) todayHeader.innerHTML = "<h2>Today's Technician Routes</h2><p>All operational branches, grouped and ordered by assigned technician.</p>";
   if (weekHeader) weekHeader.querySelector("h2").textContent = `${workspaceLabel} Week`;
   if (weekHeader) weekHeader.querySelector("p").textContent = `${workspaceLabel} tasks due in the next 7 days grouped by date.`;
   if (propertiesHeader) propertiesHeader.querySelector("p").textContent = `Manage ${workspaceLabel} properties and tasks.`;
@@ -6461,15 +6464,225 @@ function getTodayCleaningTasks() {
   console.log("[TodayView] Today date string:", todayString);
 
   const todayTasks = cleaningTasks.filter((task) => {
-    if (!taskMatchesActiveWorkspace(task)) return false;
-    if (!task.service_date) return false;
-    if (shouldSuppressWeeklyStandardTaskDisplay(task)) return false;
-    return task.service_date === todayString;
+    if (!isTaskVisibleInOperationalSchedule(task, { matchActiveWorkspace: false })) return false;
+    return normalizeDateKey(task.service_date || task.scheduled_date) === todayString;
   });
 
   console.log("[TodayView] Tasks matching today:", todayTasks.length, todayTasks.map(t => ({ id: t.id, service_date: t.service_date, service_type: t.service_type })));
 
-  return todayTasks.sort((a, b) => a.service_date.localeCompare(b.service_date));
+  return todayTasks;
+}
+
+function getTodayRouteTechnicianKey(task) {
+  const technicianId = String(task?.technician_id || "").trim();
+  if (technicianId) return `id:${technicianId}`;
+  const technicianName = String(task?.technician_name || task?.technician || "").trim().toLowerCase();
+  return technicianName ? `name:${technicianName}` : "unassigned";
+}
+
+function getTodayRouteTechnicianLabel(task) {
+  const technicianId = String(task?.technician_id || "").trim();
+  const technician = technicianId ? findTechnicianById(technicianId) : null;
+  return technician?.name || String(task?.technician_name || task?.technician || "").trim() || "Unassigned";
+}
+
+function compareTodayRouteTasks(firstTask, secondTask) {
+  const firstOrder = Number(firstTask?.route_order);
+  const secondOrder = Number(secondTask?.route_order);
+  const firstHasOrder = Number.isInteger(firstOrder) && firstOrder > 0;
+  const secondHasOrder = Number.isInteger(secondOrder) && secondOrder > 0;
+  if (firstHasOrder !== secondHasOrder) return firstHasOrder ? -1 : 1;
+  if (firstHasOrder && firstOrder !== secondOrder) return firstOrder - secondOrder;
+  const propertyComparison = getPropertyName(firstTask?.property_id).localeCompare(getPropertyName(secondTask?.property_id));
+  if (propertyComparison !== 0) return propertyComparison;
+  return String(firstTask?.id || "").localeCompare(String(secondTask?.id || ""));
+}
+
+function getTodayTechnicianRoutes(tasks) {
+  const routesByTechnician = new Map();
+  tasks.forEach((task) => {
+    const routeKey = getTodayRouteTechnicianKey(task);
+    if (!routesByTechnician.has(routeKey)) {
+      routesByTechnician.set(routeKey, {
+        routeKey,
+        technicianLabel: getTodayRouteTechnicianLabel(task),
+        tasks: [],
+      });
+    }
+    routesByTechnician.get(routeKey).tasks.push(task);
+  });
+  return Array.from(routesByTechnician.values())
+    .map((route) => ({ ...route, tasks: route.tasks.sort(compareTodayRouteTasks) }))
+    .sort((firstRoute, secondRoute) => {
+      if (firstRoute.routeKey === "unassigned") return 1;
+      if (secondRoute.routeKey === "unassigned") return -1;
+      return firstRoute.technicianLabel.localeCompare(secondRoute.technicianLabel);
+    });
+}
+
+async function saveTodayRouteOrder(routeElement) {
+  const taskIds = Array.from(routeElement?.querySelectorAll(":scope > .today-route-task") || [])
+    .map((card) => String(card.dataset.taskId || "").trim())
+    .filter(Boolean);
+  if (!taskIds.length) return;
+
+  routeElement.classList.add("today-route-saving");
+  const { error } = await supabaseClient.rpc("save_today_route_order", {
+    ordered_task_ids: taskIds,
+  });
+  routeElement.classList.remove("today-route-saving");
+  if (error) {
+    renderTaskViews();
+    const message = `Could not save route order: ${error.message}`;
+    if (statusMessage) statusMessage.textContent = message;
+    alert(message);
+    return;
+  }
+
+  taskIds.forEach((taskId, index) => {
+    const task = cleaningTasks.find((item) => String(item.id) === taskId);
+    if (task) task.route_order = index + 1;
+  });
+  renderTaskViews();
+}
+
+function updateTodayRouteCardPositions(routeElement) {
+  Array.from(routeElement?.querySelectorAll(":scope > .today-route-task") || []).forEach((card, index) => {
+    const stopNumber = index + 1;
+    const stopLabel = card.querySelector(".today-route-stop");
+    const dragHandle = card.querySelector(".today-route-drag-handle");
+    if (stopLabel) {
+      const completed = card.querySelector(".task-card.completed");
+      stopLabel.textContent = `${completed ? "✓ " : ""}STOP ${stopNumber}`;
+    }
+    if (dragHandle) dragHandle.setAttribute("aria-label", `Move Stop ${stopNumber}`);
+  });
+}
+
+function moveTodayRouteCard(draggedCard, targetCard, pointerY) {
+  if (!draggedCard || !targetCard || draggedCard === targetCard) return;
+  const routeElement = targetCard.parentElement;
+  if (!routeElement || draggedCard.parentElement !== routeElement) return;
+  const targetBounds = targetCard.getBoundingClientRect();
+  routeElement.insertBefore(draggedCard, pointerY < targetBounds.top + targetBounds.height / 2 ? targetCard : targetCard.nextSibling);
+  updateTodayRouteCardPositions(routeElement);
+}
+
+function handleTodayRouteDragStart(event, taskId) {
+  const card = event.currentTarget.closest(".today-route-task");
+  if (!card) return;
+  draggedTodayTaskId = taskId;
+  todayRouteDropCommitted = false;
+  event.dataTransfer.effectAllowed = "move";
+  event.dataTransfer.setData("text/plain", taskId);
+  card.classList.add("today-route-dragging");
+}
+
+function handleTodayRouteDragOver(event) {
+  if (!draggedTodayTaskId) return;
+  const targetCard = event.currentTarget;
+  const draggedCard = document.querySelector(`.today-route-task[data-task-id="${draggedTodayTaskId}"]`);
+  if (!draggedCard || draggedCard.parentElement !== targetCard.parentElement) return;
+  event.preventDefault();
+  event.dataTransfer.dropEffect = "move";
+  moveTodayRouteCard(draggedCard, targetCard, event.clientY);
+}
+
+async function handleTodayRouteDrop(event) {
+  if (!draggedTodayTaskId) return;
+  event.preventDefault();
+  todayRouteDropCommitted = true;
+  await saveTodayRouteOrder(event.currentTarget.closest(".today-route-list"));
+}
+
+function handleTodayRouteDragEnd(event) {
+  event.currentTarget.closest(".today-route-task")?.classList.remove("today-route-dragging");
+  draggedTodayTaskId = null;
+  if (!todayRouteDropCommitted) renderTaskViews();
+  todayRouteDropCommitted = false;
+}
+
+function clearTodayRouteTouchState({ restore = false } = {}) {
+  if (!todayRouteTouchState) return;
+  window.clearTimeout(todayRouteTouchState.holdTimer);
+  todayRouteTouchState.card?.classList.remove("today-route-dragging", "today-route-touch-dragging");
+  const shouldRestore = restore && todayRouteTouchState.active;
+  todayRouteTouchState = null;
+  if (shouldRestore) renderTaskViews();
+}
+
+function handleTodayRoutePointerDown(event, taskId) {
+  if (event.pointerType === "mouse") return;
+  clearTodayRouteTouchState({ restore: true });
+  const handle = event.currentTarget;
+  const card = handle.closest(".today-route-task");
+  const routeElement = card?.parentElement;
+  if (!card || !routeElement) return;
+
+  todayRouteTouchState = {
+    pointerId: event.pointerId,
+    taskId,
+    handle,
+    card,
+    routeElement,
+    startX: event.clientX,
+    startY: event.clientY,
+    active: false,
+    holdTimer: window.setTimeout(() => {
+      if (!todayRouteTouchState || todayRouteTouchState.pointerId !== event.pointerId) return;
+      todayRouteTouchState.active = true;
+      card.classList.add("today-route-dragging", "today-route-touch-dragging");
+      navigator.vibrate?.(30);
+    }, 300),
+  };
+  handle.setPointerCapture?.(event.pointerId);
+}
+
+function handleTodayRoutePointerMove(event) {
+  const state = todayRouteTouchState;
+  if (!state || state.pointerId !== event.pointerId) return;
+  if (!state.active) {
+    const movedDistance = Math.hypot(event.clientX - state.startX, event.clientY - state.startY);
+    if (movedDistance > 10) clearTodayRouteTouchState();
+    return;
+  }
+
+  event.preventDefault();
+  const targetCard = document.elementFromPoint(event.clientX, event.clientY)?.closest(".today-route-task");
+  if (targetCard?.parentElement === state.routeElement) {
+    moveTodayRouteCard(state.card, targetCard, event.clientY);
+  }
+  const edgeSize = 72;
+  if (event.clientY < edgeSize) window.scrollBy(0, -12);
+  else if (event.clientY > window.innerHeight - edgeSize) window.scrollBy(0, 12);
+}
+
+async function handleTodayRoutePointerUp(event) {
+  const state = todayRouteTouchState;
+  if (!state || state.pointerId !== event.pointerId) return;
+  const shouldSave = state.active;
+  const routeElement = state.routeElement;
+  clearTodayRouteTouchState();
+  if (shouldSave) await saveTodayRouteOrder(routeElement);
+}
+
+function handleTodayRoutePointerCancel(event) {
+  if (todayRouteTouchState?.pointerId !== event.pointerId) return;
+  clearTodayRouteTouchState({ restore: true });
+}
+
+async function handleTodayRouteKeyDown(event, taskId) {
+  if (!event.altKey || !["ArrowUp", "ArrowDown"].includes(event.key)) return;
+  event.preventDefault();
+  const card = document.querySelector(`.today-route-task[data-task-id="${taskId}"]`);
+  const routeElement = card?.parentElement;
+  if (!card || !routeElement) return;
+  const sibling = event.key === "ArrowUp" ? card.previousElementSibling : card.nextElementSibling;
+  if (!sibling?.classList.contains("today-route-task")) return;
+  if (event.key === "ArrowUp") routeElement.insertBefore(card, sibling);
+  else routeElement.insertBefore(sibling, card);
+  updateTodayRouteCardPositions(routeElement);
+  await saveTodayRouteOrder(routeElement);
 }
 
 function isTaskVisibleInOperationalSchedule(task, { matchActiveWorkspace = true } = {}) {
@@ -9185,6 +9398,71 @@ function getServicePnlForecastRows({ startDate, endDate, selectedPropertyId = ""
   return { rows, taskRows, revenueAuditRows };
 }
 
+const SERVICE_PNL_METRIC_COLORS = [
+  "#0f766e", "#b45309", "#2563eb", "#7c3aed", "#15803d", "#be123c",
+  "#0891b2", "#c2410c", "#475569", "#047857", "#4d7c0f", "#b91c1c",
+];
+
+function getServicePnlMetricKey(label) {
+  return String(label || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
+function getServicePnlMetricAttributes(metricKey, sourceMetricKeys = []) {
+  const normalizedKey = getServicePnlMetricKey(metricKey);
+  let colorIndex = 0;
+  for (const character of normalizedKey) colorIndex = (colorIndex + character.charCodeAt(0)) % SERVICE_PNL_METRIC_COLORS.length;
+  const normalizedSourceKeys = sourceMetricKeys.map(getServicePnlMetricKey).filter(Boolean).join(" ");
+  const sourceAttribute = normalizedSourceKeys ? ` data-pnl-source="${normalizedSourceKeys}"` : "";
+  return `data-pnl-metric="${normalizedKey}"${sourceAttribute} style="--pnl-metric-color: ${SERVICE_PNL_METRIC_COLORS[colorIndex]}"`;
+}
+
+function initializeServicePnlMetricHighlights() {
+  const reportSheet = servicePnlContainer?.querySelector(".service-pnl-sheet");
+  if (!reportSheet) return;
+
+  const setActiveMetric = (metricKey = "") => {
+    reportSheet.querySelectorAll(".service-pnl-metric-active").forEach((element) => {
+      element.classList.remove("service-pnl-metric-active");
+      element.style.removeProperty("--pnl-active-color");
+    });
+    if (!metricKey) return;
+    const activeTile = reportSheet.querySelector(`.service-pnl-summary-grid article[data-pnl-metric="${metricKey}"]`);
+    const activeColor = activeTile?.style.getPropertyValue("--pnl-metric-color") || "#0f766e";
+    reportSheet.querySelectorAll(`[data-pnl-metric="${metricKey}"], [data-pnl-source~="${metricKey}"]`).forEach((element) => {
+      element.style.setProperty("--pnl-active-color", activeColor);
+      element.classList.add("service-pnl-metric-active");
+    });
+  };
+
+  reportSheet.querySelectorAll(".service-pnl-summary-grid article[data-pnl-metric]").forEach((tile) => {
+    const metricKey = tile.dataset.pnlMetric || "";
+    tile.addEventListener("mouseenter", () => setActiveMetric(metricKey));
+    tile.addEventListener("mouseleave", () => {
+      if (!tile.contains(document.activeElement)) setActiveMetric();
+    });
+    tile.addEventListener("focusin", () => setActiveMetric(metricKey));
+    tile.addEventListener("focusout", (event) => {
+      if (!tile.contains(event.relatedTarget) && !tile.matches(":hover")) setActiveMetric();
+    });
+  });
+}
+
+function renderServicePnlMetric(label, value, explanation, { highlight = false, metricKey = "" } = {}) {
+  const resolvedMetricKey = metricKey || getServicePnlMetricKey(label);
+  return `<article class="service-pnl-metric${highlight ? " service-pnl-highlight" : ""}" ${getServicePnlMetricAttributes(resolvedMetricKey)}>
+    <div class="service-pnl-metric-heading">
+      <span>${escapeHtml(label)}</span>
+      <button type="button" class="service-pnl-info" aria-label="Explain ${escapeHtml(label)}">i</button>
+      <div class="service-pnl-tooltip" role="tooltip">${escapeHtml(explanation)}</div>
+    </div>
+    <strong>${value}</strong>
+  </article>`;
+}
+
 function renderServicePnlForecastReport() {
   if (!servicePnlContainer) return;
   const startDate = servicePnlStartDate?.value || "";
@@ -9235,14 +9513,14 @@ function renderServicePnlForecastReport() {
 
   const partialMonthlyNotices = rows.flatMap((row) => row.partialMonthlyPeriods.map((period) => `${row.propertyName}: ${period}`));
   const propertyTableRows = rows.length ? rows.map((row) => `<tr>
-    <td>${escapeHtml(row.propertyName)}</td><td class="route-frag-money">${toMoney(row.contractRevenue)}</td>
-    <td class="route-frag-money">${toMoney(row.draftRevenue)}</td><td class="route-frag-money">${toMoney(row.finalizedRevenue)}</td>
-    <td class="route-frag-money">${toMoney(row.potentialTaskRevenue)}</td><td class="route-frag-money">${toMoney(row.potentialSdsRevenue)}</td><td class="route-frag-money">${toMoney(row.revenue)}</td>
-    <td class="route-frag-money">${toMoney(row.knownLabor)}</td><td class="route-frag-money">${toMoney(row.projectedLabor)}</td><td class="route-frag-money">${toMoney(row.fullyStaffedLabor)}</td>
-    <td class="route-frag-money">${toMoney(row.chemicalCost)}</td><td class="route-frag-money">${toMoney(row.partsCost)}</td>
-    <td class="route-frag-money">${toMoney(row.projectedServiceProfit)}</td><td class="route-frag-money">${toMoney(row.propertyOperatingExpenses)}</td>
-    <td class="route-frag-money">${toMoney(row.propertyNetOperatingProfit)}</td><td class="route-frag-money">${toMoney(row.fullyStaffedProfit)}</td>
-    <td class="route-frag-money">${formatServicePnlMargin(row.projectedMargin)}</td><td class="route-frag-money">${formatServicePnlMargin(row.fullyStaffedMargin)}</td>
+    <td>${escapeHtml(row.propertyName)}</td><td class="route-frag-money" ${getServicePnlMetricAttributes("contract-revenue")}>${toMoney(row.contractRevenue)}</td>
+    <td class="route-frag-money" ${getServicePnlMetricAttributes("draft-revenue")}>${toMoney(row.draftRevenue)}</td><td class="route-frag-money" ${getServicePnlMetricAttributes("finalized-revenue")}>${toMoney(row.finalizedRevenue)}</td>
+    <td class="route-frag-money" ${getServicePnlMetricAttributes("remaining-potential-task-revenue")}>${toMoney(row.potentialTaskRevenue)}</td><td class="route-frag-money" ${getServicePnlMetricAttributes("remaining-potential-sds-revenue")}>${toMoney(row.potentialSdsRevenue)}</td><td class="route-frag-money" ${getServicePnlMetricAttributes("total-expected-revenue")}>${toMoney(row.revenue)}</td>
+    <td class="route-frag-money" ${getServicePnlMetricAttributes("known-labor", ["known-direct-costs", "total-expected-direct-costs"])}>${toMoney(row.knownLabor)}</td><td class="route-frag-money" ${getServicePnlMetricAttributes("projected-labor", ["projected-future-direct-costs", "total-expected-direct-costs"])}>${toMoney(row.projectedLabor)}</td><td class="route-frag-money" ${getServicePnlMetricAttributes("fully-staffed-labor")}>${toMoney(row.fullyStaffedLabor)}</td>
+    <td class="route-frag-money" ${getServicePnlMetricAttributes("chemical-cost", ["known-direct-costs", "projected-future-direct-costs", "total-expected-direct-costs"])}>${toMoney(row.chemicalCost)}</td><td class="route-frag-money" ${getServicePnlMetricAttributes("parts-cost", ["known-direct-costs", "projected-future-direct-costs", "total-expected-direct-costs"])}>${toMoney(row.partsCost)}</td>
+    <td class="route-frag-money" ${getServicePnlMetricAttributes("expected-service-profit")}>${toMoney(row.projectedServiceProfit)}</td><td class="route-frag-money" ${getServicePnlMetricAttributes("property-operating-expenses", ["known-operating-expenses", "future-operating-expenses", "total-expected-operating-expenses"])}>${toMoney(row.propertyOperatingExpenses)}</td>
+    <td class="route-frag-money" ${getServicePnlMetricAttributes("expected-net-operating-profit")}>${toMoney(row.propertyNetOperatingProfit)}</td><td class="route-frag-money" ${getServicePnlMetricAttributes("fully-staffed-expected-profit")}>${toMoney(row.fullyStaffedProfit)}</td>
+    <td class="route-frag-money" ${getServicePnlMetricAttributes("expected-service-margin")}>${formatServicePnlMargin(row.projectedMargin)}</td><td class="route-frag-money" ${getServicePnlMetricAttributes("fully-staffed-expected-margin")}>${formatServicePnlMargin(row.fullyStaffedMargin)}</td>
   </tr>`).join("") : '<tr><td colspan="18">No invoiced revenue, scheduled work, contract revenue, or property expenses found for this forecast period.</td></tr>';
   const revenueSourceRows = revenueAuditRows.length ? revenueAuditRows.map((row) => `<tr>
     <td>${escapeHtml(row.serviceDate)}</td><td>${escapeHtml(row.propertyName)}</td><td>${escapeHtml(row.sourceType)}</td><td>${escapeHtml(row.description)}</td><td>${escapeHtml(row.revenueStatus)}</td>
@@ -9267,25 +9545,25 @@ function renderServicePnlForecastReport() {
     ${partialMonthlyNotices.length ? `<div class="billing-report-notice">Monthly contract revenue excluded for partial calendar period(s): ${escapeHtml(partialMonthlyNotices.join(", "))}. No proration was applied.</div>` : ""}
     ${!propertyContractRevenueHistoryAvailable ? '<div class="billing-report-notice">Contract history is unavailable. Run the contract revenue migration before relying on forecast results.</div>' : ""}
     <div class="service-pnl-summary-grid">
-      <article><span>Contract Revenue</span><strong>${toMoney(totals.contractRevenue)}</strong></article>
-      <article><span>Draft Revenue</span><strong>${toMoney(totals.draftRevenue)}</strong></article>
-      <article><span>Finalized Revenue</span><strong>${toMoney(totals.finalizedRevenue)}</strong></article>
-      <article><span>Remaining Potential Task Revenue</span><strong>${toMoney(totals.potentialTaskRevenue)}</strong></article>
-      <article><span>Remaining Potential SDS Revenue</span><strong>${toMoney(totals.potentialSdsRevenue)}</strong></article>
-      <article class="service-pnl-highlight"><span>Total Expected Revenue</span><strong>${toMoney(totals.revenue)}</strong></article>
-      <article><span>Known Direct Costs</span><strong>${toMoney(totals.knownDirectCosts)}</strong></article>
-      <article><span>Projected Future Direct Costs</span><strong>${toMoney(totals.projectedFutureDirectCosts)}</strong></article>
-      <article><span>Total Expected Direct Costs</span><strong>${toMoney(totals.expectedDirectCosts)}</strong></article>
-      <article class="service-pnl-highlight"><span>Expected Service Profit</span><strong>${toMoney(totals.projectedServiceProfit)}</strong></article>
-      <article><span>Expected Service Margin</span><strong>${formatServicePnlMargin(totals.projectedMargin)}</strong></article>
-      <article><span>Known Operating Expenses</span><strong>${toMoney(totals.knownOperatingExpenses)}</strong></article>
-      <article><span>Future Operating Expenses</span><strong>${toMoney(totals.futureOperatingExpenses)}</strong></article>
-      <article><span>Total Expected Operating Expenses</span><strong>${toMoney(totals.operatingExpenses)}</strong></article>
-      <article class="service-pnl-highlight"><span>Expected Net Operating Profit</span><strong>${toMoney(totals.netOperatingProfit)}</strong></article>
-      <article><span>Expected Operating Margin</span><strong>${formatServicePnlMargin(totals.operatingMargin)}</strong></article>
-      <article><span>Fully Staffed Labor</span><strong>${toMoney(totals.fullyStaffedLabor)}</strong></article>
-      <article class="service-pnl-highlight"><span>Fully Staffed Expected Profit</span><strong>${toMoney(totals.fullyStaffedProfit)}</strong></article>
-      <article><span>Fully Staffed Expected Margin</span><strong>${formatServicePnlMargin(totals.fullyStaffedMargin)}</strong></article>
+      ${renderServicePnlMetric("Contract Revenue", toMoney(totals.contractRevenue), "Source: each Property card's Contract Revenue Amount and Contract Rate Basis, using the values effective for the report dates. Monthly amounts count once only when the full calendar month is selected; weekly amounts count once on each applicable service day.")}
+      ${renderServicePnlMetric("Draft Revenue", toMoney(totals.draftRevenue), "Source: the Amount on each invoice line item whose invoice Status is Draft and whose Invoice Date is in the selected period. The item's linked task or chemical usage determines the property; each source is counted once.")}
+      ${renderServicePnlMetric("Finalized Revenue", toMoney(totals.finalizedRevenue), "Source: the Amount on each invoice line item whose invoice has a finalized status and whose Invoice Date is in the selected period. The item's linked task or chemical usage determines the property; each source is counted once.")}
+      ${renderServicePnlMetric("Remaining Potential Task Revenue", toMoney(totals.potentialTaskRevenue), "Source: Edit Task > Charge, or the applicable Property card default charge used to calculate it. Includes eligible tasks scheduled in the period that have no matching invoice item. Contract-covered Weekly Standard tasks add $0 here.")}
+      ${renderServicePnlMetric("Remaining Potential SDS Revenue", toMoney(totals.potentialSdsRevenue), "Source: Edit Task > Same-Day Surcharge (SDS), falling back to Property card > Same-Day Surcharge. Includes eligible same-day tasks in the period that have no matching SDS invoice item.")}
+      ${renderServicePnlMetric("Total Expected Revenue", toMoney(totals.revenue), "Contract Revenue + Draft Revenue + Finalized Revenue + Remaining Potential Task Revenue + Remaining Potential SDS Revenue.", { highlight: true })}
+      ${renderServicePnlMetric("Known Direct Costs", toMoney(totals.knownDirectCosts), "Known Labor + Known Chemical Cost + Known Parts Cost. Labor comes from completed/in-progress tasks; chemicals come from saved task usage; parts come from Edit Task > Parts Cost.")}
+      ${renderServicePnlMetric("Projected Future Direct Costs", toMoney(totals.projectedFutureDirectCosts), "Projected Labor + Future Chemical Cost + Future Parts Cost for scheduled work. Labor uses the task's service type and Property card labor amount; chemicals use entered usage; parts use Edit Task > Parts Cost.")}
+      ${renderServicePnlMetric("Total Expected Direct Costs", toMoney(totals.expectedDirectCosts), "Known Direct Costs + Projected Future Direct Costs.")}
+      ${renderServicePnlMetric("Expected Service Profit", toMoney(totals.projectedServiceProfit), "Total Expected Revenue - Total Expected Direct Costs.", { highlight: true })}
+      ${renderServicePnlMetric("Expected Service Margin", formatServicePnlMargin(totals.projectedMargin), "Expected Service Profit / Total Expected Revenue x 100. Displays N/A when revenue is zero.")}
+      ${renderServicePnlMetric("Known Operating Expenses", toMoney(totals.knownOperatingExpenses), "Source: Expense Ledger > Amount for expenses dated on or before today and inside the report period. All Properties includes general and property expenses; selecting one property excludes general expenses.")}
+      ${renderServicePnlMetric("Future Operating Expenses", toMoney(totals.futureOperatingExpenses), "Source: Expense Ledger > Amount for expenses dated after today and inside the report period. All Properties includes general and property expenses; selecting one property includes only that property's expenses.")}
+      ${renderServicePnlMetric("Total Expected Operating Expenses", toMoney(totals.operatingExpenses), "Known Operating Expenses + Future Operating Expenses.")}
+      ${renderServicePnlMetric("Expected Net Operating Profit", toMoney(totals.netOperatingProfit), "Expected Service Profit - Total Expected Operating Expenses.", { highlight: true })}
+      ${renderServicePnlMetric("Expected Operating Margin", formatServicePnlMargin(totals.operatingMargin), "Expected Net Operating Profit / Total Expected Revenue x 100. Displays N/A when revenue is zero.")}
+      ${renderServicePnlMetric("Fully Staffed Labor", toMoney(totals.fullyStaffedLabor), "Source: Edit Task > Labor Amount for completed/in-progress tasks; scheduled tasks use the matching Property card labor setting, such as Standard Weekly Service Labor, Guest Ready Service Labor, Lawn Labor Amount, or Housekeeping Labor Amount. Counts every eligible task as staffed.")}
+      ${renderServicePnlMetric("Fully Staffed Expected Profit", toMoney(totals.fullyStaffedProfit), "Total Expected Revenue - Fully Staffed Labor - all entered chemical costs - all task parts costs.", { highlight: true })}
+      ${renderServicePnlMetric("Fully Staffed Expected Margin", formatServicePnlMargin(totals.fullyStaffedMargin), "Fully Staffed Expected Profit / Total Expected Revenue x 100. Displays N/A when revenue is zero.")}
     </div>
     <div class="service-pnl-staffing-summary">
       <h3>Staffing Summary</h3>
@@ -9293,9 +9571,9 @@ function renderServicePnlForecastReport() {
     </div>
     <h3>Property Forecast</h3>
     <div class="service-pnl-table-wrap"><table class="route-frag-table service-pnl-table forecast-property-table"><thead><tr>
-      <th>Property</th><th>Contract Revenue</th><th>Draft Revenue</th><th>Finalized Revenue</th><th>Remaining Potential Revenue</th><th>Remaining SDS Revenue</th><th>Total Expected Revenue</th>
-      <th>Known Labor</th><th>Projected Labor</th><th>Fully Staffed Labor</th><th>Known Chemical Cost</th><th>Known Parts Cost</th>
-      <th>Expected Service Profit</th><th>Property Operating Expenses</th><th>Expected Net Profit</th><th>Fully Staffed Profit</th><th>Expected Margin</th><th>Fully Staffed Margin</th>
+      <th>Property</th><th ${getServicePnlMetricAttributes("contract-revenue")}>Contract Revenue</th><th ${getServicePnlMetricAttributes("draft-revenue")}>Draft Revenue</th><th ${getServicePnlMetricAttributes("finalized-revenue")}>Finalized Revenue</th><th ${getServicePnlMetricAttributes("remaining-potential-task-revenue")}>Remaining Potential Revenue</th><th ${getServicePnlMetricAttributes("remaining-potential-sds-revenue")}>Remaining SDS Revenue</th><th ${getServicePnlMetricAttributes("total-expected-revenue")}>Total Expected Revenue</th>
+      <th ${getServicePnlMetricAttributes("known-labor", ["known-direct-costs", "total-expected-direct-costs"])}>Known Labor</th><th ${getServicePnlMetricAttributes("projected-labor", ["projected-future-direct-costs", "total-expected-direct-costs"])}>Projected Labor</th><th ${getServicePnlMetricAttributes("fully-staffed-labor")}>Fully Staffed Labor</th><th ${getServicePnlMetricAttributes("chemical-cost", ["known-direct-costs", "projected-future-direct-costs", "total-expected-direct-costs"])}>Known Chemical Cost</th><th ${getServicePnlMetricAttributes("parts-cost", ["known-direct-costs", "projected-future-direct-costs", "total-expected-direct-costs"])}>Known Parts Cost</th>
+      <th ${getServicePnlMetricAttributes("expected-service-profit")}>Expected Service Profit</th><th ${getServicePnlMetricAttributes("property-operating-expenses", ["known-operating-expenses", "future-operating-expenses", "total-expected-operating-expenses"])}>Property Operating Expenses</th><th ${getServicePnlMetricAttributes("expected-net-operating-profit")}>Expected Net Profit</th><th ${getServicePnlMetricAttributes("fully-staffed-expected-profit")}>Fully Staffed Profit</th><th ${getServicePnlMetricAttributes("expected-service-margin")}>Expected Margin</th><th ${getServicePnlMetricAttributes("fully-staffed-expected-margin")}>Fully Staffed Margin</th>
     </tr></thead><tbody>${propertyTableRows}</tbody></table></div>
     <h3 class="forecast-audit-heading">Revenue Source Audit</h3>
     <div class="service-pnl-table-wrap"><table class="route-frag-table forecast-revenue-audit-table"><thead><tr>
@@ -9309,6 +9587,7 @@ function renderServicePnlForecastReport() {
     </tr></thead><tbody>${costAuditRows}</tbody></table></div>
     ${renderBillingReportFooter()}
   </div>`;
+  initializeServicePnlMetricHighlights();
 }
 
 function formatServicePnlMargin(value) {
@@ -9388,23 +9667,23 @@ function renderServicePnlReport() {
     ? rows.map((row) => `
         <tr>
           <td>${escapeHtml(row.propertyName)}</td>
-          <td class="route-frag-money">${toMoney(row.contractRevenue)}</td>
-          <td class="route-frag-money">${toMoney(row.draftRevenue)}</td>
-          <td class="route-frag-money">${toMoney(row.finalizedRevenue)}</td>
-          <td class="route-frag-money">${toMoney(row.guestEngineRevenue)}</td>
-          <td class="route-frag-money">${toMoney(row.revenue)}</td>
+          <td class="route-frag-money" ${getServicePnlMetricAttributes("contract-revenue")}>${toMoney(row.contractRevenue)}</td>
+          <td class="route-frag-money" ${getServicePnlMetricAttributes("draft-revenue")}>${toMoney(row.draftRevenue)}</td>
+          <td class="route-frag-money" ${getServicePnlMetricAttributes("finalized-revenue")}>${toMoney(row.finalizedRevenue)}</td>
+          <td class="route-frag-money" ${getServicePnlMetricAttributes("guest-engine-revenue")}>${toMoney(row.guestEngineRevenue)}</td>
+          <td class="route-frag-money" ${getServicePnlMetricAttributes("total-service-revenue")}>${toMoney(row.revenue)}</td>
           <td>${row.ownerPerformedServices}</td>
           <td>${row.techPerformedServices}</td>
-          <td class="route-frag-money">${toMoney(row.actualTechLabor)}</td>
-          <td class="route-frag-money">${toMoney(row.potentialLabor)}</td>
-          <td class="route-frag-money">${toMoney(row.chemicalCost)}</td>
-          <td class="route-frag-money">${toMoney(row.partsCost)}</td>
-          <td class="route-frag-money">${toMoney(row.actualProfit)}</td>
-          <td class="route-frag-money">${toMoney(row.propertyOperatingExpenses)}</td>
-          <td class="route-frag-money">${toMoney(row.propertyNetProfit)}</td>
-          <td class="route-frag-money">${toMoney(row.fullyStaffedProfit)}</td>
-          <td class="route-frag-money">${formatServicePnlMargin(row.actualMargin)}</td>
-          <td class="route-frag-money">${formatServicePnlMargin(row.fullyStaffedMargin)}</td>
+          <td class="route-frag-money" ${getServicePnlMetricAttributes("actual-tech-labor", ["actual-direct-costs"])}>${toMoney(row.actualTechLabor)}</td>
+          <td class="route-frag-money" ${getServicePnlMetricAttributes("potential-fully-staffed-labor")}>${toMoney(row.potentialLabor)}</td>
+          <td class="route-frag-money" ${getServicePnlMetricAttributes("chemical-cost", ["actual-direct-costs"])}>${toMoney(row.chemicalCost)}</td>
+          <td class="route-frag-money" ${getServicePnlMetricAttributes("parts-cost", ["actual-direct-costs"])}>${toMoney(row.partsCost)}</td>
+          <td class="route-frag-money" ${getServicePnlMetricAttributes("service-profit")}>${toMoney(row.actualProfit)}</td>
+          <td class="route-frag-money" ${getServicePnlMetricAttributes("operating-expenses")}>${toMoney(row.propertyOperatingExpenses)}</td>
+          <td class="route-frag-money" ${getServicePnlMetricAttributes("net-operating-profit")}>${toMoney(row.propertyNetProfit)}</td>
+          <td class="route-frag-money" ${getServicePnlMetricAttributes("fully-staffed-service-profit")}>${toMoney(row.fullyStaffedProfit)}</td>
+          <td class="route-frag-money" ${getServicePnlMetricAttributes("service-margin")}>${formatServicePnlMargin(row.actualMargin)}</td>
+          <td class="route-frag-money" ${getServicePnlMetricAttributes("fully-staffed-margin")}>${formatServicePnlMargin(row.fullyStaffedMargin)}</td>
         </tr>
       `).join("")
     : '<tr><td colspan="18">No revenue, service costs, or property operating expenses found for this period.</td></tr>';
@@ -9420,23 +9699,23 @@ function renderServicePnlReport() {
       <div class="billing-report-meta">Date Range: ${escapeHtml(startDate)} to ${escapeHtml(endDate)}</div>
       ${reportNotices.map((notice) => `<div class="billing-report-notice">${escapeHtml(notice)}</div>`).join("")}
       <div class="service-pnl-summary-grid">
-        <article><span>Contract Revenue</span><strong>${toMoney(totals.contractRevenue)}</strong></article>
-        <article><span>Draft Revenue</span><strong>${toMoney(totals.draftRevenue)}</strong></article>
-        <article><span>Finalized Revenue</span><strong>${toMoney(totals.finalizedRevenue)}</strong></article>
-        <article><span>Guest Engine Revenue</span><strong>${toMoney(totals.guestEngineRevenue)}</strong></article>
-        <article class="service-pnl-highlight"><span>Total Service Revenue</span><strong>${toMoney(totals.revenue)}</strong></article>
-        <article><span>Actual Tech Labor</span><strong>${toMoney(totals.actualTechLabor)}</strong></article>
-        <article><span>Chemical Cost</span><strong>${toMoney(totals.chemicalCost)}</strong></article>
-        <article><span>Parts Cost</span><strong>${toMoney(totals.partsCost)}</strong></article>
-        <article><span>Actual Direct Costs</span><strong>${toMoney(totals.actualDirectCosts)}</strong></article>
-        <article class="service-pnl-highlight"><span>Service Profit</span><strong>${toMoney(totals.actualProfit)}</strong></article>
-        <article><span>Service Margin</span><strong>${formatServicePnlMargin(totals.actualMargin)}</strong></article>
-        <article><span>Operating Expenses</span><strong>${toMoney(totals.operatingExpenses)}</strong></article>
-        <article class="service-pnl-highlight"><span>Net Operating Profit</span><strong>${toMoney(totals.netOperatingProfit)}</strong></article>
-        <article><span>Operating Margin</span><strong>${formatServicePnlMargin(totals.operatingMargin)}</strong></article>
-        <article><span>Potential Fully Staffed Labor</span><strong>${toMoney(totals.potentialLabor)}</strong></article>
-        <article class="service-pnl-highlight"><span>Fully Staffed Service Profit</span><strong>${toMoney(totals.fullyStaffedProfit)}</strong></article>
-        <article><span>Fully Staffed Margin</span><strong>${formatServicePnlMargin(totals.fullyStaffedMargin)}</strong></article>
+        ${renderServicePnlMetric("Contract Revenue", toMoney(totals.contractRevenue), "Source: each Property card's Contract Revenue Amount and Contract Rate Basis, using the values effective for the report dates. Monthly amounts count once only when the full calendar month is selected; weekly amounts count once on each applicable service day.")}
+        ${renderServicePnlMetric("Draft Revenue", toMoney(totals.draftRevenue), "Source: the Amount on each invoice line item whose invoice Status is Draft and whose Invoice Date is in the selected period. The item's linked task or chemical usage determines the property.")}
+        ${renderServicePnlMetric("Finalized Revenue", toMoney(totals.finalizedRevenue), "Source: the Amount on each invoice line item whose invoice has a finalized status and whose Invoice Date is in the selected period. The item's linked task or chemical usage determines the property.")}
+        ${renderServicePnlMetric("Guest Engine Revenue", toMoney(totals.guestEngineRevenue), "Draft Revenue + Finalized Revenue. It is the total of qualifying invoice items and does not include Contract Revenue.")}
+        ${renderServicePnlMetric("Total Service Revenue", toMoney(totals.revenue), "Contract Revenue + Guest Engine Revenue.", { highlight: true })}
+        ${renderServicePnlMetric("Actual Tech Labor", toMoney(totals.actualTechLabor), "Source: Edit Task > Labor Amount on completed tasks whose completion date is in the report period. It counts only tasks assigned to a technician marked Settings > Technicians > Paid Labor; owner/no-cost work is excluded.")}
+        ${renderServicePnlMetric("Chemical Cost", toMoney(totals.chemicalCost), "Source: Add Chemical Usage > Quantity Used multiplied by Settings > Chemicals > Cost Per Unit. Includes usage whose Service Date is in the report period and assigns it to the usage entry's property.")}
+        ${renderServicePnlMetric("Parts Cost", toMoney(totals.partsCost), "Source: Edit Task > Parts Cost on completed tasks whose completion date is in the report period.")}
+        ${renderServicePnlMetric("Actual Direct Costs", toMoney(totals.actualDirectCosts), "Actual Tech Labor + Chemical Cost + Parts Cost.")}
+        ${renderServicePnlMetric("Service Profit", toMoney(totals.actualProfit), "Total Service Revenue - Actual Direct Costs.", { highlight: true })}
+        ${renderServicePnlMetric("Service Margin", formatServicePnlMargin(totals.actualMargin), "Service Profit / Total Service Revenue x 100. Displays N/A when revenue is zero.")}
+        ${renderServicePnlMetric("Operating Expenses", toMoney(totals.operatingExpenses), "Source: Expense Ledger > Amount for records whose Date is in the report period. All Properties includes general and property expenses; selecting one property excludes general expenses and includes only that property's records.")}
+        ${renderServicePnlMetric("Net Operating Profit", toMoney(totals.netOperatingProfit), "Service Profit - Operating Expenses.", { highlight: true })}
+        ${renderServicePnlMetric("Operating Margin", formatServicePnlMargin(totals.operatingMargin), "Net Operating Profit / Total Service Revenue x 100. Displays N/A when revenue is zero.")}
+        ${renderServicePnlMetric("Potential Fully Staffed Labor", toMoney(totals.potentialLabor), "Source: Edit Task > Labor Amount on every completed task in the report period. Weekly Standard, Guest Ready, Lawn, and Housekeeping labor amounts are captured from their matching Property card labor setting when the task is completed. Includes owner-performed work.")}
+        ${renderServicePnlMetric("Fully Staffed Service Profit", toMoney(totals.fullyStaffedProfit), "Total Service Revenue - Potential Fully Staffed Labor - Chemical Cost - Parts Cost.", { highlight: true })}
+        ${renderServicePnlMetric("Fully Staffed Margin", formatServicePnlMargin(totals.fullyStaffedMargin), "Fully Staffed Service Profit / Total Service Revenue x 100. Displays N/A when revenue is zero.")}
       </div>
       <div class="service-pnl-operating-breakdown">
         <h3>Operating Expense Breakdown</h3>
@@ -9451,23 +9730,23 @@ function renderServicePnlReport() {
           <thead>
             <tr>
               <th>Property</th>
-              <th>Contract Revenue</th>
-              <th>Draft Revenue</th>
-              <th>Finalized Revenue</th>
-              <th>Guest Engine Revenue</th>
-              <th>Total Service Revenue</th>
+              <th ${getServicePnlMetricAttributes("contract-revenue")}>Contract Revenue</th>
+              <th ${getServicePnlMetricAttributes("draft-revenue")}>Draft Revenue</th>
+              <th ${getServicePnlMetricAttributes("finalized-revenue")}>Finalized Revenue</th>
+              <th ${getServicePnlMetricAttributes("guest-engine-revenue")}>Guest Engine Revenue</th>
+              <th ${getServicePnlMetricAttributes("total-service-revenue")}>Total Service Revenue</th>
               <th>Owner-Performed Services</th>
               <th>Tech-Performed Services</th>
-              <th>Actual Tech Labor</th>
-              <th>Potential Labor</th>
-              <th>Chemical Cost</th>
-              <th>Parts Cost</th>
-              <th>Service Profit</th>
-              <th>Property Operating Expenses</th>
-              <th>Property Net Profit</th>
-              <th>Fully Staffed Profit</th>
-              <th>Service Margin</th>
-              <th>Fully Staffed Margin</th>
+              <th ${getServicePnlMetricAttributes("actual-tech-labor", ["actual-direct-costs"])}>Actual Tech Labor</th>
+              <th ${getServicePnlMetricAttributes("potential-fully-staffed-labor")}>Potential Labor</th>
+              <th ${getServicePnlMetricAttributes("chemical-cost", ["actual-direct-costs"])}>Chemical Cost</th>
+              <th ${getServicePnlMetricAttributes("parts-cost", ["actual-direct-costs"])}>Parts Cost</th>
+              <th ${getServicePnlMetricAttributes("service-profit")}>Service Profit</th>
+              <th ${getServicePnlMetricAttributes("operating-expenses")}>Property Operating Expenses</th>
+              <th ${getServicePnlMetricAttributes("net-operating-profit")}>Property Net Profit</th>
+              <th ${getServicePnlMetricAttributes("fully-staffed-service-profit")}>Fully Staffed Profit</th>
+              <th ${getServicePnlMetricAttributes("service-margin")}>Service Margin</th>
+              <th ${getServicePnlMetricAttributes("fully-staffed-margin")}>Fully Staffed Margin</th>
             </tr>
           </thead>
           <tbody>${tableRows}</tbody>
@@ -9476,6 +9755,7 @@ function renderServicePnlReport() {
       ${renderBillingReportFooter()}
     </div>
   `;
+  initializeServicePnlMetricHighlights();
 }
 
 function getBillingReportRows() {
@@ -12457,7 +12737,7 @@ function renderCleaningScheduleHistory(task) {
   cleaningScheduleHistory.innerHTML = markup;
   cleaningScheduleHistory.classList.toggle("hidden", !markup);
 }
-function renderTaskCard(task) {
+function renderTaskCard(task, { stopNumber = null } = {}) {
   const status = task.status || "Scheduled";
   const cardClass = (task.status === "Completed"
     ? "task-card completed"
@@ -12486,9 +12766,22 @@ function renderTaskCard(task) {
   const carryForwardHistory = getCarryForwardHistoryMarkup(task);
   const scheduleHistory = getScheduleHistoryMarkup(task);
   const housekeepingOperationalMarkup = getHousekeepingOperationalMarkup(task);
+  const routeMarkup = Number.isInteger(stopNumber) && stopNumber > 0
+    ? `<div class="today-route-controls">
+        <span class="today-route-stop">${status === "Completed" ? "✓ " : ""}STOP ${stopNumber}</span>
+        <button type="button" class="today-route-drag-handle" draggable="true"
+          aria-label="Move Stop ${stopNumber}" title="Drag to reorder this technician's route. Alt+Arrow keys also move stops."
+          ondragstart="handleTodayRouteDragStart(event, '${task.id}')" ondragend="handleTodayRouteDragEnd(event)"
+          onpointerdown="handleTodayRoutePointerDown(event, '${task.id}')"
+          onpointermove="handleTodayRoutePointerMove(event)" onpointerup="handleTodayRoutePointerUp(event)"
+          onpointercancel="handleTodayRoutePointerCancel(event)"
+          onkeydown="handleTodayRouteKeyDown(event, '${task.id}')">☰</button>
+      </div>`
+    : "";
 
   return `
     <div class="${cardClass} ${carryForwardInfo?.urgent ? "carried-forward-urgent-card" : carryForwardInfo ? "carried-forward-card" : ""}">
+      ${routeMarkup}
       <div class="task-card-header">
         <div class="task-card-title">${getPropertyName(task.property_id)}</div>
         ${showReconcile ? `
@@ -12698,8 +12991,23 @@ function renderTaskViews() {
     : "";
   console.log("[TodayView] Rendering", todayTasks.length, "today tasks");
   todayTasksContainer.innerHTML = todayTasks.length
-    ? todayTasks.map(renderTaskCard).join("")
-    : `<div class="empty">No ${getServiceBranchLabel(activeServiceWorkspace)} tasks due today.</div>`;
+    ? getTodayTechnicianRoutes(todayTasks).map((route) => `
+        <section class="today-route-group">
+          <div class="today-route-heading">
+            <h3>${escapeHtml(route.technicianLabel)}</h3>
+            <span>${route.tasks.length} stop${route.tasks.length === 1 ? "" : "s"}</span>
+          </div>
+          <div class="today-route-list" data-route-key="${escapeHtml(route.routeKey)}">
+            ${route.tasks.map((task, index) => `
+              <div class="today-route-task" data-task-id="${escapeHtml(task.id)}"
+                ondragover="handleTodayRouteDragOver(event)" ondrop="handleTodayRouteDrop(event)">
+                ${renderTaskCard(task, { stopNumber: index + 1 })}
+              </div>
+            `).join("")}
+          </div>
+        </section>
+      `).join("")
+    : '<div class="empty">No operational tasks due today.</div>';
 
   renderWeekView();
   renderMonthView();
