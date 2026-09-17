@@ -43,7 +43,6 @@ const AUTO_ICAL_SYNC_COOLDOWN_MS = 10 * 60 * 1000;
 let activeServiceWorkspace = SERVICE_BRANCH_POOL;
 let currentMonthViewYear = new Date().getFullYear();
 let currentMonthViewMonth = new Date().getMonth();
-let monthBranchFilter = "all";
 let selectedDailyRouteDate = null;
 let selectedDailyRouteTechnicianKey = "all";
 let draggedMonthTaskId = null;
@@ -97,7 +96,6 @@ function applyRoleBasedInterface() {
   document.body.classList.toggle("staff-role", isStaffUser());
   document.body.classList.toggle("manager-role", isManagerUser());
   renderMonthAddTaskControl();
-
   if (isManagerUser() && !["current", "next"].includes(selectedMonthFilter)) {
     selectedMonthFilter = "current";
     if (monthFilterSelect) monthFilterSelect.value = selectedMonthFilter;
@@ -265,6 +263,14 @@ const INVOICE_ITEM_SOURCES = {
   CHEMICAL: "chemical",
   SDS: "sds",
 };
+const INVOICE_SERVICE_BRANCH_OPTIONS = [
+  { value: "", label: "Not Categorized" },
+  { value: SERVICE_BRANCH_POOL, label: "Pool" },
+  { value: SERVICE_BRANCH_LAWN, label: "Lawn" },
+  { value: SERVICE_BRANCH_MAINTENANCE, label: "Maintenance" },
+  { value: SERVICE_BRANCH_HOUSEKEEPING, label: "Housekeeping" },
+  { value: "other", label: "Other" },
+];
 const INVOICE_QUICK_ADD_TEMPLATES = {
   filter_cleaning: { description: "Filter Cleaning", unit: "service", rate: 95, itemType: "manual" },
   cartridge_cleaning: { description: "Cartridge Cleaning", unit: "service", rate: 125, itemType: "manual" },
@@ -470,6 +476,7 @@ const billingReportContainer = document.getElementById("billingReportContainer")
 const invoiceIncludeNonBillableChemicals = document.getElementById("invoiceIncludeNonBillableChemicals");
 const invoiceTaxEnabled = document.getElementById("invoiceTaxEnabled");
 const generateInvoiceBtn = document.getElementById("generateInvoiceBtn");
+const manualInvoiceBtn = document.getElementById("manualInvoiceBtn");
 const invoiceEligibilitySummary = document.getElementById("invoiceEligibilitySummary");
 const invoicePreviewContainer = document.getElementById("invoicePreviewContainer");
 const invoiceBatchPreviewContainer = document.getElementById("invoiceBatchPreviewContainer");
@@ -982,6 +989,10 @@ if (billingReconciledOnly) {
 
 if (generateInvoiceBtn) {
   generateInvoiceBtn.addEventListener("click", generateInvoicePreviewFromFilters);
+}
+
+if (manualInvoiceBtn) {
+  manualInvoiceBtn.addEventListener("click", createManualInvoiceDraft);
 }
 
 if (invoiceStatusFilter) {
@@ -8927,6 +8938,9 @@ function getContractRevenueForProperty(property, startDate, endDate) {
 }
 
 function getServicePnlInvoiceItemPropertyId(item) {
+  const storedPropertyId = normalizePropertyId(item?.property_id);
+  if (storedPropertyId) return storedPropertyId;
+
   const itemSource = String(item?.item_source || item?.source_type || "").trim().toLowerCase();
   const chemicalUsageId = item?.chemical_usage_id
     || (itemSource === INVOICE_ITEM_SOURCES.CHEMICAL ? item?.source_id : null);
@@ -9019,6 +9033,10 @@ function getServicePnlRows({ startDate, endDate, selectedPropertyId = "" } = {})
     const amount = Number(item.amount || 0);
     const category = getServicePnlInvoiceRevenueCategory(invoice.status);
     row.guestEngineRevenue += amount;
+    if (getForecastInvoiceItemSource(item) === INVOICE_ITEM_SOURCES.MANUAL) {
+      row.actualTechLabor += Math.max(0, Number(item.labor_cost || 0));
+      row.partsCost += Math.max(0, Number(item.material_cost || 0));
+    }
     if (category === "draft") {
       row.draftRevenue += amount;
     } else if (category === "finalized") {
@@ -9205,8 +9223,19 @@ function getForecastInvoiceRevenueData({ startDate, endDate, selectedPropertyId 
     if (source === INVOICE_ITEM_SOURCES.TASK && taskId) representedTaskIds.add(taskId);
     const amount = Number(item?.amount || 0);
     const propertyKey = normalizePropertyId(propertyId) || SERVICE_PNL_UNASSIGNED_PROPERTY_ID;
-    if (!byProperty.has(propertyKey)) byProperty.set(propertyKey, { draftRevenue: 0, finalizedRevenue: 0 });
+    if (!byProperty.has(propertyKey)) {
+      byProperty.set(propertyKey, {
+        draftRevenue: 0,
+        finalizedRevenue: 0,
+        manualLaborCost: 0,
+        manualMaterialCost: 0,
+      });
+    }
     byProperty.get(propertyKey)[invoiceRecord.category === "draft" ? "draftRevenue" : "finalizedRevenue"] += amount;
+    if (source === INVOICE_ITEM_SOURCES.MANUAL) {
+      byProperty.get(propertyKey).manualLaborCost += Math.max(0, Number(item?.labor_cost || 0));
+      byProperty.get(propertyKey).manualMaterialCost += Math.max(0, Number(item?.material_cost || 0));
+    }
     auditRows.push({
       sourceKey,
       serviceDate: normalizeDateKey(item?.service_date) || normalizeDateKey(invoiceRecord.invoice.invoice_date),
@@ -9328,6 +9357,10 @@ function getServicePnlForecastRows({ startDate, endDate, selectedPropertyId = ""
     const row = ensureRow(propertyId);
     row.draftRevenue += invoiceTotals.draftRevenue;
     row.finalizedRevenue += invoiceTotals.finalizedRevenue;
+    row.knownLabor += invoiceTotals.manualLaborCost;
+    row.fullyStaffedLabor += invoiceTotals.manualLaborCost;
+    row.knownPartsCost += invoiceTotals.manualMaterialCost;
+    row.partsCost += invoiceTotals.manualMaterialCost;
   });
 
   const taskRows = getServicePnlForecastTaskRows({
@@ -9965,7 +9998,7 @@ function getPropertyOptionsMarkup(selectedClientName = "") {
     .filter((property) => !normalizedClientName || String(property.client_name || "").trim() === normalizedClientName)
     .slice()
     .sort((a, b) => (a.property_name || "").localeCompare(b.property_name || ""))
-    .map((property) => `<option value="${property.id}">${property.property_name}</option>`)
+    .map((property) => `<option value="${property.id}">${escapeHtml(property.property_name)}${isPropertyActive(property) ? "" : " (Inactive)"}</option>`)
     .join("")}`;
 }
 
@@ -10615,6 +10648,78 @@ function formatInvoiceDate(date) {
   return formatDateValue(date || new Date());
 }
 
+function getInvoiceDueDate(invoiceDate, paymentTerms) {
+  const date = parseDateString(invoiceDate);
+  date.setUTCDate(date.getUTCDate() + getInvoiceTermsDays(paymentTerms));
+  return formatDateValue(date);
+}
+
+function createManualInvoiceItem(property, serviceDate) {
+  return {
+    sourceId: null,
+    taskId: null,
+    chemicalUsageId: null,
+    propertyId: property.id,
+    propertyName: property.property_name || "",
+    description: "",
+    serviceDate,
+    quantity: 1,
+    unit: "each",
+    rate: 0,
+    amount: 0,
+    itemType: "manual",
+    itemSource: INVOICE_ITEM_SOURCES.MANUAL,
+    serviceBranch: "other",
+    laborCost: 0,
+    materialCost: 0,
+    notes: "",
+  };
+}
+
+function createManualInvoiceDraft() {
+  if (!requireAdminAccess()) return;
+  const propertyId = String(billingPropertySelect?.value || "").trim();
+  const property = properties.find((item) => normalizePropertyId(item.id) === normalizePropertyId(propertyId));
+  if (!property) {
+    alert("Select one property before creating a manual invoice. Inactive properties are available in the Property list.");
+    return;
+  }
+
+  const invoiceDate = formatInvoiceDate(new Date());
+  const paymentTerms = String(property.payment_terms || DEFAULT_INVOICE_TERMS).trim() || DEFAULT_INVOICE_TERMS;
+  currentInvoiceBatchDrafts = [];
+  clearInvoiceEligibilitySummary();
+  currentInvoiceDraft = {
+    id: null,
+    invoiceNumber: "(pending)",
+    propertyId: property.id,
+    propertyName: property.property_name || "",
+    companyBranch: normalizeCompanyBranch(property.company_branch),
+    clientName: String(property.client_name || property.billing_company_name || property.property_name || "Client").trim(),
+    billingCompanyName: String(property.billing_company_name || "").trim(),
+    billingEmail: String(property.billing_email || "").trim(),
+    billingAddress: String(property.billing_address || "").trim(),
+    accountReference: String(property.billing_account_reference || "").trim(),
+    periodStart: invoiceDate,
+    periodEnd: invoiceDate,
+    invoiceDate,
+    dueDate: getInvoiceDueDate(invoiceDate, paymentTerms),
+    status: "draft",
+    notes: String(property.invoice_notes || "").trim(),
+    paymentTerms,
+    taxable: property.billing_taxable !== false,
+    taxRate: Number(property.billing_tax_rate || 0),
+    includeNonBillableChemicals: false,
+    isManualInvoice: true,
+    items: [createManualInvoiceItem(property, invoiceDate)],
+    subtotal: 0,
+    tax: 0,
+    total: 0,
+  };
+  renderInvoiceBatchPreview();
+  renderInvoicePreview();
+}
+
 function buildDraftInvoiceModel({ property, clientName = "", propertyIds = [], startDate, endDate, includeNonBillableChemicals = false, taxOverride = "property", enableDebugLog = false }) {
   const invoiceDate = formatInvoiceDate(new Date());
   const selectedPropertyId = !clientName && propertyIds.length <= 1
@@ -10662,11 +10767,7 @@ function buildDraftInvoiceModel({ property, clientName = "", propertyIds = [], s
   const total = Number((subtotal + tax).toFixed(2));
 
   const paymentTerms = String(property?.payment_terms || DEFAULT_INVOICE_TERMS).trim() || DEFAULT_INVOICE_TERMS;
-  const dueDate = (() => {
-    const date = parseDateString(invoiceDate);
-    date.setUTCDate(date.getUTCDate() + getInvoiceTermsDays(paymentTerms));
-    return formatDateValue(date);
-  })();
+  const dueDate = getInvoiceDueDate(invoiceDate, paymentTerms);
 
   return {
     id: null,
@@ -10814,6 +10915,12 @@ function buildInvoicePropertyHistoryLabel({ invoice = {}, invoiceItems = [] } = 
   return buildInvoicePropertyHeaderLabel({ invoice, invoiceItems });
 }
 
+function getInvoiceServiceBranchOptionsMarkup(selectedBranch = "") {
+  return INVOICE_SERVICE_BRANCH_OPTIONS.map((option) => (
+    `<option value="${option.value}" ${option.value === selectedBranch ? "selected" : ""}>${option.label}</option>`
+  )).join("");
+}
+
 function renderInvoicePreview() {
   if (!invoicePreviewContainer) return;
 
@@ -10828,19 +10935,26 @@ function renderInvoicePreview() {
   const invoice = currentInvoiceDraft;
 
   const itemRows = invoice.items.length
-    ? invoice.items.map((item, index) => `
+    ? invoice.items.map((item, index) => {
+      const isManualItem = item.itemSource === INVOICE_ITEM_SOURCES.MANUAL;
+      const internalFieldState = isManualItem ? "" : " disabled";
+      return `
       <tr>
         <td><input type="text" value="${escapeHtml(item.description || "")}" onchange="updateInvoiceItemField(${index}, 'description', this.value)"></td>
         <td><input type="date" value="${item.serviceDate || ""}" onchange="updateInvoiceItemField(${index}, 'serviceDate', this.value)"></td>
         <td><input type="number" step="0.01" value="${Number(item.quantity || 0)}" onchange="updateInvoiceItemField(${index}, 'quantity', this.value)"></td>
         <td><input type="text" value="${escapeHtml(item.unit || "")}" onchange="updateInvoiceItemField(${index}, 'unit', this.value)"></td>
         <td><input type="number" step="0.01" value="${Number(item.rate || 0)}" onchange="updateInvoiceItemField(${index}, 'rate', this.value)"></td>
+        <td><select onchange="updateInvoiceItemField(${index}, 'serviceBranch', this.value)"${internalFieldState}>${getInvoiceServiceBranchOptionsMarkup(item.serviceBranch || "")}</select></td>
+        <td><input type="number" min="0" step="0.01" value="${Number(item.laborCost || 0)}" onchange="updateInvoiceItemField(${index}, 'laborCost', this.value)"${internalFieldState}></td>
+        <td><input type="number" min="0" step="0.01" value="${Number(item.materialCost || 0)}" onchange="updateInvoiceItemField(${index}, 'materialCost', this.value)"${internalFieldState}></td>
         <td><input type="text" value="${escapeHtml(item.notes || "")}" onchange="updateInvoiceItemField(${index}, 'notes', this.value)"></td>
         <td class="billing-report-amount">${toMoney(item.amount)}</td>
         <td><button type="button" class="delete-btn" onclick="removeInvoiceItem(${index})">Remove</button></td>
       </tr>
-    `).join("")
-    : `<tr><td colspan="8">No line items in this invoice.</td></tr>`;
+    `;
+    }).join("")
+    : `<tr><td colspan="11">No line items in this invoice.</td></tr>`;
 
   const printItemRows = invoice.items.length
     ? invoice.items.map((item) => `
@@ -10913,7 +11027,8 @@ function renderInvoicePreview() {
         <div class="billing-report-meta"><strong>Account/Ref:</strong> <input type="text" value="${escapeHtml(invoice.accountReference || "")}" onchange="updateInvoiceDraftField('accountReference', this.value)"></div>
         <div class="billing-report-meta"><strong>Invoice #:</strong> ${escapeHtml(invoice.invoiceNumber || "(pending)")}</div>
         <div class="billing-report-meta"><strong>Invoice Date:</strong> ${invoice.invoiceDate}</div>
-        <div class="billing-report-meta"><strong>Due Date:</strong> <input type="date" value="${invoice.dueDate || ""}" onchange="updateInvoiceDraftField('dueDate', this.value)"> (${escapeHtml(invoice.paymentTerms || DEFAULT_INVOICE_TERMS)})</div>
+        <div class="billing-report-meta"><strong>Payment Terms:</strong> <input type="text" value="${escapeHtml(invoice.paymentTerms || DEFAULT_INVOICE_TERMS)}" onchange="updateInvoiceDraftField('paymentTerms', this.value)"></div>
+        <div class="billing-report-meta"><strong>Due Date:</strong> <input type="date" value="${invoice.dueDate || ""}" onchange="updateInvoiceDraftField('dueDate', this.value)"></div>
         <div class="billing-report-meta"><strong>Service Period:</strong> ${invoice.periodStart} to ${invoice.periodEnd}</div>
         <div class="billing-report-meta"><strong>Status:</strong> ${escapeHtml(String(invoice.status || "draft").toUpperCase())}</div>
         <div class="billing-report-meta">${escapeHtml(invoicePropertyHeaderLabel)}</div>
@@ -10932,6 +11047,9 @@ function renderInvoicePreview() {
                 <th>Qty</th>
                 <th>Unit</th>
                 <th>Rate</th>
+                <th>Branch</th>
+                <th>Internal Labor</th>
+                <th>Internal Materials</th>
                 <th>Notes</th>
                 <th>Amount</th>
                 <th></th>
@@ -11299,7 +11417,7 @@ function updateInvoiceItemField(index, field, rawValue) {
   const item = currentInvoiceDraft.items[index];
   if (!item) return;
 
-  const numericFields = new Set(["quantity", "rate"]);
+  const numericFields = new Set(["quantity", "rate", "laborCost", "materialCost"]);
   item[field] = numericFields.has(field) ? Number(rawValue || 0) : rawValue;
   recalculateInvoiceDraftTotals();
   renderInvoicePreview();
@@ -11314,20 +11432,9 @@ function removeInvoiceItem(index) {
 
 function addInvoiceManualItem() {
   if (!currentInvoiceDraft) return;
-  currentInvoiceDraft.items.push({
-    sourceId: null,
-    taskId: null,
-    chemicalUsageId: null,
-    description: "Manual line item",
-    serviceDate: currentInvoiceDraft.periodEnd || "",
-    quantity: 1,
-    unit: "each",
-    rate: 0,
-    amount: 0,
-    itemType: "manual",
-    itemSource: INVOICE_ITEM_SOURCES.MANUAL,
-    notes: "",
-  });
+  const property = getPropertyById(currentInvoiceDraft.propertyId);
+  if (!property) return;
+  currentInvoiceDraft.items.push(createManualInvoiceItem(property, currentInvoiceDraft.periodEnd || currentInvoiceDraft.invoiceDate || ""));
   renderInvoicePreview();
 }
 
@@ -11437,16 +11544,39 @@ async function saveInvoiceDraft(options = {}) {
 
   recalculateInvoiceDraftTotals();
 
+  if (currentInvoiceDraft.isManualInvoice) {
+    const hasMeaningfulItem = currentInvoiceDraft.items.some((item) => String(item.description || "").trim());
+    const hasInvalidInternalCost = currentInvoiceDraft.items.some((item) => (
+      !Number.isFinite(Number(item.laborCost || 0))
+      || !Number.isFinite(Number(item.materialCost || 0))
+      || Number(item.laborCost || 0) < 0
+      || Number(item.materialCost || 0) < 0
+    ));
+    if (!hasMeaningfulItem) {
+      if (!silent) alert("Add at least one described line item before saving this manual invoice.");
+      return false;
+    }
+    if (hasInvalidInternalCost) {
+      if (!silent) alert("Internal labor and material costs must be valid nonnegative amounts.");
+      return false;
+    }
+  }
+
   const invoicePayload = {
     invoice_number: currentInvoiceDraft.id ? currentInvoiceDraft.invoiceNumber : buildInvoiceNumber(),
     property_id: currentInvoiceDraft.propertyId,
     client_name: currentInvoiceDraft.clientName || null,
+    billing_company_name: currentInvoiceDraft.billingCompanyName || null,
     billing_email: currentInvoiceDraft.billingEmail || null,
     billing_address: currentInvoiceDraft.billingAddress || null,
+    billing_account_reference: currentInvoiceDraft.accountReference || null,
     period_start: currentInvoiceDraft.periodStart,
     period_end: currentInvoiceDraft.periodEnd,
     invoice_date: currentInvoiceDraft.invoiceDate,
     due_date: currentInvoiceDraft.dueDate,
+    payment_terms: currentInvoiceDraft.paymentTerms || DEFAULT_INVOICE_TERMS,
+    taxable: currentInvoiceDraft.taxable !== false,
+    tax_rate: Number(currentInvoiceDraft.taxRate || 0),
     subtotal: currentInvoiceDraft.subtotal,
     tax: currentInvoiceDraft.tax,
     total: currentInvoiceDraft.total,
@@ -11488,6 +11618,7 @@ async function saveInvoiceDraft(options = {}) {
     invoice_id: invoiceId,
     task_id: item.taskId || null,
     chemical_usage_id: item.chemicalUsageId || null,
+    property_id: item.propertyId || currentInvoiceDraft.propertyId,
     description: item.description || null,
     service_date: item.serviceDate || null,
     quantity: Number(item.quantity || 0),
@@ -11497,6 +11628,8 @@ async function saveInvoiceDraft(options = {}) {
     item_type: item.itemType || "manual",
     item_source: item.itemSource || (item.taskId ? INVOICE_ITEM_SOURCES.TASK : item.chemicalUsageId ? INVOICE_ITEM_SOURCES.CHEMICAL : INVOICE_ITEM_SOURCES.MANUAL),
     service_branch: item.serviceBranch || null,
+    labor_cost: Number(item.laborCost || 0),
+    material_cost: Number(item.materialCost || 0),
     notes: item.notes || null,
   }));
 
@@ -11754,24 +11887,25 @@ async function openInvoiceDraft(invoiceId) {
     propertyName: property?.property_name || "",
     companyBranch: normalizeCompanyBranch(property?.company_branch),
     clientName: invoice.client_name || "",
-    billingCompanyName: property?.billing_company_name || "",
+    billingCompanyName: invoice.billing_company_name || property?.billing_company_name || "",
     billingEmail: invoice.billing_email || property?.billing_email || "",
     billingAddress: invoice.billing_address || property?.billing_address || "",
-    accountReference: property?.billing_account_reference || "",
+    accountReference: invoice.billing_account_reference || property?.billing_account_reference || "",
     periodStart: invoice.period_start || "",
     periodEnd: invoice.period_end || "",
     invoiceDate: invoice.invoice_date || "",
     dueDate: invoice.due_date || "",
     status: invoice.status || "draft",
     notes: invoice.notes || "",
-    paymentTerms: property?.payment_terms || DEFAULT_INVOICE_TERMS,
-    taxable: (property?.billing_taxable !== false),
-    taxRate: Number(property?.billing_tax_rate || 0),
+    paymentTerms: invoice.payment_terms || property?.payment_terms || DEFAULT_INVOICE_TERMS,
+    taxable: invoice.taxable ?? (property?.billing_taxable !== false),
+    taxRate: Number(invoice.tax_rate ?? property?.billing_tax_rate ?? 0),
     includeNonBillableChemicals: false,
     items: (items || []).map((item) => ({
       sourceId: item.chemical_usage_id || item.task_id || null,
       taskId: item.task_id || null,
       chemicalUsageId: item.chemical_usage_id || null,
+      propertyId: item.property_id || invoice.property_id,
       property_name: item.property_name || "",
       propertyName: item.property_name || item.propertyName || "",
       description: item.description || "",
@@ -11783,8 +11917,13 @@ async function openInvoiceDraft(invoiceId) {
       itemType: item.item_type || "manual",
       itemSource: item.item_source || (item.task_id ? INVOICE_ITEM_SOURCES.TASK : item.chemical_usage_id ? INVOICE_ITEM_SOURCES.CHEMICAL : INVOICE_ITEM_SOURCES.MANUAL),
       serviceBranch: item.service_branch || null,
+      laborCost: Number(item.labor_cost || 0),
+      materialCost: Number(item.material_cost || 0),
       notes: item.notes || "",
     })),
+    isManualInvoice: (items || []).length > 0 && (items || []).every((item) => (
+      (item.item_source || (item.task_id ? INVOICE_ITEM_SOURCES.TASK : item.chemical_usage_id ? INVOICE_ITEM_SOURCES.CHEMICAL : INVOICE_ITEM_SOURCES.MANUAL)) === INVOICE_ITEM_SOURCES.MANUAL
+    )),
     subtotal: Number(invoice.subtotal || 0),
     tax: Number(invoice.tax || 0),
     total: Number(invoice.total || 0),
@@ -14570,6 +14709,10 @@ function updateInvoiceDraftField(field, rawValue) {
     currentInvoiceDraft.taxable = Boolean(rawValue);
   } else {
     currentInvoiceDraft[field] = rawValue;
+  }
+
+  if (field === "paymentTerms") {
+    currentInvoiceDraft.dueDate = getInvoiceDueDate(currentInvoiceDraft.invoiceDate, currentInvoiceDraft.paymentTerms);
   }
 
   recalculateInvoiceDraftTotals();
