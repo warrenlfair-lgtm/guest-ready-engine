@@ -49,7 +49,6 @@ let draggedMonthTaskId = null;
 let pendingMonthTaskMove = null;
 let draggedTodayTaskId = null;
 let todayRouteDropCommitted = false;
-let todayRouteTouchState = null;
 
 let companyProfile = { ...DEFAULT_COMPANY_PROFILE };
 let currentSessionUserId = null;
@@ -6678,75 +6677,6 @@ function handleTodayRouteDragEnd(event) {
   todayRouteDropCommitted = false;
 }
 
-function clearTodayRouteTouchState({ restore = false } = {}) {
-  if (!todayRouteTouchState) return;
-  window.clearTimeout(todayRouteTouchState.holdTimer);
-  todayRouteTouchState.card?.classList.remove("today-route-dragging", "today-route-touch-dragging");
-  const shouldRestore = restore && todayRouteTouchState.active;
-  todayRouteTouchState = null;
-  if (shouldRestore) renderTaskViews();
-}
-
-function handleTodayRoutePointerDown(event, taskId) {
-  if (event.pointerType === "mouse") return;
-  clearTodayRouteTouchState({ restore: true });
-  const handle = event.currentTarget;
-  const card = handle.closest(".today-route-task");
-  const routeElement = card?.parentElement;
-  if (!card || !routeElement) return;
-
-  todayRouteTouchState = {
-    pointerId: event.pointerId,
-    taskId,
-    handle,
-    card,
-    routeElement,
-    startX: event.clientX,
-    startY: event.clientY,
-    active: false,
-    holdTimer: window.setTimeout(() => {
-      if (!todayRouteTouchState || todayRouteTouchState.pointerId !== event.pointerId) return;
-      todayRouteTouchState.active = true;
-      card.classList.add("today-route-dragging", "today-route-touch-dragging");
-      navigator.vibrate?.(30);
-    }, 300),
-  };
-  handle.setPointerCapture?.(event.pointerId);
-}
-
-function handleTodayRoutePointerMove(event) {
-  const state = todayRouteTouchState;
-  if (!state || state.pointerId !== event.pointerId) return;
-  if (!state.active) {
-    const movedDistance = Math.hypot(event.clientX - state.startX, event.clientY - state.startY);
-    if (movedDistance > 10) clearTodayRouteTouchState();
-    return;
-  }
-
-  event.preventDefault();
-  const targetCard = document.elementFromPoint(event.clientX, event.clientY)?.closest(".today-route-task");
-  if (targetCard?.parentElement === state.routeElement) {
-    moveTodayRouteCard(state.card, targetCard, event.clientY);
-  }
-  const edgeSize = 72;
-  if (event.clientY < edgeSize) window.scrollBy(0, -12);
-  else if (event.clientY > window.innerHeight - edgeSize) window.scrollBy(0, 12);
-}
-
-async function handleTodayRoutePointerUp(event) {
-  const state = todayRouteTouchState;
-  if (!state || state.pointerId !== event.pointerId) return;
-  const shouldSave = state.active;
-  const routeElement = state.routeElement;
-  clearTodayRouteTouchState();
-  if (shouldSave) await saveTodayRouteOrder(routeElement);
-}
-
-function handleTodayRoutePointerCancel(event) {
-  if (todayRouteTouchState?.pointerId !== event.pointerId) return;
-  clearTodayRouteTouchState({ restore: true });
-}
-
 async function handleTodayRouteKeyDown(event, taskId) {
   if (!event.altKey || !["ArrowUp", "ArrowDown"].includes(event.key)) return;
   event.preventDefault();
@@ -12973,13 +12903,10 @@ function renderTaskCard(task, { stopNumber = null, routeEditable = true } = {}) 
   const routeMarkup = Number.isInteger(stopNumber) && stopNumber > 0
     ? `<div class="today-route-controls">
         <span class="today-route-stop">${status === "Completed" ? "✓ " : ""}STOP ${stopNumber}</span>
-        ${routeEditable ? `<button type="button" class="today-route-drag-handle" draggable="true"
+        ${routeEditable ? `<div class="today-route-drag-handle" draggable="true" role="button" tabindex="0"
           aria-label="Move Stop ${stopNumber}" title="Drag to reorder this technician's route. Alt+Arrow keys also move stops."
           ondragstart="handleTodayRouteDragStart(event, '${task.id}')" ondragend="handleTodayRouteDragEnd(event)"
-          onpointerdown="handleTodayRoutePointerDown(event, '${task.id}')"
-          onpointermove="handleTodayRoutePointerMove(event)" onpointerup="handleTodayRoutePointerUp(event)"
-          onpointercancel="handleTodayRoutePointerCancel(event)"
-          onkeydown="handleTodayRouteKeyDown(event, '${task.id}')">☰</button>` : ""}
+          onkeydown="handleTodayRouteKeyDown(event, '${task.id}')">☰</div>` : ""}
       </div>`
     : "";
 

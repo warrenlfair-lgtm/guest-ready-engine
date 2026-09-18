@@ -1155,10 +1155,6 @@ button:hover {
     opacity: 0.58;
 }
 
-.today-route-task.today-route-touch-dragging {
-    transform: scale(1.01);
-}
-
 .today-route-controls {
     display: flex;
     align-items: center;
@@ -1178,8 +1174,8 @@ button:hover {
 
 .today-route-drag-handle {
     display: grid;
-    width: 40px;
-    height: 40px;
+    width: 44px;
+    height: 44px;
     padding: 0;
     place-items: center;
     border: 1px solid #cbd5e1;
@@ -1189,7 +1185,7 @@ button:hover {
     font-size: 20px;
     line-height: 1;
     cursor: grab;
-    touch-action: none;
+    touch-action: auto;
     user-select: none;
 }
 
