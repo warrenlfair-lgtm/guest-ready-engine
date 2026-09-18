@@ -43,6 +43,7 @@ const AUTO_ICAL_SYNC_COOLDOWN_MS = 10 * 60 * 1000;
 let activeServiceWorkspace = SERVICE_BRANCH_POOL;
 let currentMonthViewYear = new Date().getFullYear();
 let currentMonthViewMonth = new Date().getMonth();
+let monthBranchFilter = "all";
 let selectedDailyRouteDate = null;
 let selectedDailyRouteTechnicianKey = "all";
 let draggedMonthTaskId = null;
