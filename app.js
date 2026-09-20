@@ -5341,16 +5341,13 @@ async function runSyncAllIcal({ automatic }) {
       if (error) {
         result.error = error.message || String(error);
         console.log(`[SyncAll] ERROR for "${property.property_name}":`, result.error);
-      } else if (
-        propertySupportsServiceBranch(property, SERVICE_BRANCH_HOUSEKEEPING)
-        && data?.syncVersion !== "housekeeping-pricing-v1"
-      ) {
-        result.error = "Housekeeping pricing sync is not deployed. Deploy the updated sync-ical Edge Function, then sync again.";
+      } else if (data?.syncVersion !== "ical-source-reconciliation-v1") {
+        result.error = "iCal source reconciliation is not deployed. Run its migration and deploy the updated sync-ical Edge Function.";
         console.log(`[SyncAll] OUTDATED FUNCTION for "${property.property_name}":`, result.error);
       } else {
         result.success = true;
         result.data = data;
-        console.log(`[SyncAll] SUCCESS for "${property.property_name}": parsed=${data?.reservationsParsed ?? "?"} active=${data?.activeReservations ?? "?"} ignored=${data?.oldIgnored ?? "?"} saved=${data?.reservationsCreated ?? 0} weekly=${data?.weeklyTasksCreated ?? 0} guestReady=${data?.guestReadyTasksCreated ?? 0} housekeepingCreated=${data?.housekeepingTasksCreated ?? 0} housekeepingUpdated=${data?.housekeepingTasksUpdated ?? 0}`);
+        console.log(`[SyncAll] SUCCESS for "${property.property_name}": parsed=${data?.reservationsParsed ?? "?"} active=${data?.activeReservations ?? "?"} added=${data?.reservationsCreated ?? 0} updated=${data?.reservationsUpdated ?? 0} removed=${data?.reservationsRemoved ?? 0} tasksCreated=${data?.tasksCreated ?? 0} staleCancelled=${data?.staleTasksCancelled ?? 0} review=${data?.tasksRequiringReview ?? 0}`);
       }
     } catch (invokeError) {
       result.error = invokeError?.message || String(invokeError);
@@ -5399,7 +5396,7 @@ function renderSyncReport(results) {
       return `
         <tr class="sync-row-skipped">
           <td>${r.propertyName}</td>
-          <td colspan="10" class="sync-skipped-label">Skipped — ${r.skippedReason || "Not eligible"}</td>
+          <td colspan="15" class="sync-skipped-label">Skipped — ${r.skippedReason || "Not eligible"}</td>
         </tr>`;
     }
     if (!r.success) {
@@ -5407,7 +5404,7 @@ function renderSyncReport(results) {
         <tr class="sync-row-error">
           <td>${r.propertyName}</td>
           <td>✓</td>
-          <td colspan="8">—</td>
+          <td colspan="13">—</td>
           <td class="sync-error-msg">${r.error || "Unknown error"}</td>
         </tr>`;
     }
@@ -5420,10 +5417,15 @@ function renderSyncReport(results) {
         <td>${d.activeReservations ?? "—"}</td>
         <td>${d.oldIgnored ?? "—"}</td>
         <td>${d.reservationsCreated ?? 0}</td>
+        <td>${d.reservationsUpdated ?? 0}</td>
+        <td>${d.reservationsRemoved ?? 0}</td>
         <td>${d.weeklyTasksCreated ?? 0}</td>
         <td>${d.guestReadyTasksCreated ?? 0}</td>
         <td>${d.housekeepingTasksCreated ?? 0}</td>
         <td>${d.housekeepingTasksUpdated ?? 0}</td>
+        <td>${d.staleTasksCancelled ?? 0}</td>
+        <td>${d.tasksRequiringReview ?? 0}</td>
+        <td>${d.protectedTasksPreserved ?? 0}</td>
         <td class="sync-ok-label">OK</td>
       </tr>`;
   }).join("");
@@ -5442,11 +5444,16 @@ function renderSyncReport(results) {
             <th>Parsed</th>
             <th>Active</th>
             <th>Ignored</th>
-            <th>Saved</th>
+            <th>Added</th>
+            <th>Updated</th>
+            <th>Removed</th>
             <th>Weekly Tasks</th>
             <th>Guest Ready Tasks</th>
             <th>Housekeeping Created</th>
             <th>Housekeeping Updated</th>
+            <th>Stale Tasks Cancelled</th>
+            <th>Review Required</th>
+            <th>Protected</th>
             <th>Result</th>
           </tr>
         </thead>
@@ -5509,10 +5516,9 @@ async function syncPropertyIcal(propertyId) {
   }
 
   if (
-    propertySupportsServiceBranch(property, SERVICE_BRANCH_HOUSEKEEPING)
-    && !Object.prototype.hasOwnProperty.call(data || {}, "housekeepingTasksCreated")
+    data?.syncVersion !== "ical-source-reconciliation-v1"
   ) {
-    statusMessage.textContent = "Housekeeping sync is not deployed. Deploy the updated sync-ical Edge Function, then sync again.";
+    statusMessage.textContent = "iCal source reconciliation is not deployed. Run its migration and deploy the updated sync-ical Edge Function.";
     return;
   }
 
@@ -5522,7 +5528,7 @@ async function syncPropertyIcal(propertyId) {
     console.log("[SynciCal] loadData() threw after sync — suppressing to preserve result message:", loadError);
   }
 
-  const successMsg = `iCal sync complete: ${data?.reservationsCreated ?? 0} reservation(s) saved, ${data?.guestReadyTasksCreated ?? 0} Guest Ready task(s), ${data?.housekeepingTasksCreated ?? 0} Housekeeping task(s) created, ${data?.housekeepingTasksUpdated ?? 0} Housekeeping task(s) updated.`;
+  const successMsg = `iCal sync complete: ${data?.reservationsCreated ?? 0} reservation(s) added, ${data?.reservationsUpdated ?? 0} updated, ${data?.reservationsRemoved ?? 0} removed; ${data?.tasksCreated ?? 0} task(s) created, ${data?.staleTasksCancelled ?? 0} stale task(s) cancelled, ${data?.tasksRequiringReview ?? 0} requiring review, ${data?.protectedTasksPreserved ?? 0} protected.`;
   console.log("[SynciCal] Success message:", successMsg);
   statusMessage.textContent = successMsg;
 }
@@ -12845,6 +12851,12 @@ function getCarryForwardBadgeMarkup(task, { compact = false } = {}) {
     </div>`;
 }
 
+function getSourceReviewBadgeMarkup(task, { compact = false } = {}) {
+  if (!(isAdminUser() || isManagerUser()) || !task?.source_review_required_at) return "";
+  const label = compact ? "RESERVATION REMOVED" : "RESERVATION REMOVED - Review Task";
+  return `<span class="task-alert-badge badge-alert-red" title="${escapeHtml(task.source_review_reason || label)}">${label}</span>`;
+}
+
 function getCarryForwardHistoryMarkup(task) {
   const info = getCarryForwardInfo(task);
   if (!info) return "";
@@ -12938,7 +12950,9 @@ function getScheduleHistoryMarkup(task, { compact = false, expanded = false } = 
 function renderCleaningScheduleHistory(task) {
   if (!cleaningScheduleHistory) return;
   const canViewAudit = isAdminUser() || isManagerUser();
-  const markup = canViewAudit ? getScheduleHistoryMarkup(task, { expanded: true }) : "";
+  const markup = canViewAudit
+    ? `${getSourceReviewBadgeMarkup(task)}${getScheduleHistoryMarkup(task, { expanded: true })}`
+    : "";
   cleaningScheduleHistory.innerHTML = markup;
   cleaningScheduleHistory.classList.toggle("hidden", !markup);
 }
@@ -12968,6 +12982,7 @@ function renderTaskCard(task, { stopNumber = null, routeEditable = true } = {}) 
   const staffOperationalMarkup = getStaffOperationalTaskMarkup(task);
   const carryForwardInfo = getCarryForwardInfo(task);
   const carryForwardBadge = getCarryForwardBadgeMarkup(task);
+  const sourceReviewBadge = getSourceReviewBadgeMarkup(task);
   const carryForwardHistory = getCarryForwardHistoryMarkup(task);
   const scheduleHistory = getScheduleHistoryMarkup(task);
   const housekeepingOperationalMarkup = getHousekeepingOperationalMarkup(task);
@@ -12998,6 +13013,7 @@ function renderTaskCard(task, { stopNumber = null, routeEditable = true } = {}) 
         ${sdsReconcileControl}
       </div>
       ${carryForwardBadge}
+      ${sourceReviewBadge}
       ${alertBadge}
       <div class="task-card-details">
         <div><strong>Service Date:</strong> ${task.service_date || task.scheduled_date || "Not set"}</div>
@@ -13450,7 +13466,8 @@ function renderMonthView() {
         : "";
       const carryForwardInfo = getCarryForwardInfo(task);
       const carryForwardBadge = getCarryForwardBadgeMarkup(task, { compact: true });
-            const scheduleHistoryBadge = getScheduleHistoryMarkup(task, { compact: true });
+      const sourceReviewBadge = getSourceReviewBadgeMarkup(task, { compact: true });
+      const scheduleHistoryBadge = getScheduleHistoryMarkup(task, { compact: true });
       const guestReadyBadge = isTaskGuestReady(task)
         ? `<span class="month-task-gr-pill" title="Guest Ready">GR</span>`
         : "";
@@ -13464,6 +13481,7 @@ function renderMonthView() {
         <div class="month-task-card ${branchClass} ${carryForwardInfo?.urgent ? "carried-forward-urgent-card" : carryForwardInfo ? "carried-forward-card" : ""} ${rescheduleEnabled ? "month-task-draggable" : "month-task-locked"}" ${dragAttributes} title="${escapeHtml(dragTitle)}" onclick="event.stopPropagation(); openEditCleaning('${task.id}')">
           <div class="month-task-property-name">${escapeHtml(propertyName)}</div>
           ${carryForwardBadge}
+          ${sourceReviewBadge}
           ${scheduleHistoryBadge}
           <div class="month-task-meta-line">
             <span>${escapeHtml(getServiceTypeDisplayLabel(task.service_type))}</span>
@@ -13608,6 +13626,7 @@ function renderWeekViewListTaskCard(task) {
   const staffOperationalMarkup = getStaffOperationalTaskMarkup(task);
   const carryForwardInfo = getCarryForwardInfo(task);
   const carryForwardBadge = getCarryForwardBadgeMarkup(task);
+  const sourceReviewBadge = getSourceReviewBadgeMarkup(task);
   const carryForwardHistory = getCarryForwardHistoryMarkup(task);
   const scheduleHistory = getScheduleHistoryMarkup(task);
 
@@ -13625,6 +13644,7 @@ function renderWeekViewListTaskCard(task) {
       </div>
       ${badge}
       ${carryForwardBadge}
+      ${sourceReviewBadge}
       ${sameDayBadge}
       <div class="task-line"><small>Task Type: ${getServiceTypeDisplayLabel(task.service_type)}</small></div>
       <div class="task-line"><small>Service Branch: <span class="service-branch-pill ${getServiceBranchClass(task)}">${getServiceBranchLabel(task.service_branch)}</span></small></div>
@@ -13705,6 +13725,7 @@ function renderWeekViewCalendar(weekTasks) {
                     const alertBadge = getAlertBadgeForTask(task);
                     const carryForwardInfo = getCarryForwardInfo(task);
                     const carryForwardBadge = getCarryForwardBadgeMarkup(task);
+                    const sourceReviewBadge = getSourceReviewBadgeMarkup(task);
                     const carryForwardHistory = getCarryForwardHistoryMarkup(task);
                     const scheduleHistoryBadge = getScheduleHistoryMarkup(task, { compact: true });
                     const showReconcile = shouldShowReconcileForTask(task);
@@ -13725,6 +13746,7 @@ function renderWeekViewCalendar(weekTasks) {
                         <div class="calendar-task-type">${getServiceTypeDisplayLabel(task.service_type)}</div>
                         ${guestReadyBadge}
                         ${carryForwardBadge}
+                        ${sourceReviewBadge}
                         ${alertBadge}
                         ${carryForwardHistory}
                         ${scheduleHistoryBadge}
