@@ -6963,6 +6963,11 @@ function reservationMatchesTaskProperty(reservation, taskProperty) {
 }
 
 function isTaskGuestOccupied(task) {
+  const supportsOccupiedIndicator = String(task?.service_type || "").trim() === "Weekly Standard"
+    || isLawnTask(task)
+    || isMaintenanceTask(task);
+  if (!supportsOccupiedIndicator) return false;
+
   const taskDate = normalizeDateKey(task?.service_date || task?.scheduled_date || task?.serviceDate || task?.date);
   const taskProperty = getTaskPropertyMatchInfo(task);
   if (!taskDate || !(taskProperty.propertyId || taskProperty.propertyNameFromProperty || taskProperty.taskPropertyName)) return false;
