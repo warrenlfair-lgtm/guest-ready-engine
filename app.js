@@ -2893,13 +2893,12 @@ function closeCleaningModal(options = {}) {
   renderChemicalUsageForCurrentTask();
 }
 
-function isAutoCreatedIcalGuestReadyTask(task) {
+function isAutoCreatedIcalReservationTask(task) {
   if (!task) return false;
-  if (task.service_type !== "Guest Ready") return false;
-  if (task.source_type === "reservation_guest_ready") return true;
+  if (["reservation_guest_ready", "reservation_housekeeping"].includes(task.source_type)) return true;
 
   const sourceKey = String(task.source_key || "");
-  return sourceKey.startsWith("gr:");
+  return sourceKey.startsWith("gr:") || sourceKey.startsWith("hk:");
 }
 
 function closeDeleteCleaningModal(confirmed) {
@@ -2936,7 +2935,7 @@ function openDeleteCleaningModal(task) {
   }
 
   if (deleteCleaningSyncWarning) {
-    const showSyncWarning = isAutoCreatedIcalGuestReadyTask(task);
+    const showSyncWarning = isAutoCreatedIcalReservationTask(task);
     deleteCleaningSyncWarning.classList.toggle("hidden", !showSyncWarning);
   }
 
@@ -6961,6 +6960,24 @@ function reservationMatchesTaskProperty(reservation, taskProperty) {
   }
 
   return false;
+}
+
+function isTaskGuestOccupied(task) {
+  const taskDate = normalizeDateKey(task?.service_date || task?.scheduled_date || task?.serviceDate || task?.date);
+  const taskProperty = getTaskPropertyMatchInfo(task);
+  if (!taskDate || !(taskProperty.propertyId || taskProperty.propertyNameFromProperty || taskProperty.taskPropertyName)) return false;
+
+  return reservations.some((reservation) => {
+    if (!reservationMatchesTaskProperty(reservation, taskProperty)) return false;
+    const checkInDate = normalizeDateKey(reservation?.check_in ?? reservation?.checkIn ?? reservation?.startDate);
+    const checkOutDate = normalizeDateKey(reservation?.check_out ?? reservation?.checkOut ?? reservation?.endDate);
+    return Boolean(checkInDate && checkOutDate && checkInDate <= taskDate && taskDate < checkOutDate);
+  });
+}
+
+function getGuestOccupiedBadgeMarkup(task, { compact = false } = {}) {
+  if (!isTaskGuestOccupied(task)) return "";
+  return `<span class="guest-occupied-badge${compact ? " guest-occupied-badge-compact" : ""}" title="Guest Occupied" aria-label="Guest Occupied">&#128100;${compact ? "" : " Occupied"}</span>`;
 }
 
 function getSameDayTurnoverForTask(task) {
@@ -13015,6 +13032,7 @@ function renderTaskCard(task, { stopNumber = null, routeEditable = true } = {}) 
       ${carryForwardBadge}
       ${sourceReviewBadge}
       ${alertBadge}
+      ${getGuestOccupiedBadgeMarkup(task)}
       <div class="task-card-details">
         <div><strong>Service Date:</strong> ${task.service_date || task.scheduled_date || "Not set"}</div>
         <div><strong>Task Type:</strong> ${getServiceTypeDisplayLabel(task.service_type)}</div>
@@ -13039,7 +13057,7 @@ function renderTaskCard(task, { stopNumber = null, routeEditable = true } = {}) 
         <button onclick="openEditCleaning('${task.id}')">${isStaffUser() ? "Details / Chemicals" : "Edit"}</button>
         ${status !== "Completed" && status !== "In Progress" ? `<button onclick="startCleaningTask('${task.id}')">Start</button>` : ""}
         ${status !== "Completed" ? `<button onclick="markCleaningComplete('${task.id}')">Complete</button>` : ""}
-        ${isAdminUser() && isLawnTask(task) ? `<button class="delete-btn" onclick="deleteCleaningTask('${task.id}')">Delete</button>` : ""}
+        ${isAdminUser() ? `<button class="delete-btn" onclick="deleteCleaningTask('${task.id}')">Delete</button>` : ""}
       </div>
     </div>
   `;
@@ -13471,6 +13489,12 @@ function renderMonthView() {
       const guestReadyBadge = isTaskGuestReady(task)
         ? `<span class="month-task-gr-pill" title="Guest Ready">GR</span>`
         : "";
+      const occupiedBadge = getGuestOccupiedBadgeMarkup(task, { compact: true });
+      const deleteButton = isAdminUser()
+        ? `<button type="button" class="month-task-delete-btn" draggable="false" title="Delete task" aria-label="Delete task"
+            onpointerdown="event.stopPropagation()" onclick="event.preventDefault(); event.stopPropagation(); deleteCleaningTask('${task.id}')"
+            ondragstart="event.preventDefault(); event.stopPropagation()">&#128465;</button>`
+        : "";
       const rescheduleEnabled = canRescheduleTask(task);
       const dragAttributes = rescheduleEnabled
         ? `draggable="true" ondragstart="handleMonthTaskDragStart(event, '${task.id}')" ondragend="handleMonthTaskDragEnd(event)"`
@@ -13479,13 +13503,16 @@ function renderMonthView() {
 
       return `
         <div class="month-task-card ${branchClass} ${carryForwardInfo?.urgent ? "carried-forward-urgent-card" : carryForwardInfo ? "carried-forward-card" : ""} ${rescheduleEnabled ? "month-task-draggable" : "month-task-locked"}" ${dragAttributes} title="${escapeHtml(dragTitle)}" onclick="event.stopPropagation(); openEditCleaning('${task.id}')">
-          <div class="month-task-property-name">${escapeHtml(propertyName)}</div>
+          <div class="month-task-heading">
+            <div class="month-task-property-name">${escapeHtml(propertyName)}</div>
+            ${deleteButton}
+          </div>
           ${carryForwardBadge}
           ${sourceReviewBadge}
           ${scheduleHistoryBadge}
           <div class="month-task-meta-line">
             <span>${escapeHtml(getServiceTypeDisplayLabel(task.service_type))}</span>
-            ${sameDayBadge || guestReadyBadge}
+            <span class="month-task-indicators">${occupiedBadge}${sameDayBadge || guestReadyBadge}</span>
           </div>
           <div class="month-task-meta-line">
             <span>Tech: ${escapeHtml(techName)}</span>
@@ -13646,6 +13673,7 @@ function renderWeekViewListTaskCard(task) {
       ${carryForwardBadge}
       ${sourceReviewBadge}
       ${sameDayBadge}
+      ${getGuestOccupiedBadgeMarkup(task)}
       <div class="task-line"><small>Task Type: ${getServiceTypeDisplayLabel(task.service_type)}</small></div>
       <div class="task-line"><small>Service Branch: <span class="service-branch-pill ${getServiceBranchClass(task)}">${getServiceBranchLabel(task.service_branch)}</span></small></div>
       ${normalizeServiceBranch(task.service_branch) === SERVICE_BRANCH_POOL ? `<div class="task-line"><small>Guest Ready: ${isTaskGuestReady(task) ? "Yes" : "No"}</small></div>` : ""}
@@ -13748,6 +13776,7 @@ function renderWeekViewCalendar(weekTasks) {
                         ${carryForwardBadge}
                         ${sourceReviewBadge}
                         ${alertBadge}
+                        ${getGuestOccupiedBadgeMarkup(task)}
                         ${carryForwardHistory}
                         ${scheduleHistoryBadge}
                         <div class="calendar-task-status">
@@ -14000,6 +14029,7 @@ function renderProperties() {
               ${badge}
               ${carryForwardBadge}
               ${sameDayBadge}
+              ${getGuestOccupiedBadgeMarkup(task)}
               ${taskBillingAmount > 0 ? `<div class="task-line">$${taskBillingAmount}</div>` : ""}
               ${billingLine}
               ${weeklyReconcileLine}
