@@ -1297,6 +1297,20 @@ button:hover {
     background-color: #ecfdf5;
 }
 
+.invoice-marker-disabled {
+    cursor: not-allowed;
+    opacity: 0.72;
+}
+
+.invoice-marker-disabled:hover {
+    color: #9ca3af;
+    background-color: #f3f4f6;
+}
+
+.invoice-marker-disabled input[type="checkbox"] {
+    cursor: not-allowed;
+}
+
 .calendar-task-header .invoice-marker {
     padding: 2px 6px;
     font-size: 12px;

@@ -291,6 +291,17 @@ function getGuestReadyCharge(serviceDate: string, standardDay: string, coverageR
   return Number(defaultOffCycleCharge ?? 65);
 }
 
+function getWeeklyContractTaskAmount(
+  weeklyServiceDate: string,
+  configuredAmount: number | null,
+  effectiveDate: string | null
+) {
+  const normalizedEffectiveDate = normalizeDateKey(effectiveDate);
+  const normalizedServiceDate = normalizeDateKey(weeklyServiceDate);
+  if (!normalizedEffectiveDate || !normalizedServiceDate || normalizedServiceDate < normalizedEffectiveDate) return 0;
+  return Math.max(0, Number(configuredAmount || 0));
+}
+
 function isSafeAutoWeeklyTaskToSuppress(task: { manually_modified: boolean | null; status: string | null; completed_at: string | null; invoiced: boolean | null }) {
   const status = task.status || "Scheduled";
   return !task.manually_modified && status === "Scheduled" && !task.completed_at && !task.invoiced;
@@ -373,6 +384,8 @@ Deno.serve(async (req: Request) => {
       housekeeping_default_charge: number | null;
       housekeeping_labor_amount: number | null;
       default_off_cycle_charge: number | null;
+      weekly_contract_cleaning_amount: number | null;
+      weekly_contract_billing_effective_date: string | null;
       standard_service_day: string | null;
       coverage_days: number | null;
       coverage_rule: string | null;
@@ -516,6 +529,7 @@ Deno.serve(async (req: Request) => {
           .from("cleaning_tasks")
           .update({
             status: "Cancelled",
+            weekly_contract_obligation_key: null,
             source_removed_at: removedAt,
             source_review_required_at: null,
             source_review_reason: null,
@@ -850,7 +864,7 @@ Deno.serve(async (req: Request) => {
     const { data: existingByDate, error: weeklyByDateError } = weeklyServiceDates.length
       ? await supabase
           .from("cleaning_tasks")
-          .select("id, service_date, service_type, guest_ready, check_in_date, source_key, manually_modified, status, completed_at, invoiced")
+          .select("id, service_date, service_type, guest_ready, check_in_date, source_key, weekly_contract_obligation_key, charge, manually_modified, status, completed_at, invoiced")
           .eq("property_id", propertyId)
           .eq("service_type", "Weekly Standard")
           .in("service_date", weeklyServiceDates)
@@ -863,7 +877,7 @@ Deno.serve(async (req: Request) => {
     const { data: existingByKey, error: weeklyByKeyError } = weeklySourceKeys.length
       ? await supabase
           .from("cleaning_tasks")
-          .select("id, service_date, service_type, guest_ready, check_in_date, source_key, manually_modified, status, completed_at, invoiced")
+          .select("id, service_date, service_type, guest_ready, check_in_date, source_key, weekly_contract_obligation_key, charge, manually_modified, status, completed_at, invoiced")
           .eq("property_id", propertyId)
           .eq("service_type", "Weekly Standard")
           .in("source_key", weeklySourceKeys)
@@ -872,7 +886,7 @@ Deno.serve(async (req: Request) => {
       return createErrorResponse(`Could not load Weekly Standard tasks by source: ${weeklyByKeyError.message}`, 500);
     }
 
-    type WeeklyTaskRecord = { id: string; service_date: string; service_type: string; guest_ready: boolean; check_in_date: string | null; source_key: string | null; manually_modified: boolean | null; status: string | null; completed_at: string | null; invoiced: boolean | null };
+    type WeeklyTaskRecord = { id: string; service_date: string; service_type: string; guest_ready: boolean; check_in_date: string | null; source_key: string | null; weekly_contract_obligation_key: string | null; charge: number | null; manually_modified: boolean | null; status: string | null; completed_at: string | null; invoiced: boolean | null };
     const existingWeeklyTaskMap = new Map<string, WeeklyTaskRecord>();
     // Add by-date results first — derive source_key from the original scheduled date
     for (const task of (existingByDate || []) as WeeklyTaskRecord[]) {
@@ -888,7 +902,7 @@ Deno.serve(async (req: Request) => {
     const { data: existingGuestReadyTasks, error: guestReadyLookupError } = checkIns.length
       ? await supabase
           .from("cleaning_tasks")
-        .select("id, service_date, scheduled_date, suggested_date, check_in_date, service_type, source_key, source_reservation_id, manually_modified, status, completed_at, invoiced, invoice_id, invoiced_invoice_id, same_day_surcharge_reconciled, same_day_surcharge_invoice_id, source_removed_at, source_review_required_at")
+        .select("id, service_date, scheduled_date, suggested_date, check_in_date, service_type, source_key, source_reservation_id, weekly_contract_obligation_key, charge, off_cycle, manually_modified, status, completed_at, invoiced, invoice_id, invoiced_invoice_id, same_day_surcharge_reconciled, same_day_surcharge_invoice_id, source_removed_at, source_review_required_at")
           .eq("property_id", propertyId)
         .eq("source_type", "reservation_guest_ready")
       : { data: [], error: null };
@@ -905,6 +919,9 @@ Deno.serve(async (req: Request) => {
       service_type: string;
       source_key: string | null;
       source_reservation_id: string | null;
+      weekly_contract_obligation_key: string | null;
+      charge: number | null;
+      off_cycle: boolean | null;
       manually_modified: boolean | null;
       status: string | null;
       completed_at: string | null;
@@ -916,6 +933,23 @@ Deno.serve(async (req: Request) => {
       source_removed_at: string | null;
       source_review_required_at: string | null;
     };
+    const releasableCancelledContractTasks = ((existingGuestReadyTasks || []) as GuestReadyTaskRecord[])
+      .filter((task) => ["cancelled", "canceled", "void", "deleted"].includes(String(task.status || "").toLowerCase()))
+      .filter((task) => task.weekly_contract_obligation_key)
+      .filter((task) => task.invoiced !== true && !task.invoice_id && !task.invoiced_invoice_id);
+    if (releasableCancelledContractTasks.length) {
+      const releasableIds = releasableCancelledContractTasks.map((task) => task.id);
+      const { error: releaseError } = await supabase
+        .from("cleaning_tasks")
+        .update({ weekly_contract_obligation_key: null })
+        .in("id", releasableIds);
+      if (releaseError) {
+        return createErrorResponse(`Could not release cancelled weekly contract obligations: ${releaseError.message}`, 500);
+      }
+      releasableCancelledContractTasks.forEach((task) => {
+        task.weekly_contract_obligation_key = null;
+      });
+    }
     const existingGuestReadyBySourceKey = new Map<string, GuestReadyTaskRecord>();
     const existingGuestReadyByReservationId = new Map<string, GuestReadyTaskRecord>();
     for (const task of (existingGuestReadyTasks || []) as GuestReadyTaskRecord[]) {
@@ -929,6 +963,12 @@ Deno.serve(async (req: Request) => {
     const weeklyTaskIdsToSuppress: string[] = [];
     const suppressedWeeklySourceKeys = new Set<string>();
     const guestReadyTasksToCreate: Array<Record<string, any>> = [];
+    const guestReadyContractUpdates: Array<{ id: string; charge: number; off_cycle: boolean; weekly_contract_obligation_key: string | null }> = [];
+    const weeklyContractOwnerByKey = new Map<string, string>(
+      ((existingGuestReadyTasks || []) as GuestReadyTaskRecord[])
+        .filter((task) => task.weekly_contract_obligation_key)
+        .map((task) => [task.weekly_contract_obligation_key as string, task.id])
+    );
 
     for (const weeklyServiceDate of weeklyServiceDates) {
       const hasGuestReadyInsideWindow = (existingGuestReadyWindowTasks || []).some((task: { service_date: string; status: string | null }) => {
@@ -1017,7 +1057,6 @@ Deno.serve(async (req: Request) => {
         continue;
       }
 
-      const guestReadyCharge = getGuestReadyCharge(guestReadyServiceDate, standardDay, coverageRule, property.default_off_cycle_charge);
       const reservationRow = currentReservationMap.get(getReservationIdentityKey(reservation));
       if (!reservationRow) {
         return createErrorResponse("Could not resolve a current reservation before generating Guest Ready tasks.", 500);
@@ -1027,6 +1066,29 @@ Deno.serve(async (req: Request) => {
       const existingGuestReady = existingGuestReadyByReservationId.get(reservationRow.id)
         || existingGuestReadyBySourceKey.get(guestReadySourceKey)
         || existingGuestReadyBySourceKey.get(legacyGuestReadySourceKey);
+      const weeklyContractAmount = getWeeklyContractTaskAmount(
+        service_date,
+        property.weekly_contract_cleaning_amount,
+        property.weekly_contract_billing_effective_date
+      );
+      const existingContractOwnerId = weeklyContractOwnerByKey.get(source_key);
+      const weeklyTaskBlocksTransfer = Boolean(weeklyTask && !isSafeAutoWeeklyTaskToSuppress(weeklyTask));
+      const existingGuestReadyOwnsContract = existingGuestReady?.weekly_contract_obligation_key === source_key;
+      const claimsWeeklyContract = shouldUseWeeklyForReservation
+        && guestReadyWithinWindow
+        && weeklyContractAmount > 0
+        && !weeklyTaskBlocksTransfer
+        && (!existingContractOwnerId || existingContractOwnerId === existingGuestReady?.id);
+      if (claimsWeeklyContract) {
+        weeklyContractOwnerByKey.set(source_key, existingGuestReady?.id || `pending:${guestReadySourceKey}`);
+      }
+      const defaultGuestReadyCharge = getGuestReadyCharge(guestReadyServiceDate, standardDay, coverageRule, property.default_off_cycle_charge);
+      const guestReadyCharge = claimsWeeklyContract
+        ? (existingGuestReadyOwnsContract && Number(existingGuestReady?.charge || 0) > 0
+          ? Number(existingGuestReady?.charge || 0)
+          : weeklyContractAmount)
+        : defaultGuestReadyCharge;
+      const weeklyContractObligationKey = claimsWeeklyContract ? source_key : null;
 
       console.log("[GUEST READY CHECK]", { reservation_check_in: reservation.check_in, source_key: guestReadySourceKey, foundExistingTask: !!existingGuestReady, existing_id: existingGuestReady?.id, within_window: guestReadyWithinWindow });
 
@@ -1046,6 +1108,18 @@ Deno.serve(async (req: Request) => {
           && ["scheduled", "in progress", "in_progress"].includes(existingStatus)
           && !existingGuestReady.completed_at
           && !financiallyLocked;
+        if ((restorableCancellation || canMoveExistingTask) && (
+          Number(existingGuestReady.charge || 0) !== guestReadyCharge
+          || existingGuestReady.off_cycle !== (defaultGuestReadyCharge > 0 && !claimsWeeklyContract)
+          || existingGuestReady.weekly_contract_obligation_key !== weeklyContractObligationKey
+        )) {
+          guestReadyContractUpdates.push({
+            id: existingGuestReady.id,
+            charge: guestReadyCharge,
+            off_cycle: defaultGuestReadyCharge > 0 && !claimsWeeklyContract,
+            weekly_contract_obligation_key: weeklyContractObligationKey,
+          });
+        }
 
         if (restorableCancellation || (canMoveExistingTask && (
           existingGuestReady.service_date !== guestReadyServiceDate
@@ -1112,13 +1186,14 @@ Deno.serve(async (req: Request) => {
           check_in_date: reservation.check_in,
           service_type: "Guest Ready",
           status: "Scheduled",
-          off_cycle: guestReadyCharge > 0,
+          off_cycle: defaultGuestReadyCharge > 0 && !claimsWeeklyContract,
           guest_ready: true,
           charge: guestReadyCharge,
           notes: `Auto-created from iCal sync for check-in ${reservation.check_in}.`,
           source_type: "reservation_guest_ready",
           source_key: guestReadySourceKey,
           source_reservation_id: reservationRow.id,
+          weekly_contract_obligation_key: weeklyContractObligationKey,
           manually_modified: false,
         });
       }
@@ -1138,6 +1213,20 @@ Deno.serve(async (req: Request) => {
       console.log("[WEEKLY SUPPRESS APPLIED]", weeklyTaskIdsToSuppress.length, "weekly tasks removed");
     }
 
+    for (const update of guestReadyContractUpdates) {
+      const { error } = await supabase
+        .from("cleaning_tasks")
+        .update({
+          charge: update.charge,
+          off_cycle: update.off_cycle,
+          weekly_contract_obligation_key: update.weekly_contract_obligation_key,
+        })
+        .eq("id", update.id);
+      if (error) {
+        return createErrorResponse(`Could not snapshot Guest Ready contract billing: ${error.message}`, 500);
+      }
+    }
+
     const weeklyTasksToCreate = Array.from(pendingWeeklyTasks.entries())
       .filter(([service_date]) => isAutoTaskDateOnOrAfterPropertyStart(service_date, propertyStartDate))
       .filter(([service_date]) => !suppressedWeeklySourceKeys.has(`wk:${propertyId}:${service_date}`))
@@ -1151,10 +1240,19 @@ Deno.serve(async (req: Request) => {
       status: "Scheduled",
       off_cycle: false,
       guest_ready: payload.guest_ready,
-      charge: 0,
+      charge: getWeeklyContractTaskAmount(
+        service_date,
+        property.weekly_contract_cleaning_amount,
+        property.weekly_contract_billing_effective_date
+      ),
       notes: `Auto-created Weekly Standard for the week covering service date ${service_date}.`,
       source_type: "weekly_standard",
       source_key: `wk:${propertyId}:${service_date}`,
+      weekly_contract_obligation_key: getWeeklyContractTaskAmount(
+        service_date,
+        property.weekly_contract_cleaning_amount,
+        property.weekly_contract_billing_effective_date
+      ) > 0 ? `wk:${propertyId}:${service_date}` : null,
       manually_modified: false,
     }));
 

@@ -259,6 +259,7 @@ const MANUAL_BILLING_OVERRIDE_TAG = "[Manual Override]";
 const INVOICE_STATUSES = ["draft", "finalized", "sent", "paid", "void"];
 const DEFAULT_INVOICE_TERMS = "Upon Receipt";
 const CUSTOM_INVOICE_TERMS = "Custom Date";
+const DEFAULT_WEEKLY_CONTRACT_BILLING_EFFECTIVE_DATE = "2026-10-01";
 const INVOICE_ITEM_SOURCES = {
   MANUAL: "manual",
   TASK: "task",
@@ -354,6 +355,8 @@ const offCycleCharge = document.getElementById("offCycleCharge");
 const propertyWeeklyLaborRate = document.getElementById("propertyWeeklyLaborRate");
 const propertyContractRevenueAmount = document.getElementById("propertyContractRevenueAmount");
 const propertyContractRateBasis = document.getElementById("propertyContractRateBasis");
+const propertyWeeklyContractCleaningAmount = document.getElementById("propertyWeeklyContractCleaningAmount");
+const propertyWeeklyContractBillingEffectiveDate = document.getElementById("propertyWeeklyContractBillingEffectiveDate");
 const propertyGuestReadyLaborRate = document.getElementById("propertyGuestReadyLaborRate");
 const propertyAdditionalLaborRate = document.getElementById("propertyAdditionalLaborRate");
 const propertyDefaultCleaningRate = document.getElementById("propertyDefaultCleaningRate");
@@ -2397,6 +2400,11 @@ function openEditModal(id) {
   if (propertyWeeklyLaborRate) propertyWeeklyLaborRate.value = Number(property.weekly_service_labor || 0);
   if (propertyContractRevenueAmount) propertyContractRevenueAmount.value = Number(property.contract_revenue_amount || 0);
   if (propertyContractRateBasis) propertyContractRateBasis.value = normalizeContractRateBasis(property.contract_rate_basis);
+  if (propertyWeeklyContractCleaningAmount) propertyWeeklyContractCleaningAmount.value = Number(property.weekly_contract_cleaning_amount || 0);
+  if (propertyWeeklyContractBillingEffectiveDate) {
+    propertyWeeklyContractBillingEffectiveDate.value = normalizeDateKey(property.weekly_contract_billing_effective_date);
+    propertyWeeklyContractBillingEffectiveDate.disabled = Boolean(propertyWeeklyContractBillingEffectiveDate.value);
+  }
   if (propertyGuestReadyLaborRate) propertyGuestReadyLaborRate.value = Number(property.guest_ready_service_labor || 0);
   if (propertyAdditionalLaborRate) propertyAdditionalLaborRate.value = Number(property.additional_cleaning_labor || 0);
   if (propertyDefaultCleaningRate) propertyDefaultCleaningRate.value = Number(property.default_cleaning_rate || 0);
@@ -3735,6 +3743,29 @@ function hasExistingWeeklyTask(propertyId, weeklyServiceDate) {
   });
 }
 
+function getWeeklyContractObligationKey(propertyId, weeklyServiceDate) {
+  const normalizedPropertyId = normalizePropertyId(propertyId);
+  const normalizedServiceDate = normalizeDateKey(weeklyServiceDate);
+  return normalizedPropertyId && normalizedServiceDate
+    ? `wk:${normalizedPropertyId}:${normalizedServiceDate}`
+    : "";
+}
+
+function getWeeklyContractTaskAmount(property, weeklyServiceDate) {
+  if (!isWeeklyContractTaskBillingEffective(property, weeklyServiceDate)) return 0;
+  return Math.max(0, Number(property?.weekly_contract_cleaning_amount || 0));
+}
+
+function isWeeklyContractTaskBillingEffective(property, dateValue) {
+  const effectiveDate = normalizeDateKey(property?.weekly_contract_billing_effective_date);
+  const normalizedDate = normalizeDateKey(dateValue);
+  return Boolean(effectiveDate && normalizedDate && normalizedDate >= effectiveDate);
+}
+
+function isWeeklyContractObligationTask(task) {
+  return Boolean(String(task?.weekly_contract_obligation_key || "").trim());
+}
+
 async function ensureWeeklyStandardTasksForMonth(monthType) {
   if (!["current", "next", "previous"].includes(monthType)) return 0;
 
@@ -3772,6 +3803,8 @@ async function ensureWeeklyStandardTasksForMonth(monthType) {
         continue;
       }
 
+      const weeklyContractAmount = getWeeklyContractTaskAmount(property, serviceDate);
+      const weeklyContractObligationKey = getWeeklyContractObligationKey(property.id, serviceDate);
       weeklyTasksToCreate.push({
         property_id: property.id,
         service_date: serviceDate,
@@ -3783,10 +3816,11 @@ async function ensureWeeklyStandardTasksForMonth(monthType) {
         status: "Scheduled",
         off_cycle: false,
         guest_ready: false,
-        charge: 0,
+        charge: weeklyContractAmount,
         notes: `Auto-created Weekly Standard (${frequencyLabel}) for ${standardDayName} in ${monthType} month view.`,
         source_type: "weekly_standard",
-        source_key: `wk:${property.id}:${serviceDate}`,
+        source_key: weeklyContractObligationKey,
+        weekly_contract_obligation_key: weeklyContractAmount > 0 ? weeklyContractObligationKey : null,
         manually_modified: false,
       });
     }
@@ -5038,6 +5072,8 @@ async function saveProperty() {
     }
   }
 
+  const weeklyContractCleaningAmount = Math.max(0, Number(propertyWeeklyContractCleaningAmount?.value || 0));
+  const selectedWeeklyContractEffectiveDate = normalizeDateKey(propertyWeeklyContractBillingEffectiveDate?.value);
   const propertyData = {
     property_name: propertyName.value.trim(),
     client_name: String(propertyClientName?.value || "").trim() || null,
@@ -5058,6 +5094,8 @@ async function saveProperty() {
     weekly_service_labor: Math.max(0, Number(propertyWeeklyLaborRate?.value || 0)),
     contract_revenue_amount: Math.max(0, Number(propertyContractRevenueAmount?.value || 0)),
     contract_rate_basis: normalizeContractRateBasis(propertyContractRateBasis?.value),
+    weekly_contract_cleaning_amount: weeklyContractCleaningAmount,
+    weekly_contract_billing_effective_date: weeklyContractCleaningAmount > 0 ? (selectedWeeklyContractEffectiveDate || null) : null,
     guest_ready_service_labor: Math.max(0, Number(propertyGuestReadyLaborRate?.value || 0)),
     additional_cleaning_labor: Math.max(0, Number(propertyAdditionalLaborRate?.value || 0)),
     default_cleaning_rate: Number(propertyDefaultCleaningRate?.value || 0),
@@ -5081,6 +5119,22 @@ async function saveProperty() {
     lawn_labor_amount: Math.max(0, Number(propertyLawnLaborAmount?.value || 0)),
     active: selectedPropertyActive
   };
+
+  if (
+    propertyData.weekly_contract_cleaning_amount > 0
+    && !propertyData.weekly_contract_billing_effective_date
+  ) {
+    alert("Task Billing Effective Date is required when Weekly Contract Cleaning Amount is greater than zero.");
+    return;
+  }
+
+  if (
+    propertyData.weekly_contract_billing_effective_date
+    && !propertyData.weekly_contract_billing_effective_date.endsWith("-01")
+  ) {
+    alert("Task Billing Effective Date must be the first day of a month.");
+    return;
+  }
 
   if (!editingPropertyId) {
     propertyData.task_generation_start_date = getBusinessDateValue();
@@ -5115,6 +5169,8 @@ async function saveProperty() {
     "weekly_service_labor",
     "contract_revenue_amount",
     "contract_rate_basis",
+    "weekly_contract_cleaning_amount",
+    "weekly_contract_billing_effective_date",
     "guest_ready_service_labor",
     "additional_cleaning_labor",
     "billing_taxable",
@@ -5689,11 +5745,18 @@ async function saveCleaningTask() {
   const serviceType = editingCleaningId
     ? cleaningServiceType.value
     : (serviceBranch === SERVICE_BRANCH_LAWN ? "Lawn Service" : cleaningServiceType.value);
+  const weeklyContractObligationDate = serviceType === "Weekly Standard"
+    ? getServiceDateForWeek(serviceDate, property.standard_service_day || "Wednesday")
+    : "";
+  const weeklyContractObligationKey = getWeeklyContractObligationKey(property.id, weeklyContractObligationDate);
+  const weeklyContractAmount = !editingCleaningId && serviceType === "Weekly Standard"
+    ? getWeeklyContractTaskAmount(property, weeklyContractObligationDate)
+    : 0;
   const weeklyServiceLevel = serviceType === "Weekly Standard"
     ? normalizeWeeklyServiceLevel(cleaningWeeklyServiceLevel?.value)
     : null;
   const taskStatus = cleaningStatus.value || "Scheduled";
-  const charge = Number(cleaningCharge.value || 0);
+  const charge = weeklyContractAmount > 0 ? weeklyContractAmount : Number(cleaningCharge.value || 0);
   const manualLaborRaw = String(cleaningLaborAmount?.value || "").trim();
   const hasManualLaborInput = manualLaborRaw !== "";
   const parsedManualLabor = hasManualLaborInput ? Number(manualLaborRaw) : null;
@@ -5862,7 +5925,7 @@ async function saveCleaningTask() {
     completed_by_technician_id: taskStatus === "Completed" ? (completedByTechnician?.id || null) : null,
     completed_by_technician_name: taskStatus === "Completed" ? (completedByTechnician?.name || null) : null,
     status: taskStatus,
-    off_cycle: charge > 0 || serviceType === "Off-Cycle",
+    off_cycle: serviceType === "Weekly Standard" ? false : charge > 0 || serviceType === "Off-Cycle",
     charge: charge,
     labor_amount: laborAmount === null ? null : Number(laborAmount || 0),
     labor_calculated_at: laborCalculatedAt,
@@ -5872,7 +5935,19 @@ async function saveCleaningTask() {
     guest_ready: serviceType === "Guest Ready",
     completed_at: completedAt,
     // Only persist an explicit manual SDS override; a blank/0 field leaves any existing reconciled snapshot untouched.
-    ...(sdsAmountInput !== null && sdsAmountInput > 0 ? { same_day_surcharge_amount: sdsAmountInput } : {})
+    ...(sdsAmountInput !== null && sdsAmountInput > 0 ? { same_day_surcharge_amount: sdsAmountInput } : {}),
+    ...(editingCleaningId
+      && ["cancelled", "canceled", "void", "deleted"].includes(String(taskStatus || "").toLowerCase())
+      && !isTaskReconciled(existingTask)
+      && !existingTask?.invoice_id
+      && !existingTask?.invoiced_invoice_id
+      ? { weekly_contract_obligation_key: null }
+      : {}),
+    ...(!editingCleaningId && serviceType === "Weekly Standard" ? {
+      source_type: "weekly_standard",
+      source_key: weeklyContractObligationKey,
+      weekly_contract_obligation_key: weeklyContractAmount > 0 ? weeklyContractObligationKey : null,
+    } : {}),
   };
 
   let result;
@@ -6291,6 +6366,11 @@ function clearPropertyForm() {
   if (propertyWeeklyLaborRate) propertyWeeklyLaborRate.value = 0;
   if (propertyContractRevenueAmount) propertyContractRevenueAmount.value = 0;
   if (propertyContractRateBasis) propertyContractRateBasis.value = CONTRACT_RATE_BASIS_NONE;
+  if (propertyWeeklyContractCleaningAmount) propertyWeeklyContractCleaningAmount.value = 0;
+  if (propertyWeeklyContractBillingEffectiveDate) {
+    propertyWeeklyContractBillingEffectiveDate.value = DEFAULT_WEEKLY_CONTRACT_BILLING_EFFECTIVE_DATE;
+    propertyWeeklyContractBillingEffectiveDate.disabled = false;
+  }
   if (propertyGuestReadyLaborRate) propertyGuestReadyLaborRate.value = 0;
   if (propertyAdditionalLaborRate) propertyAdditionalLaborRate.value = 0;
   if (propertyDefaultCleaningRate) propertyDefaultCleaningRate.value = 0;
@@ -6332,11 +6412,15 @@ function toggleInvoiceMarker(taskId) {
   }
   
   const newInvoiced = !task.invoiced;
+  if (newInvoiced && String(task.status || "").toLowerCase() !== "completed") {
+    alert("Only completed tasks can be reconciled.");
+    return;
+  }
   const updatePayload = { invoiced: newInvoiced };
   const previousCharge = task.charge;
 
   // Reconciling locks in the effective charge (task charge, or property default fallback) so later rate changes don't alter this task's billed amount.
-  if (newInvoiced && (task.service_type === "Weekly Standard" || isLawnTask(task)) && !(Number(task.charge || 0) > 0)) {
+  if (newInvoiced && isLawnTask(task) && !(Number(task.charge || 0) > 0)) {
     const effectiveCharge = getTaskBillingAmount(task);
     if (effectiveCharge > 0) {
       updatePayload.charge = effectiveCharge;
@@ -6870,7 +6954,7 @@ function getServiceDateForWeek(checkInDateString, standardDay) {
 
   const serviceDate = new Date(startOfWeek);
   serviceDate.setUTCDate(startOfWeek.getUTCDate() + standardDayNumber);
-  return formatDateValue(serviceDate);
+  return serviceDate.toISOString().slice(0, 10);
 }
 
 function getIncludedDaysForCoverageRule(standardDay, coverageRuleValue = "both") {
@@ -7215,11 +7299,19 @@ function getGuestReadyBillingDetails(task) {
 function getEffectiveWeeklyStandardCharge(task, property) {
   const rawCharge = Number(task?.charge || 0);
   if (rawCharge > 0) return rawCharge;
-  const defaultRate = Number(property?.default_cleaning_rate || 0);
-  return defaultRate > 0 ? defaultRate : 0;
+  return 0;
 }
 
 function getTaskBillingContext(task) {
+  if (isWeeklyContractObligationTask(task)) {
+    const amount = Math.max(0, Number(task.charge || 0));
+    return {
+      billableAmount: amount,
+      isBillable: amount > 0,
+      billingReasonLabel: amount > 0 ? "Weekly Contract Cleaning" : "No Weekly Contract Charge",
+    };
+  }
+
   if (isHousekeepingTask(task)) {
     const amount = Number(task.charge || 0);
     return {
@@ -7834,7 +7926,7 @@ function getBillingReportRowsForFilters({
   return cleaningTasks
     .filter((task) => {
       if (isTaskReconciled(task)) return true;
-      if (task.service_type === "Weekly Standard") return false;
+      if (task.service_type === "Weekly Standard" || isWeeklyContractObligationTask(task)) return false;
       return String(task.status || "").toLowerCase() === "completed";
     })
     .filter((task) => {
@@ -8874,6 +8966,10 @@ function getContractRateForDate(property, dateKey) {
   const normalizedDate = normalizeDateKey(dateKey);
   if (!propertyId || !normalizedDate) {
     return { amount: 0, basis: CONTRACT_RATE_BASIS_NONE, serviceDay: "Wednesday" };
+  }
+
+  if (isWeeklyContractTaskBillingEffective(property, normalizedDate)) {
+    return { amount: 0, basis: CONTRACT_RATE_BASIS_NONE, serviceDay: String(property?.standard_service_day || "Wednesday") };
   }
 
   const historicalRate = propertyContractRevenueHistory
@@ -10565,7 +10661,9 @@ function getInvoiceCandidateTasks({ startDate, endDate, selectedPropertyId = "",
     propertyId: row.property_id,
     propertyName: row.propertyName || getPropertyName(row.property_id),
     clientName: row.clientName || "",
-    description: isHousekeepingTask(row)
+    description: isWeeklyContractObligationTask(row)
+      ? "Scheduled Weekly Contract Cleaning"
+      : isHousekeepingTask(row)
       ? `${row.propertyName || getPropertyName(row.property_id)} - Housekeeping`
       : isLawnTask(row)
       ? `${row.propertyName || getPropertyName(row.property_id)} - ${normalizeServiceFrequency(getPropertyById(row.property_id)?.lawn_service_frequency) === SERVICE_FREQUENCY_BIWEEKLY ? "Biweekly Lawn Service" : "Lawn Service"}`
@@ -12652,30 +12750,37 @@ function renderRouteFragmentationAnalytics() {
 
 function shouldShowReconcileForTask(task) {
   if (!task) return false;
+  if (!(isAdminUser() || isManagerUser())) return false;
+  const status = String(task.status || "").toLowerCase();
+  if (["cancelled", "canceled", "void", "deleted"].includes(status)) return false;
+  return getTaskBillingAmount(task) > 0;
+}
+
+function canReconcileTask(task) {
+  if (!task || String(task.status || "").toLowerCase() !== "completed") return false;
+  if (isTaskReconciled(task) || isTaskLinkedToFinalizedInvoice(task)) return false;
   if (isManagerUser()) return task.manager_reconcile_eligible === true;
-  if (!isAdminUser()) return false;
-  if (isTaskReconciled(task)) return false;
+  return isAdminUser();
+}
 
-  if (isLawnTask(task)) {
-    return String(task.status || "").toLowerCase() === "completed"
-      && !isTaskLinkedToFinalizedInvoice(task)
-      && getTaskBillingAmount(task) > 0;
-  }
+function renderTaskReconcileControl(task, label = "$ Reconcile") {
+  if (!shouldShowReconcileForTask(task)) return "";
 
-  if (task.service_type === "Weekly Standard") {
-    const status = String(task.status || "").toLowerCase();
-    if (status === "cancelled" || status === "void" || status === "deleted") return false;
-    if (isTaskLinkedToFinalizedInvoice(task)) return false;
-    return getTaskBillingAmount(task) > 0;
-  }
+  const reconciled = isTaskReconciled(task) || isTaskLinkedToFinalizedInvoice(task);
+  const enabled = canReconcileTask(task);
+  const markerClass = reconciled ? "invoice-marker-checked" : "invoice-marker-unchecked";
+  const title = reconciled
+    ? "Task reconciled"
+    : enabled
+      ? "Reconcile completed task"
+      : "Complete task to reconcile";
 
-  if (isTaskGuestReady(task)) {
-    const guestReadyBilling = getGuestReadyBillingDetails(task);
-    if (guestReadyBilling.isChargeable) return true;
-    return hasManualBillingOverride(task) && Number(task.charge || 0) > 0;
-  }
-
-  return Number(task.charge || 0) > 0;
+  return `
+    <label class="invoice-marker ${markerClass} ${enabled ? "" : "invoice-marker-disabled"}" title="${title}">
+      <input type="checkbox" ${reconciled ? "checked" : ""} ${enabled ? "" : "disabled"} onchange="toggleInvoiceMarker('${task.id}')" />
+      <span>${label}</span>
+    </label>
+  `;
 }
 
 function isTaskReconciled(task) {
@@ -12831,7 +12936,7 @@ async function reconcileManagerTask(taskId, reconciliationType) {
 
 function getWeeklyReconciliationBillingLine(task, taskBillingAmount) {
   if (!isAdminUser()) return "";
-  if (!task || task.service_type !== "Weekly Standard") return "";
+  if (!task || (task.service_type !== "Weekly Standard" && !isWeeklyContractObligationTask(task))) return "";
   if (Number(taskBillingAmount || 0) <= 0) return "";
   return isTaskReconciled(task) || isTaskLinkedToFinalizedInvoice(task)
     ? `<div class="task-line"><small>Billing: Reconciled</small></div>`
@@ -13006,8 +13111,7 @@ function renderTaskCard(task, { stopNumber = null, routeEditable = true } = {}) 
       ? "badge-yellow"
       : "badge-blue";
   const alertBadge = getAlertBadgeForTask(task);
-  const showReconcile = shouldShowReconcileForTask(task);
-  const invoiceMarkerClass = task.invoiced ? "invoice-marker-checked" : "invoice-marker-unchecked";
+  const reconcileControl = renderTaskReconcileControl(task, isManagerUser() ? "Reconcile" : "$");
   const taskBillingAmount = getTaskBillingAmount(task);
   const weeklyReconcileLine = getWeeklyReconciliationBillingLine(task, taskBillingAmount);
   const sdsBillingLine = getSdsBillingLine(task);
@@ -13041,12 +13145,7 @@ function renderTaskCard(task, { stopNumber = null, routeEditable = true } = {}) 
       ${routeMarkup}
       <div class="task-card-header">
         <div class="task-card-title">${getPropertyName(task.property_id)}</div>
-        ${showReconcile ? `
-        <label class="invoice-marker ${invoiceMarkerClass}">
-          <input type="checkbox" ${task.invoiced ? "checked" : ""} onchange="toggleInvoiceMarker('${task.id}')" />
-          <span>${isManagerUser() ? "Reconcile" : isLawnTask(task) ? "Reconcile" : "$"}</span>
-        </label>
-        ` : ""}
+        ${reconcileControl}
         ${sdsReconcileControl}
       </div>
       ${carryForwardBadge}
@@ -13627,8 +13726,7 @@ function renderWeekViewListTaskCard(task) {
   const taskBillingAmount = getTaskBillingAmount(task);
   const billingContext = getTaskBillingContext(task);
   const guestReadyBilling = billingContext.guestReadyBilling || null;
-  const showReconcile = shouldShowReconcileForTask(task);
-  const invoiceMarkerClass = task.invoiced ? "invoice-marker-checked" : "invoice-marker-unchecked";
+  const reconcileControl = renderTaskReconcileControl(task, isManagerUser() ? "Reconcile" : "$ Reconcile");
   const status = String(task.status || "Scheduled");
   const isCompleted = status === "Completed";
   const isInProgress = status === "In Progress";
@@ -13681,12 +13779,7 @@ function renderWeekViewListTaskCard(task) {
     <div class="${taskClass} ${carryForwardInfo?.urgent ? "carried-forward-urgent-card" : carryForwardInfo ? "carried-forward-card" : ""}">
       <div class="task-item-header">
         <div class="task-title">${getPropertyName(task.property_id)} — ${task.service_date || task.scheduled_date || "Not set"}</div>
-        ${showReconcile ? `
-        <label class="invoice-marker ${invoiceMarkerClass}">
-          <input type="checkbox" ${task.invoiced ? "checked" : ""} onchange="toggleInvoiceMarker('${task.id}')" />
-          <span>${isManagerUser() ? "Reconcile" : "$ Reconcile"}</span>
-        </label>
-        ` : ""}
+        ${reconcileControl}
         ${sdsReconcileControl}
       </div>
       ${badge}
@@ -13776,10 +13869,9 @@ function renderWeekViewCalendar(weekTasks) {
                     const sourceReviewBadge = getSourceReviewBadgeMarkup(task);
                     const carryForwardHistory = getCarryForwardHistoryMarkup(task);
                     const scheduleHistoryBadge = getScheduleHistoryMarkup(task, { compact: true });
-                    const showReconcile = shouldShowReconcileForTask(task);
-                    const invoiceMarkerClass = task.invoiced ? "invoice-marker-checked" : "invoice-marker-unchecked";
+                    const reconcileControl = renderTaskReconcileControl(task, "Reconcile");
                     const sdsReconcileControl = renderSdsReconcileControl(task);
-                    const showBilling = showReconcile || Boolean(sdsReconcileControl);
+                    const showBilling = Boolean(reconcileControl) || Boolean(sdsReconcileControl);
                     const weeklyServiceLevelMarkup = renderTaskWeeklyServiceLevelSelector(task, { compact: true });
                     const technicianMarkup = renderTaskTechnicianSelector(task, { compact: true });
                     const laborSnapshotLine = renderTaskLaborSnapshot(task);
@@ -13811,12 +13903,7 @@ function renderWeekViewCalendar(weekTasks) {
                         ${showBilling ? `
                         <div class="calendar-task-billing-section">
                           <div class="calendar-task-section-label">Billing:</div>
-                          ${showReconcile ? `
-                          <label class="invoice-marker ${invoiceMarkerClass}">
-                            <input type="checkbox" ${task.invoiced ? "checked" : ""} onchange="toggleInvoiceMarker('${task.id}')" />
-                            <span>Reconcile</span>
-                          </label>
-                          ` : ""}
+                          ${reconcileControl}
                           ${sdsReconcileControl}
                         </div>
                         ` : ""}
@@ -13990,8 +14077,7 @@ function renderProperties() {
           const taskBillingAmount = getTaskBillingAmount(task);
           const billingContext = getTaskBillingContext(task);
           const guestReadyBilling = billingContext.guestReadyBilling || null;
-          const showReconcile = shouldShowReconcileForTask(task);
-          const invoiceMarkerClass = task.invoiced ? "invoice-marker-checked" : "invoice-marker-unchecked";
+          const reconcileControl = renderTaskReconcileControl(task, "$ Reconcile");
           const taskClass = (
             task.status === "Completed"
               ? "task-item completed"
@@ -14038,12 +14124,7 @@ function renderProperties() {
             <div class="${taskClass} ${carryForwardInfo?.urgent ? "carried-forward-urgent-card" : carryForwardInfo ? "carried-forward-card" : ""}">
               <div class="task-item-header">
                 <div class="task-title">${task.service_date} — ${getServiceTypeDisplayLabel(task.service_type)}</div>
-                ${showReconcile ? `
-                <label class="invoice-marker ${invoiceMarkerClass}">
-                  <input type="checkbox" ${task.invoiced ? "checked" : ""} onchange="toggleInvoiceMarker('${task.id}')" />
-                  <span>$ Reconcile</span>
-                </label>
-                ` : ""}
+                ${reconcileControl}
                 ${sdsReconcileControl}
               </div>
               ${badge}
@@ -14844,12 +14925,7 @@ function renderManagerProperties() {
           <div class="task-item ${task.status === "Completed" ? "completed" : ""} ${getServiceBranchClass(task)} ${carryForwardInfo?.urgent ? "carried-forward-urgent-card" : carryForwardInfo ? "carried-forward-card" : ""}">
             <div class="task-item-header">
               <div class="task-title">${escapeHtml(task.service_date || task.scheduled_date || "Not set")} - ${escapeHtml(getServiceTypeDisplayLabel(task.service_type))}</div>
-              ${shouldShowReconcileForTask(task) ? `
-                <label class="invoice-marker invoice-marker-unchecked">
-                  <input type="checkbox" onchange="toggleInvoiceMarker('${task.id}')" />
-                  <span>Reconcile</span>
-                </label>
-              ` : ""}
+              ${renderTaskReconcileControl(task, "Reconcile")}
               ${renderSdsReconcileControl(task)}
             </div>
             ${getCarryForwardBadgeMarkup(task)}
