@@ -9,7 +9,7 @@ ADD COLUMN IF NOT EXISTS billing_account_reference TEXT,
 ADD COLUMN IF NOT EXISTS default_cleaning_rate NUMERIC DEFAULT 0,
 ADD COLUMN IF NOT EXISTS billing_taxable BOOLEAN DEFAULT true,
 ADD COLUMN IF NOT EXISTS billing_tax_rate NUMERIC DEFAULT 0,
-ADD COLUMN IF NOT EXISTS payment_terms TEXT DEFAULT 'Net 15',
+ADD COLUMN IF NOT EXISTS payment_terms TEXT DEFAULT 'Upon Receipt',
 ADD COLUMN IF NOT EXISTS invoice_notes TEXT;
 
 -- Invoice header table

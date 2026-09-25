@@ -257,7 +257,8 @@ let isProtectedAccessUnlocked = false;
 let pinModalResolver = null;
 const MANUAL_BILLING_OVERRIDE_TAG = "[Manual Override]";
 const INVOICE_STATUSES = ["draft", "finalized", "sent", "paid", "void"];
-const DEFAULT_INVOICE_TERMS = "Net 15";
+const DEFAULT_INVOICE_TERMS = "Upon Receipt";
+const CUSTOM_INVOICE_TERMS = "Custom Date";
 const INVOICE_ITEM_SOURCES = {
   MANUAL: "manual",
   TASK: "task",
@@ -2402,7 +2403,7 @@ function openEditModal(id) {
   if (propertySameDaySurcharge) propertySameDaySurcharge.value = Number(property.same_day_surcharge || 0);
   if (propertyTaxable) propertyTaxable.value = property.billing_taxable === false ? "no" : "yes";
   if (propertyTaxRate) propertyTaxRate.value = Number(property.billing_tax_rate || 0);
-  if (propertyPaymentTerms) propertyPaymentTerms.value = property.payment_terms || DEFAULT_INVOICE_TERMS;
+  if (propertyPaymentTerms) propertyPaymentTerms.value = getPropertyInvoiceTerms(property);
   if (propertyInvoiceNotes) propertyInvoiceNotes.value = property.invoice_notes || "";
   if (propertyCompanyBranch) propertyCompanyBranch.value = normalizeCompanyBranch(property.company_branch);
   if (propertyStatus) propertyStatus.value = isPropertyActive(property) ? "active" : "inactive";
@@ -10638,9 +10639,22 @@ function getInvoiceChemicalCandidates({ startDate, endDate, selectedPropertyId =
 
 function getInvoiceTermsDays(terms) {
   const value = String(terms || "").trim().toLowerCase();
+  if (!value || value === "upon receipt" || value === "custom date") return 0;
   const match = value.match(/(\d+)/);
   if (match) return Number(match[1]);
-  return 15;
+  return 0;
+}
+
+function getInvoicePaymentTermsMode(terms) {
+  return String(terms || "").trim().toLowerCase() === "upon receipt"
+    ? DEFAULT_INVOICE_TERMS
+    : CUSTOM_INVOICE_TERMS;
+}
+
+function getPropertyInvoiceTerms(property) {
+  return String(property?.payment_terms || "").trim().toLowerCase() === "custom date"
+    ? CUSTOM_INVOICE_TERMS
+    : DEFAULT_INVOICE_TERMS;
 }
 
 // SDS candidates are reconciled-only (mirrors the Weekly Standard reconcile-gated pattern) and always
@@ -10680,7 +10694,7 @@ function formatInvoiceDate(date) {
 function getInvoiceDueDate(invoiceDate, paymentTerms) {
   const date = parseDateString(invoiceDate);
   date.setUTCDate(date.getUTCDate() + getInvoiceTermsDays(paymentTerms));
-  return formatDateValue(date);
+  return date.toISOString().slice(0, 10);
 }
 
 function createManualInvoiceItem(property, serviceDate) {
@@ -10715,7 +10729,7 @@ function createManualInvoiceDraft() {
   }
 
   const invoiceDate = formatInvoiceDate(new Date());
-  const paymentTerms = String(property.payment_terms || DEFAULT_INVOICE_TERMS).trim() || DEFAULT_INVOICE_TERMS;
+  const paymentTerms = getPropertyInvoiceTerms(property);
   currentInvoiceBatchDrafts = [];
   clearInvoiceEligibilitySummary();
   currentInvoiceDraft = {
@@ -10795,7 +10809,7 @@ function buildDraftInvoiceModel({ property, clientName = "", propertyIds = [], s
   const tax = taxable && taxRate > 0 ? Number((subtotal * (taxRate / 100)).toFixed(2)) : 0;
   const total = Number((subtotal + tax).toFixed(2));
 
-  const paymentTerms = String(property?.payment_terms || DEFAULT_INVOICE_TERMS).trim() || DEFAULT_INVOICE_TERMS;
+  const paymentTerms = getPropertyInvoiceTerms(property);
   const dueDate = getInvoiceDueDate(invoiceDate, paymentTerms);
 
   return {
@@ -11017,6 +11031,7 @@ function renderInvoicePreview() {
   const showTaxLine = invoice.taxable && Number(invoice.taxRate || 0) > 0;
   const invoiceBranch = getInvoiceCompanyBranch(invoice);
   const invoiceBranding = getCompanyBrandingForBranch(invoiceBranch);
+  const paymentTermsMode = getInvoicePaymentTermsMode(invoice.paymentTerms);
 
   invoicePreviewContainer.innerHTML = `
     <div class="invoice-preview-actions no-print">
@@ -11056,8 +11071,8 @@ function renderInvoicePreview() {
         <div class="billing-report-meta"><strong>Account/Ref:</strong> <input type="text" value="${escapeHtml(invoice.accountReference || "")}" onchange="updateInvoiceDraftField('accountReference', this.value)"></div>
         <div class="billing-report-meta"><strong>Invoice #:</strong> ${escapeHtml(invoice.invoiceNumber || "(pending)")}</div>
         <div class="billing-report-meta"><strong>Invoice Date:</strong> ${invoice.invoiceDate}</div>
-        <div class="billing-report-meta"><strong>Payment Terms:</strong> <input type="text" value="${escapeHtml(invoice.paymentTerms || DEFAULT_INVOICE_TERMS)}" onchange="updateInvoiceDraftField('paymentTerms', this.value)"></div>
-        <div class="billing-report-meta"><strong>Due Date:</strong> <input type="date" value="${invoice.dueDate || ""}" onchange="updateInvoiceDraftField('dueDate', this.value)"></div>
+        <div class="billing-report-meta"><strong>Payment Terms:</strong> <select onchange="updateInvoiceDraftField('paymentTerms', this.value)"><option value="${DEFAULT_INVOICE_TERMS}" ${paymentTermsMode === DEFAULT_INVOICE_TERMS ? "selected" : ""}>Upon Receipt</option><option value="${CUSTOM_INVOICE_TERMS}" ${paymentTermsMode === CUSTOM_INVOICE_TERMS ? "selected" : ""}>Custom Date</option></select></div>
+        <div class="billing-report-meta"><strong>Due Date:</strong> <input type="date" value="${invoice.dueDate || ""}" ${paymentTermsMode === DEFAULT_INVOICE_TERMS ? "disabled" : ""} onchange="updateInvoiceDraftField('dueDate', this.value)"></div>
         <div class="billing-report-meta"><strong>Service Period:</strong> ${invoice.periodStart} to ${invoice.periodEnd}</div>
         <div class="billing-report-meta"><strong>Status:</strong> ${escapeHtml(String(invoice.status || "draft").toUpperCase())}</div>
         <div class="billing-report-meta">${escapeHtml(invoicePropertyHeaderLabel)}</div>
@@ -14770,7 +14785,12 @@ function updateInvoiceDraftField(field, rawValue) {
   }
 
   if (field === "paymentTerms") {
-    currentInvoiceDraft.dueDate = getInvoiceDueDate(currentInvoiceDraft.invoiceDate, currentInvoiceDraft.paymentTerms);
+    currentInvoiceDraft.paymentTerms = getInvoicePaymentTermsMode(currentInvoiceDraft.paymentTerms);
+    if (currentInvoiceDraft.paymentTerms === DEFAULT_INVOICE_TERMS) {
+      currentInvoiceDraft.dueDate = currentInvoiceDraft.invoiceDate;
+    }
+  } else if (field === "dueDate") {
+    currentInvoiceDraft.paymentTerms = CUSTOM_INVOICE_TERMS;
   }
 
   recalculateInvoiceDraftTotals();
