@@ -2690,6 +2690,20 @@ async function cleanupDeactivatedPropertyServiceBranches(propertyId, deactivated
   return results;
 }
 
+async function cleanupDeactivatedPropertyTasks(propertyId) {
+  const { data, error } = await supabaseClient.rpc("cleanup_deactivated_property_tasks", {
+    selected_property_id: propertyId,
+  });
+  if (error) return { removedCount: 0, preservedLockedCount: 0, error };
+
+  const result = Array.isArray(data) ? data[0] : data;
+  return {
+    removedCount: Number(result?.removed_count || 0),
+    preservedLockedCount: Number(result?.preserved_locked_count || 0),
+    error: null,
+  };
+}
+
 const WEEKLY_SERVICE_LEVEL_FULL = "full_service";
 const WEEKLY_SERVICE_LEVEL_HEALTH = "health_check";
 
@@ -5039,9 +5053,7 @@ async function saveProperty() {
     lawn: selectedLawnServiceActive,
     housekeeping: selectedHousekeepingServiceActive,
   });
-  const deactivatingProperty = Boolean(existingProperty)
-    && isPropertyActive(existingProperty)
-    && !selectedPropertyActive;
+  const inactivePropertyCleanupRequested = Boolean(existingProperty) && !selectedPropertyActive;
   const todayDate = new Date();
   todayDate.setHours(0, 0, 0, 0);
   const todayKey = formatDateValue(todayDate);
@@ -5061,7 +5073,7 @@ async function saveProperty() {
       || existingStandardDay !== (String(standardDay.value || "").trim() || "Wednesday")
     );
 
-  const staleFutureAutoWeeklyTasks = scheduleChanged && !deactivatingProperty && selectedPoolServiceActive
+  const staleFutureAutoWeeklyTasks = scheduleChanged && !inactivePropertyCleanupRequested && selectedPoolServiceActive
     ? getFutureAutoWeeklyTasksOutsideSchedule(editingPropertyId, nextSchedule, todayKey)
     : [];
 
@@ -5213,7 +5225,10 @@ async function saveProperty() {
     return;
   }
 
-  const branchCleanupResults = deactivatedServiceBranches.length
+  const propertyCleanupResult = inactivePropertyCleanupRequested
+    ? await cleanupDeactivatedPropertyTasks(editingPropertyId)
+    : null;
+  const branchCleanupResults = !inactivePropertyCleanupRequested && deactivatedServiceBranches.length
     ? await cleanupDeactivatedPropertyServiceBranches(editingPropertyId, deactivatedServiceBranches)
     : [];
 
@@ -5235,7 +5250,17 @@ async function saveProperty() {
   closePropertyModal();
   await loadData();
 
-  if (branchCleanupResults.length > 0) {
+  if (propertyCleanupResult) {
+    if (propertyCleanupResult.error) {
+      statusMessage.textContent = `Property made inactive, but future task cleanup failed: ${propertyCleanupResult.error.message}`;
+    } else {
+      const removedLabel = `${propertyCleanupResult.removedCount} future incomplete task${propertyCleanupResult.removedCount === 1 ? "" : "s"} removed.`;
+      const preservedLabel = propertyCleanupResult.preservedLockedCount > 0
+        ? ` ${propertyCleanupResult.preservedLockedCount} financially locked task${propertyCleanupResult.preservedLockedCount === 1 ? " was" : "s were"} preserved.`
+        : "";
+      statusMessage.textContent = `Property made inactive. ${removedLabel}${preservedLabel}`;
+    }
+  } else if (branchCleanupResults.length > 0) {
     statusMessage.textContent = branchCleanupResults.map((entry) => {
       if (entry.error) {
         return `${entry.label} disabled, but automatic task cleanup failed: ${entry.error.message}`;
@@ -6858,6 +6883,12 @@ function isTaskVisibleInOperationalSchedule(task, { matchActiveWorkspace = true 
   if (shouldSuppressWeeklyStandardTaskDisplay(task)) return false;
 
   const status = String(task.status || "").trim().toLowerCase();
+  const property = properties.find((item) => item.id === task.property_id);
+  const taskDate = normalizeDateKey(task.service_date || task.scheduled_date);
+  const isIncomplete = status !== "completed" && !task.completed_at;
+  if (property && !isPropertyActive(property) && isIncomplete && taskDate >= getBusinessDateValue()) {
+    return false;
+  }
   return status !== "cancelled";
 }
 
