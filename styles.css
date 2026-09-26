@@ -3324,6 +3324,34 @@ textarea{
     margin-top: 12px;
 }
 
+.invoice-sent-cell {
+    white-space: nowrap;
+}
+
+.invoice-sent-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.invoice-sent-toggle input {
+    width: 15px;
+    height: 15px;
+    accent-color: #059669;
+}
+
+.invoice-sent-toggle input:disabled {
+    cursor: not-allowed;
+}
+
+.invoice-sent-toggle:has(input:disabled) {
+    cursor: not-allowed;
+    opacity: 0.65;
+}
+
 .invoice-preview-actions {
     margin-top: 14px;
     display: flex;

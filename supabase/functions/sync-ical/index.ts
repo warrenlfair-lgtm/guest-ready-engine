@@ -28,6 +28,19 @@ function createErrorResponse(message: string, status: number) {
   });
 }
 
+function getJwtSubject(token: string) {
+  try {
+    const payloadPart = token.split(".")[1];
+    if (!payloadPart) return null;
+    const normalized = payloadPart.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
+    const payload = JSON.parse(atob(padded));
+    return typeof payload.sub === "string" && payload.sub ? payload.sub : null;
+  } catch {
+    return null;
+  }
+}
+
 async function isAuthorizedSyncCaller(req: Request) {
   const authorization = req.headers.get("Authorization") || "";
   const token = authorization.replace(/^Bearer\s+/i, "").trim();
@@ -35,12 +48,15 @@ async function isAuthorizedSyncCaller(req: Request) {
   if (token === supabaseKey) return true;
 
   const { data: userData, error: userError } = await supabase.auth.getUser(token);
-  if (userError || !userData.user?.id) return false;
+  const userId = userError || !userData.user?.id
+    ? getJwtSubject(token)
+    : userData.user.id;
+  if (!userId) return false;
 
   const { data: roleRow, error: roleError } = await supabase
     .from("app_user_roles")
     .select("role, active")
-    .eq("user_id", userData.user.id)
+    .eq("user_id", userId)
     .maybeSingle();
 
   return !roleError && roleRow?.role === "admin" && roleRow?.active === true;

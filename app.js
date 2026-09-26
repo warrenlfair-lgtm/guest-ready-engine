@@ -7187,6 +7187,8 @@ function getHousekeepingTurnoverContext(task) {
   const checkoutDate = normalizeDateKey(task?.suggested_date || task?.original_service_date || task?.service_date || task?.scheduled_date);
   const taskProperty = getTaskPropertyMatchInfo(task);
   if (!checkoutDate || !taskProperty.propertyId) return null;
+  const property = properties.find((item) => normalizePropertyId(item.id) === taskProperty.propertyId);
+  if (!property || !isPropertyActive(property) || property.housekeeping_service_active !== true) return null;
 
   const nextCheckInDate = reservations
     .filter((reservation) => reservationMatchesTaskProperty(reservation, taskProperty))
@@ -12037,6 +12039,24 @@ async function updateInvoiceStatus(invoiceId, status) {
   renderInvoiceHistory();
 }
 
+async function toggleInvoiceSent(invoiceId, sent) {
+  const invoice = invoices.find((row) => row.id === invoiceId);
+  if (!invoice) return;
+
+  const currentStatus = String(invoice.status || "draft").toLowerCase();
+  if (sent && currentStatus === "draft") {
+    alert("Finalize the invoice before marking it as sent.");
+    renderInvoiceHistory();
+    return;
+  }
+  if (currentStatus === "void" || currentStatus === "paid") {
+    renderInvoiceHistory();
+    return;
+  }
+
+  await updateInvoiceStatus(invoiceId, sent ? "sent" : "finalized");
+}
+
 async function openInvoiceDraft(invoiceId) {
   const invoice = invoices.find((row) => row.id === invoiceId);
   if (!invoice) return;
@@ -12327,6 +12347,9 @@ function renderInvoiceHistory() {
     const deleteMode = getInvoiceHistoryDeleteMode(invoice);
     const showDeleteButton = deleteMode === "draft" || deleteMode === "finalized" || deleteMode === "protected";
     const deleteHandler = deleteMode === "draft" ? `deleteInvoiceDraft('${invoice.id}')` : `deleteFinalizedOrProtectedInvoice('${invoice.id}')`;
+    const invoiceStatus = String(invoice.status || "draft").toLowerCase();
+    const sentCheckboxDisabled = invoiceStatus === "draft" || invoiceStatus === "void" || invoiceStatus === "paid";
+    const sentCheckboxChecked = invoiceStatus === "sent" || invoiceStatus === "paid";
     return `
       <tr>
         <td>${escapeHtml(invoice.invoice_number || "")}</td>
@@ -12335,6 +12358,12 @@ function renderInvoiceHistory() {
         <td>${invoice.invoice_date || ""}</td>
         <td>${invoice.due_date || ""}</td>
         <td class="billing-report-amount">${toMoney(invoice.total || 0)}</td>
+        <td class="invoice-sent-cell">
+          <label class="invoice-sent-toggle" title="${sentCheckboxDisabled && invoiceStatus === "draft" ? "Finalize the invoice before marking it as sent" : "Mark invoice as sent"}">
+            <input type="checkbox" ${sentCheckboxChecked ? "checked" : ""} ${sentCheckboxDisabled ? "disabled" : ""} onchange="toggleInvoiceSent('${invoice.id}', this.checked)">
+            <span>Sent</span>
+          </label>
+        </td>
         <td>
           <select onchange="updateInvoiceStatus('${invoice.id}', this.value)">
             ${INVOICE_STATUSES.map((status) => `<option value="${status}" ${String(invoice.status || "draft").toLowerCase() === status ? "selected" : ""}>${status}</option>`).join("")}
@@ -12360,6 +12389,7 @@ function renderInvoiceHistory() {
             <th>Invoice Date</th>
             <th>Due Date</th>
             <th>Total</th>
+            <th>Sent</th>
             <th>Status</th>
             <th>Open</th>
           </tr>
