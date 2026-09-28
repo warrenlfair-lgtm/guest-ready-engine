@@ -5420,7 +5420,7 @@ async function runSyncAllIcal({ automatic }) {
       console.log(`[SyncAll] Edge Function response for "${property.property_name}":`, data, error);
 
       if (error) {
-        result.error = error.message || String(error);
+        result.error = await getEdgeFunctionErrorMessage(error);
         console.log(`[SyncAll] ERROR for "${property.property_name}":`, result.error);
       } else if (data?.syncVersion !== "ical-source-reconciliation-v1") {
         result.error = "iCal source reconciliation is not deployed. Run its migration and deploy the updated sync-ical Edge Function.";
@@ -5483,10 +5483,12 @@ function renderSyncReport(results) {
     if (!r.success) {
       return `
         <tr class="sync-row-error">
-          <td>${r.propertyName}</td>
+          <td>${escapeHtml(r.propertyName || "Unknown Property")}</td>
           <td>✓</td>
-          <td colspan="13">—</td>
-          <td class="sync-error-msg">${r.error || "Unknown error"}</td>
+          <td colspan="14">Sync failed</td>
+        </tr>
+        <tr class="sync-row-error-detail">
+          <td colspan="16"><strong>Error:</strong> ${escapeHtml(r.error || "Unknown error")}</td>
         </tr>`;
     }
     const d = r.data || {};
@@ -5544,6 +5546,28 @@ function renderSyncReport(results) {
   `;
 }
 
+async function getEdgeFunctionErrorMessage(error) {
+  const fallbackMessage = error?.message || String(error || "Unknown Edge Function error");
+  const response = error?.context;
+  if (!response || typeof response.clone !== "function") return fallbackMessage;
+
+  const statusPrefix = response.status ? `HTTP ${response.status}: ` : "";
+  try {
+    const body = await response.clone().json();
+    const message = body?.error || body?.message;
+    if (message) return `${statusPrefix}${message}`;
+  } catch {
+    try {
+      const bodyText = await response.clone().text();
+      if (bodyText) return `${statusPrefix}${bodyText}`;
+    } catch {
+      // Keep the SDK error if the response body is unavailable.
+    }
+  }
+
+  return `${statusPrefix}${fallbackMessage}`;
+}
+
 async function syncPropertyIcal(propertyId) {
   if (!requireAdminAccess()) return;
   console.log("[SynciCal] Sync button clicked, propertyId:", propertyId);
@@ -5590,7 +5614,7 @@ async function syncPropertyIcal(propertyId) {
   }
 
   if (error) {
-    const msg = "iCal sync failed: " + (error.message || error);
+    const msg = "iCal sync failed: " + await getEdgeFunctionErrorMessage(error);
     console.log("[SynciCal] Edge Function returned error:", error);
     statusMessage.textContent = msg;
     return;

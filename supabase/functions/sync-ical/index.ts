@@ -190,6 +190,14 @@ function addDays(dateString: string, daysToAdd: number) {
   return formatDate(date);
 }
 
+function chunkArray<T>(values: T[], chunkSize = 100) {
+  const chunks: T[][] = [];
+  for (let index = 0; index < values.length; index += chunkSize) {
+    chunks.push(values.slice(index, index + chunkSize));
+  }
+  return chunks;
+}
+
 const SERVICE_FREQUENCY_WEEKLY = "weekly";
 const SERVICE_FREQUENCY_BIWEEKLY = "bi_weekly";
 
@@ -495,28 +503,45 @@ Deno.serve(async (req: Request) => {
     if (removedReservationIds.length) {
       const removedAt = new Date().toISOString();
       if (staleReservationIds.length) {
-        const { error: cancelError } = await supabase
-          .from("reservations")
-          .update({ status: "cancelled", cancelled_at: removedAt })
-          .in("id", staleReservationIds);
+        for (const reservationIdBatch of chunkArray(staleReservationIds)) {
+          const { error: cancelError } = await supabase
+            .from("reservations")
+            .update({ status: "cancelled", cancelled_at: removedAt })
+            .in("id", reservationIdBatch);
 
-        if (cancelError) {
-          console.error("sync-ical fatal error", cancelError?.message || cancelError);
-          return createErrorResponse(`Could not mark removed reservations: ${cancelError.message}`, 500);
+          if (cancelError) {
+            console.error("sync-ical fatal error", cancelError?.message || cancelError);
+            return createErrorResponse(`Could not mark removed reservations: ${cancelError.message}`, 500);
+          }
         }
         reservationsRemoved += staleReservationIds.length;
         console.log("[RESERVATION CANCEL APPLIED]", staleReservationIds.length, "stale reservation(s) marked cancelled");
       }
 
-      const { data: linkedTasks, error: linkedTaskError } = await supabase
-        .from("cleaning_tasks")
-        .select("id, source_type, manually_modified, status, completed_at, invoiced, invoice_id, invoiced_invoice_id, same_day_surcharge_reconciled, same_day_surcharge_invoice_id")
-        .eq("property_id", propertyId)
-        .in("source_reservation_id", removedReservationIds)
-        .in("source_type", ["reservation_guest_ready", "reservation_housekeeping"]);
+      const linkedTasks: Array<{
+        id: string;
+        source_type: string | null;
+        manually_modified: boolean | null;
+        status: string | null;
+        completed_at: string | null;
+        invoiced: boolean | null;
+        invoice_id: string | null;
+        invoiced_invoice_id: string | null;
+        same_day_surcharge_reconciled: boolean | null;
+        same_day_surcharge_invoice_id: string | null;
+      }> = [];
+      for (const reservationIdBatch of chunkArray(removedReservationIds)) {
+        const { data: linkedTaskBatch, error: linkedTaskError } = await supabase
+          .from("cleaning_tasks")
+          .select("id, source_type, manually_modified, status, completed_at, invoiced, invoice_id, invoiced_invoice_id, same_day_surcharge_reconciled, same_day_surcharge_invoice_id")
+          .eq("property_id", propertyId)
+          .in("source_reservation_id", reservationIdBatch)
+          .in("source_type", ["reservation_guest_ready", "reservation_housekeeping"]);
 
-      if (linkedTaskError) {
-        return createErrorResponse(`Could not inspect tasks for removed reservations: ${linkedTaskError.message}`, 500);
+        if (linkedTaskError) {
+          return createErrorResponse(`Could not inspect tasks for removed reservations: ${linkedTaskError.message}`, 500);
+        }
+        linkedTasks.push(...(linkedTaskBatch || []));
       }
 
       const safeTaskIds: string[] = [];
@@ -541,35 +566,39 @@ Deno.serve(async (req: Request) => {
       }
 
       if (safeTaskIds.length) {
-        const { error: staleTaskError } = await supabase
-          .from("cleaning_tasks")
-          .update({
-            status: "Cancelled",
-            weekly_contract_obligation_key: null,
-            source_removed_at: removedAt,
-            source_review_required_at: null,
-            source_review_reason: null,
-          })
-          .in("id", safeTaskIds);
-        if (staleTaskError) {
-          return createErrorResponse(`Could not cancel stale generated tasks: ${staleTaskError.message}`, 500);
+        for (const taskIdBatch of chunkArray(safeTaskIds)) {
+          const { error: staleTaskError } = await supabase
+            .from("cleaning_tasks")
+            .update({
+              status: "Cancelled",
+              weekly_contract_obligation_key: null,
+              source_removed_at: removedAt,
+              source_review_required_at: null,
+              source_review_reason: null,
+            })
+            .in("id", taskIdBatch);
+          if (staleTaskError) {
+            return createErrorResponse(`Could not cancel stale generated tasks: ${staleTaskError.message}`, 500);
+          }
+          staleTasksCancelled += taskIdBatch.length;
         }
-        staleTasksCancelled += safeTaskIds.length;
       }
 
       if (reviewTaskIds.length) {
-        const { error: reviewTaskError } = await supabase
-          .from("cleaning_tasks")
-          .update({
-            source_removed_at: removedAt,
-            source_review_required_at: removedAt,
-            source_review_reason: "RESERVATION REMOVED - Review Task",
-          })
-          .in("id", reviewTaskIds);
-        if (reviewTaskError) {
-          return createErrorResponse(`Could not flag generated tasks for review: ${reviewTaskError.message}`, 500);
+        for (const taskIdBatch of chunkArray(reviewTaskIds)) {
+          const { error: reviewTaskError } = await supabase
+            .from("cleaning_tasks")
+            .update({
+              source_removed_at: removedAt,
+              source_review_required_at: removedAt,
+              source_review_reason: "RESERVATION REMOVED - Review Task",
+            })
+            .in("id", taskIdBatch);
+          if (reviewTaskError) {
+            return createErrorResponse(`Could not flag generated tasks for review: ${reviewTaskError.message}`, 500);
+          }
+          tasksRequiringReview += taskIdBatch.length;
         }
-        tasksRequiringReview += reviewTaskIds.length;
       }
     }
 
