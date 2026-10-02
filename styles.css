@@ -4010,6 +4010,26 @@ textarea{
     box-shadow: 0 4px 10px rgba(15, 23, 42, 0.18);
 }
 
+.month-task-card.month-task-completed {
+    position: relative;
+}
+
+/* Corner-to-corner line (upper-left to lower-right); gradient scales with any card size. */
+.month-task-card.month-task-completed::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    border-radius: inherit;
+    background: linear-gradient(
+        to top right,
+        transparent calc(50% - 1.5px),
+        rgba(15, 23, 42, 0.7) calc(50% - 1.5px),
+        rgba(15, 23, 42, 0.7) calc(50% + 1.5px),
+        transparent calc(50% + 1.5px)
+    );
+}
+
 .month-task-heading,
 .month-task-indicators {
     display: flex;

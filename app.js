@@ -13706,7 +13706,7 @@ function renderMonthView() {
       const dragTitle = rescheduleEnabled ? "Drag to another calendar day to reschedule" : getTaskRescheduleBlockReason(task);
 
       return `
-        <div class="month-task-card ${branchClass} ${carryForwardInfo?.urgent ? "carried-forward-urgent-card" : carryForwardInfo ? "carried-forward-card" : ""} ${rescheduleEnabled ? "month-task-draggable" : "month-task-locked"}" ${dragAttributes} title="${escapeHtml(dragTitle)}" onclick="event.stopPropagation(); openEditCleaning('${task.id}')">
+        <div class="month-task-card ${branchClass} ${status === "Completed" ? "month-task-completed" : ""} ${carryForwardInfo?.urgent ? "carried-forward-urgent-card" : carryForwardInfo ? "carried-forward-card" : ""} ${rescheduleEnabled ? "month-task-draggable" : "month-task-locked"}" ${dragAttributes} title="${escapeHtml(dragTitle)}" onclick="event.stopPropagation(); openEditCleaning('${task.id}')">
           <div class="month-task-heading">
             <div class="month-task-property-name">${escapeHtml(propertyName)}</div>
             ${deleteButton}
