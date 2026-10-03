@@ -44,6 +44,10 @@ let activeServiceWorkspace = SERVICE_BRANCH_POOL;
 let currentMonthViewYear = new Date().getFullYear();
 let currentMonthViewMonth = new Date().getMonth();
 let monthBranchFilter = "all";
+let monthViewMode = "tasks";
+let monthIcalPropertyFilter = "all";
+// Hostaway holds/blocks are not guest stays; hide events whose iCal summary matches.
+const MONTH_RESERVATION_BLOCK_PATTERN = /\b(blocked?|on hold|hold|not available|unavailable|closed)\b/i;
 let selectedDailyRouteDate = null;
 let selectedDailyRouteTechnicianKey = "all";
 let draggedMonthTaskId = null;
@@ -848,6 +852,18 @@ if (monthBranchFilterSelect) {
     renderMonthView();
   });
 }
+
+document.querySelectorAll("[data-month-mode]").forEach((button) => {
+  button.addEventListener("click", () => {
+    monthViewMode = button.dataset.monthMode === "ical" ? "ical" : "tasks";
+    renderMonthView();
+  });
+});
+
+document.getElementById("monthIcalPropertySelect")?.addEventListener("change", (e) => {
+  monthIcalPropertyFilter = e.target.value || "all";
+  renderMonthView();
+});
 
 function renderMonthAddTaskControl() {
   if (!monthAddTaskSlot) return;
@@ -13631,6 +13647,12 @@ function renderMonthView() {
     monthCalendarTitle.textContent = `${monthNames[currentMonthViewMonth]} ${currentMonthViewYear}`;
   }
 
+  applyMonthModeControls();
+  if (monthViewMode === "ical") {
+    renderMonthReservationView();
+    return;
+  }
+
   const todayString = getBusinessDateValue();
 
   const firstDayOfMonth = new Date(Date.UTC(currentMonthViewYear, currentMonthViewMonth, 1));
@@ -13763,6 +13785,209 @@ function renderMonthView() {
       </tbody>
     </table>
   `;
+}
+
+function canUseMonthIcalMode() {
+  return isAdminUser() || isManagerUser();
+}
+
+function applyMonthModeControls() {
+  if (monthViewMode === "ical" && !canUseMonthIcalMode()) monthViewMode = "tasks";
+  const icalMode = monthViewMode === "ical";
+  const modeToggle = document.getElementById("monthModeToggle");
+  modeToggle?.classList.toggle("hidden", !canUseMonthIcalMode());
+  document.querySelectorAll("[data-month-mode]").forEach((button) => {
+    button.classList.toggle("active", (button.dataset.monthMode === "ical") === icalMode);
+  });
+  monthBranchFilterSelect?.closest(".month-filter-group")?.classList.toggle("hidden", icalMode);
+  monthAddTaskSlot?.classList.toggle("hidden", icalMode);
+  document.getElementById("monthIcalFilterGroup")?.classList.toggle("hidden", !icalMode);
+  document.getElementById("monthIcalSyncLabel")?.classList.toggle("hidden", !icalMode);
+}
+
+function formatMonthReservationDate(dateKey) {
+  return parseDateString(dateKey).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+}
+
+function getMonthReservationDayDiff(fromKey, toKey) {
+  return Math.round((parseDateString(toKey).getTime() - parseDateString(fromKey).getTime()) / 86400000);
+}
+
+function getMonthIcalProperties() {
+  return properties
+    .filter((property) => String(property.ical_url || "").trim() && isPropertyActive(property))
+    .sort((a, b) => String(a.property_name || "").localeCompare(String(b.property_name || "")));
+}
+
+function getMonthIcalReservations() {
+  const propertyIds = new Set(getMonthIcalProperties().map((property) => property.id));
+  return reservations
+    .filter((reservation) => isReservationActive(reservation)
+      && propertyIds.has(reservation.property_id)
+      && (reservation.source === undefined || reservation.source === "ical")
+      && !MONTH_RESERVATION_BLOCK_PATTERN.test(String(reservation.guest_name || "")))
+    .map((reservation) => ({
+      reservation,
+      checkIn: normalizeDateKey(reservation.check_in),
+      checkOut: normalizeDateKey(reservation.check_out),
+    }))
+    .filter((item) => item.checkIn && item.checkOut && item.checkOut >= item.checkIn);
+}
+
+function getMonthReservationColor(propertyId) {
+  let hash = 0;
+  const text = String(propertyId || "");
+  for (let i = 0; i < text.length; i++) hash = (hash * 31 + text.charCodeAt(i)) >>> 0;
+  return `hsl(${hash % 360}, 55%, 36%)`;
+}
+
+function renderMonthReservationView() {
+  const icalProperties = getMonthIcalProperties();
+  if (monthIcalPropertyFilter !== "all" && !icalProperties.some((property) => property.id === monthIcalPropertyFilter)) {
+    monthIcalPropertyFilter = "all";
+  }
+  const filterSelect = document.getElementById("monthIcalPropertySelect");
+  if (filterSelect) {
+    filterSelect.innerHTML = `<option value="all">All Properties</option>${icalProperties.map((property) =>
+      `<option value="${escapeHtml(property.id)}">${escapeHtml(property.property_name)}</option>`).join("")}`;
+    filterSelect.value = monthIcalPropertyFilter;
+  }
+
+  const allItems = getMonthIcalReservations();
+  const syncLabel = document.getElementById("monthIcalSyncLabel");
+  if (syncLabel) {
+    const lastSeen = allItems
+      .map((item) => Date.parse(item.reservation.last_seen_at || ""))
+      .filter(Number.isFinite)
+      .reduce((max, value) => Math.max(max, value), 0);
+    syncLabel.textContent = lastSeen
+      ? `Last iCal Sync: ${new Date(lastSeen).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`
+      : "";
+  }
+
+  const items = allItems.filter((item) => monthIcalPropertyFilter === "all" || item.reservation.property_id === monthIcalPropertyFilter);
+
+  const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  const firstDayOfMonth = new Date(Date.UTC(currentMonthViewYear, currentMonthViewMonth, 1));
+  const gridStart = new Date(firstDayOfMonth);
+  gridStart.setUTCDate(gridStart.getUTCDate() - firstDayOfMonth.getUTCDay());
+  const todayString = getBusinessDateValue();
+
+  const weeksHtml = [];
+  for (let week = 0; week < 6; week++) {
+    const weekStartDate = new Date(gridStart);
+    weekStartDate.setUTCDate(weekStartDate.getUTCDate() + week * 7);
+    const weekStart = formatIsoDateUtc(weekStartDate);
+    const weekEndDate = new Date(weekStartDate);
+    weekEndDate.setUTCDate(weekEndDate.getUTCDate() + 6);
+    const weekEnd = formatIsoDateUtc(weekEndDate);
+
+    // 14 half-day columns: a stay starts at the middle of check-in day and ends at the middle of checkout day.
+    const segments = items
+      .filter((item) => item.checkOut >= weekStart && item.checkIn <= weekEnd)
+      .map((item) => {
+        const continuesFromPrev = item.checkIn < weekStart;
+        const continuesToNext = item.checkOut > weekEnd;
+        const startLine = continuesFromPrev ? 1 : getMonthReservationDayDiff(weekStart, item.checkIn) * 2 + 2;
+        let endLine = continuesToNext ? 15 : getMonthReservationDayDiff(weekStart, item.checkOut) * 2 + 2;
+        if (endLine <= startLine) endLine = startLine + 1;
+        return { ...item, startLine, endLine, continuesFromPrev, continuesToNext };
+      })
+      .sort((a, b) => a.startLine - b.startLine || b.endLine - a.endLine);
+
+    const laneEnds = [];
+    segments.forEach((segment) => {
+      let lane = laneEnds.findIndex((end) => end <= segment.startLine);
+      if (lane === -1) {
+        lane = laneEnds.length;
+        laneEnds.push(0);
+      }
+      laneEnds[lane] = segment.endLine;
+      segment.lane = lane;
+    });
+    const laneCount = Math.max(1, laneEnds.length);
+
+    const dayCellsHtml = Array.from({ length: 7 }, (_, dayIndex) => {
+      const date = new Date(weekStartDate);
+      date.setUTCDate(date.getUTCDate() + dayIndex);
+      const dateKey = formatIsoDateUtc(date);
+      const classes = [
+        "month-res-day",
+        date.getUTCMonth() === currentMonthViewMonth ? "" : "other-month",
+        dateKey === todayString ? "today-cell" : ""
+      ].filter(Boolean).join(" ");
+      return `<div class="${classes}" style="grid-column: ${dayIndex * 2 + 1} / span 2; grid-row: 1 / span ${laneCount + 1};"><span class="month-day-number">${date.getUTCDate()}</span></div>`;
+    }).join("");
+
+    const barsHtml = segments.map((segment) => {
+      const { reservation } = segment;
+      const propertyName = getPropertyName(reservation.property_id);
+      const classes = [
+        "month-res-bar",
+        segment.continuesFromPrev ? "continues-prev" : "",
+        segment.continuesToNext ? "continues-next" : ""
+      ].filter(Boolean).join(" ");
+      const label = `${propertyName} - ${formatMonthReservationDate(segment.checkIn)} to ${formatMonthReservationDate(segment.checkOut)}`;
+      const guestCount = Number(reservation.guest_count);
+      const barText = Number.isFinite(guestCount) && reservation.guest_count !== null
+        ? `${propertyName} \u2022 ${guestCount} guest${guestCount === 1 ? "" : "s"}`
+        : propertyName;
+      return `<button type="button" class="${classes}" draggable="false" style="grid-column: ${segment.startLine} / ${segment.endLine}; grid-row: ${segment.lane + 2}; background: ${getMonthReservationColor(reservation.property_id)};" title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}" onclick="openMonthReservationDetail('${escapeHtml(reservation.id)}')"><span>${escapeHtml(barText)}</span></button>`;
+    }).join("");
+
+    weeksHtml.push(`<div class="month-res-week" style="grid-template-rows: 26px repeat(${laneCount}, 26px);">${dayCellsHtml}${barsHtml}</div>`);
+  }
+
+  const emptyNote = items.length ? "" : `<div class="empty">No active iCal reservations to display.</div>`;
+  monthTasksCalendarContainer.innerHTML = `
+    <div class="month-res-calendar">
+      <div class="month-res-header">${dayNames.map((name) => `<div>${name}</div>`).join("")}</div>
+      ${weeksHtml.join("")}
+    </div>
+    ${emptyNote}
+  `;
+}
+
+function closeMonthReservationDetail() {
+  document.getElementById("monthReservationModal")?.remove();
+}
+
+function openMonthReservationDetail(reservationId) {
+  const reservation = reservations.find((item) => String(item.id) === String(reservationId));
+  if (!reservation) return;
+  closeMonthReservationDetail();
+
+  const checkIn = normalizeDateKey(reservation.check_in);
+  const checkOut = normalizeDateKey(reservation.check_out);
+  const nights = getMonthReservationDayDiff(checkIn, checkOut);
+  const lastSeen = Date.parse(reservation.last_seen_at || "");
+  const rows = [
+    ["Property", getPropertyName(reservation.property_id)],
+    ["Check-in", formatMonthReservationDate(checkIn)],
+    ["Checkout", formatMonthReservationDate(checkOut)],
+    ["Nights", String(nights)],
+    ...(reservation.guest_count !== null && reservation.guest_count !== undefined ? [["Guests", String(reservation.guest_count)]] : []),
+    ["Status", "Active"],
+    ...(Number.isFinite(lastSeen) ? [["Last seen in iCal", new Date(lastSeen).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })]] : []),
+  ];
+
+  const modal = document.createElement("div");
+  modal.id = "monthReservationModal";
+  modal.className = "modal";
+  modal.innerHTML = `
+    <div class="modal-card month-move-task-modal-card" role="dialog" aria-modal="true" aria-label="iCal reservation details">
+      <h2>iCal Reservation</h2>
+      <dl class="month-res-detail">
+        ${rows.map(([label, value]) => `<dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd>`).join("")}
+      </dl>
+      <p class="month-res-detail-note">Read-only. Synced from the property's iCal feed.</p>
+      <div class="modal-actions"><button type="button" onclick="closeMonthReservationDetail()">Close</button></div>
+    </div>
+  `;
+  modal.addEventListener("click", (event) => {
+    if (event.target === modal) closeMonthReservationDetail();
+  });
+  document.body.appendChild(modal);
 }
 
 function renderWeekView() {

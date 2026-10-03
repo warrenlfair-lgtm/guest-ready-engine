@@ -109,7 +109,7 @@ function createSuccessResponse(
 function parseICalReservations(icalText: string) {
   const unfolded = icalText.replace(/\r?\n[ \t]/g, "");
   const events = unfolded.split(/BEGIN:VEVENT/i).slice(1);
-  const reservations: Array<{ check_in: string; check_out: string | null; summary: string | null; uid: string | null; cancelled: boolean }> = [];
+  const reservations: Array<{ check_in: string; check_out: string | null; summary: string | null; uid: string | null; cancelled: boolean; guest_count: number | null }> = [];
 
   for (const eventText of events) {
     const checkInMatch = eventText.match(/DTSTART(?:;VALUE=DATE)?:(\d{8})(?:T\d{6}Z?)?/i);
@@ -127,7 +127,9 @@ function parseICalReservations(icalText: string) {
     const summary = summaryMatch ? summaryMatch[1].trim() : null;
     const uid = uidMatch ? uidMatch[1].trim() || null : null;
     const cancelled = statusMatch ? /cancelled/i.test(statusMatch[1]) : false;
-    reservations.push({ check_in, check_out, summary, uid, cancelled });
+    const guestMatch = eventText.match(/Number of Guests:\s*(\d+)/i);
+    const guest_count = guestMatch ? Number(guestMatch[1]) : null;
+    reservations.push({ check_in, check_out, summary, uid, cancelled, guest_count });
   }
 
   return reservations;
@@ -618,6 +620,7 @@ Deno.serve(async (req: Request) => {
           guest_name: guestName,
           check_in: reservation.check_in,
           check_out: reservation.check_out,
+          guest_count: reservation.guest_count,
           status: "active",
           cancelled_at: null,
           imported_at: new Date().toISOString(),
@@ -653,6 +656,7 @@ Deno.serve(async (req: Request) => {
         check_in: reservation.check_in,
         check_out: reservation.check_out || null,
         reservation_uid: reservation.uid || null,
+        guest_count: reservation.guest_count,
         status: "active",
         imported_at: new Date().toISOString(),
         last_seen_at: new Date().toISOString(),

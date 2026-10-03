@@ -157,6 +157,15 @@
           <button type="button" id="nextMonthBtn" class="secondary-btn">Next Month &raquo;</button>
           <span id="monthCalendarTitle" class="month-calendar-title">August 2026</span>
         </div>
+        <div id="monthModeToggle" class="month-mode-toggle hidden">
+          <button type="button" class="secondary-btn active" data-month-mode="tasks">Tasks</button>
+          <button type="button" class="secondary-btn" data-month-mode="ical">iCal Reservations</button>
+        </div>
+        <div id="monthIcalFilterGroup" class="month-filter-group hidden">
+          <label for="monthIcalPropertySelect">Property:</label>
+          <select id="monthIcalPropertySelect"><option value="all">All Properties</option></select>
+        </div>
+        <span id="monthIcalSyncLabel" class="month-ical-sync-label hidden"></span>
         <div class="month-filter-group">
           <label for="monthBranchFilterSelect">Tasks:</label>
           <select id="monthBranchFilterSelect">
