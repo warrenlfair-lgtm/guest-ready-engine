@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="referrer" content="no-referrer">
+  <meta name="robots" content="noindex,nofollow,noarchive">
+  <title>Customer Invoice | Fair Ventures</title>
+  <link rel="stylesheet" href="invoice.css">
+</head>
+<body>
+  <main class="invoice-shell">
+    <section id="invoiceLoading" class="invoice-state" aria-live="polite"><p>Loading invoice...</p></section>
+    <section id="invoiceUnavailable" class="invoice-state hidden" aria-live="polite">
+      <h1>Invoice unavailable</h1>
+      <p>This invoice link is invalid, revoked, or no longer available.</p>
+    </section>
+    <article id="invoiceContent" class="invoice-paper hidden">
+      <header class="invoice-brand">
+        <img id="invoiceLogo" class="hidden" alt="">
+        <div><p id="invoiceBrandName" class="brand-name"></p><p id="invoiceTagline" class="brand-tagline"></p></div>
+        <span id="invoiceStatus" class="status-badge"></span>
+      </header>
+      <div class="invoice-title-row">
+        <div><p class="eyebrow">Customer Invoice</p><h1 id="invoiceNumber"></h1></div>
+        <div class="invoice-dates"><p><span>Invoice date</span><strong id="invoiceDate"></strong></p><p><span>Due date</span><strong id="invoiceDueDate"></strong></p><p><span>Service period</span><strong id="invoicePeriod"></strong></p><p><span>Payment terms</span><strong id="invoicePaymentTerms"></strong></p></div>
+      </div>
+      <section class="bill-to">
+        <h2>Bill to</h2>
+        <p id="invoiceClient"></p>
+        <p id="invoiceBillingCompany" class="hidden"></p>
+        <p id="invoiceBillingReference" class="hidden"></p>
+        <p id="invoiceBillingAddress" class="hidden"></p>
+      </section>
+      <section id="invoiceProperties" class="properties-section hidden"><h2>Property</h2><div id="invoicePropertyList"></div></section>
+      <div class="items-wrap">
+        <table class="items-table">
+          <thead><tr><th>Description</th><th>Service date</th><th>Qty</th><th>Rate</th><th class="money">Amount</th></tr></thead>
+          <tbody id="invoiceItems"></tbody>
+        </table>
+      </div>
+      <section class="totals" aria-label="Invoice totals">
+        <p><span>Subtotal</span><strong id="invoiceSubtotal"></strong></p>
+        <p id="invoiceTaxRow" class="hidden"><span>Tax</span><strong id="invoiceTax"></strong></p>
+        <p class="grand-total"><span>Total</span><strong id="invoiceTotal"></strong></p>
+        <p class="balance-due"><span>Balance due</span><strong id="invoiceBalance"></strong></p>
+      </section>
+      <section id="invoiceNotesSection" class="invoice-notes hidden"><h2>Notes</h2><p id="invoiceNotes"></p></section>
+      <footer class="invoice-footer">
+        <div id="invoiceContact"></div>
+        <p>Thank you for your business.</p>
+      </footer>
+    </article>
+  </main>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="invoice.js"></script>
+</body>
+</html>

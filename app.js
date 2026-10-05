@@ -8,6 +8,7 @@ let chemicals = [];
 let technicians = [];
 let invoices = [];
 let invoiceItems = [];
+let invoiceCustomerLinksByInvoiceId = new Map();
 let expenses = [];
 let appUsers = [];
 let propertyContractRevenueHistory = [];
@@ -10462,6 +10463,7 @@ function renderBillingReport() {
 
 async function loadInvoices() {
   invoiceItems = [];
+  invoiceCustomerLinksByInvoiceId = new Map();
   const { data, error } = await supabaseClient
     .from("invoices")
     .select("*")
@@ -10481,6 +10483,22 @@ async function loadInvoices() {
 
   const invoiceIds = invoices.map((invoice) => invoice.id).filter(Boolean);
   if (!invoiceIds.length) return;
+
+  const eligibleInvoiceIds = invoices
+    .filter((invoice) => ["finalized", "sent", "paid"].includes(String(invoice.status || "").toLowerCase()))
+    .map((invoice) => invoice.id);
+  if (eligibleInvoiceIds.length && isAdminUser()) {
+    const { data: customerLinks, error: customerLinksError } = await supabaseClient
+      .from("invoice_customer_links")
+      .select("invoice_id, created_at, last_viewed_at, view_count")
+      .in("invoice_id", eligibleInvoiceIds)
+      .is("revoked_at", null);
+    if (!customerLinksError) {
+      invoiceCustomerLinksByInvoiceId = new Map((customerLinks || []).map((link) => [String(link.invoice_id), link]));
+    } else if (!String(customerLinksError.message || "").toLowerCase().includes("invoice_customer_links")) {
+      console.warn("Could not load customer invoice link status:", customerLinksError.message);
+    }
+  }
 
   const { data: invoiceItemsData, error: invoiceItemsError } = await supabaseClient
     .from("invoice_items")
@@ -12388,6 +12406,11 @@ function renderInvoiceHistory() {
     const showDeleteButton = deleteMode === "draft" || deleteMode === "finalized" || deleteMode === "protected";
     const deleteHandler = deleteMode === "draft" ? `deleteInvoiceDraft('${invoice.id}')` : `deleteFinalizedOrProtectedInvoice('${invoice.id}')`;
     const invoiceStatus = String(invoice.status || "draft").toLowerCase();
+    const customerLink = invoiceCustomerLinksByInvoiceId.get(String(invoice.id));
+    const canShareInvoice = isAdminUser() && ["finalized", "sent", "paid"].includes(invoiceStatus);
+    const viewedLabel = customerLink?.last_viewed_at
+      ? `Viewed ${new Date(customerLink.last_viewed_at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`
+      : "Not viewed";
     const sentCheckboxDisabled = invoiceStatus === "draft" || invoiceStatus === "void" || invoiceStatus === "paid";
     const sentCheckboxChecked = invoiceStatus === "sent" || invoiceStatus === "paid";
     return `
@@ -12411,7 +12434,9 @@ function renderInvoiceHistory() {
         </td>
         <td class="invoice-history-actions">
           <button type="button" onclick="openInvoiceDraft('${invoice.id}')">Open</button>
+          ${canShareInvoice ? `<button type="button" onclick="openCustomerInvoiceShare('${invoice.id}')">Share Invoice</button>` : ""}
           ${showDeleteButton ? `<button type="button" class="delete-btn" onclick="${deleteHandler}">Delete</button>` : ""}
+          ${canShareInvoice ? `<span class="customer-invoice-link-status">${customerLink ? `Customer Link Active · ${viewedLabel}` : "No Customer Link"}</span>` : ""}
         </td>
       </tr>
     `;
@@ -12440,6 +12465,144 @@ function renderInvoiceHistory() {
       </table>
     </div>
   `;
+}
+
+function closeCustomerInvoiceShare() {
+  document.getElementById("customerInvoiceShareModal")?.remove();
+}
+
+function buildCustomerInvoiceUrl(token) {
+  const isLocalPreview = ["localhost", "127.0.0.1"].includes(window.location.hostname)
+    || window.location.protocol === "file:";
+  const url = new URL(isLocalPreview ? "invoice.html" : `/i/${token}`, window.location.href);
+  url.search = "";
+  url.hash = "";
+  if (isLocalPreview) url.searchParams.set("t", token);
+  return url.toString();
+}
+
+async function getOrCreateCustomerInvoiceToken(invoiceId) {
+  const { data: token, error } = await supabaseClient.rpc("admin_generate_customer_invoice_link", {
+    target_invoice_id: invoiceId,
+  });
+  if (error || !token) throw new Error(error?.message || "Could not create the customer invoice link.");
+  return token;
+}
+
+async function copyCustomerInvoiceContent(invoiceId, kind) {
+  if (!requireAdminAccess()) return;
+  const invoice = invoices.find((row) => String(row.id) === String(invoiceId));
+  if (!invoice || !["finalized", "sent", "paid"].includes(String(invoice.status || "").toLowerCase())) {
+    alert("Only finalized invoices can be shared.");
+    return;
+  }
+
+  const customerWindow = kind === "open" ? window.open("", "_blank") : null;
+  if (kind === "open" && !customerWindow) {
+    alert("Allow pop-ups to open the customer invoice in a new tab.");
+    return;
+  }
+  if (customerWindow) customerWindow.opener = null;
+
+  try {
+    const token = await getOrCreateCustomerInvoiceToken(invoiceId);
+    const url = buildCustomerInvoiceUrl(token);
+    const link = invoiceCustomerLinksByInvoiceId.get(String(invoiceId));
+    invoiceCustomerLinksByInvoiceId.set(String(invoiceId), link || { invoice_id: invoiceId, created_at: new Date().toISOString() });
+    const shareStatus = document.querySelector("#customerInvoiceShareModal .customer-invoice-share-status");
+    if (shareStatus) shareStatus.textContent = "Customer Link Active. Repeated copies use the same secure URL.";
+    if (kind === "open") {
+      customerWindow.location.replace(url);
+    } else {
+      const branding = getCompanyBrandingForBranch(getInvoiceCompanyBranch(invoice));
+      const amountDue = String(invoice.status || "").toLowerCase() === "paid" ? 0 : Number(invoice.total || 0);
+      const message = [
+        branding.companyName,
+        `Invoice #${invoice.invoice_number} — ${toMoney(amountDue)}${amountDue === 0 && String(invoice.status || "").toLowerCase() === "paid" ? " paid" : " due"}`,
+        "",
+        "Your invoice is ready to view:",
+        url,
+        "",
+        "Thank you!",
+      ].join("\n");
+      await copyTextToClipboard(kind === "message" ? message : url);
+      alert(kind === "message" ? "Invoice text message copied." : "Invoice link copied.");
+    }
+    renderInvoiceHistory();
+  } catch (error) {
+    customerWindow?.close();
+    alert(`Could not prepare the customer invoice link: ${error.message}`);
+  }
+}
+
+async function openCustomerInvoiceShare(invoiceId) {
+  if (!requireAdminAccess()) return;
+  const invoice = invoices.find((row) => String(row.id) === String(invoiceId));
+  if (!invoice || !["finalized", "sent", "paid"].includes(String(invoice.status || "").toLowerCase())) {
+    alert("Finalize the invoice before sharing it.");
+    return;
+  }
+  closeCustomerInvoiceShare();
+  const modal = document.createElement("div");
+  modal.id = "customerInvoiceShareModal";
+  modal.className = "modal customer-invoice-share-modal";
+  modal.innerHTML = `
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="customerInvoiceShareTitle">
+      <h2 id="customerInvoiceShareTitle">Share Invoice ${escapeHtml(invoice.invoice_number || "")}</h2>
+      <p class="customer-invoice-share-status" aria-live="polite">Preparing secure customer link...</p>
+      <div class="customer-invoice-share-actions">
+        <button type="button" data-customer-link-action="link" disabled>Copy Invoice Link</button>
+        <button type="button" data-customer-link-action="message" disabled>Copy Text Message</button>
+        <button type="button" data-customer-link-action="open" disabled>Open Customer View</button>
+        <button type="button" class="delete-btn" data-customer-link-action="revoke" disabled>Revoke Link</button>
+      </div>
+      <div class="modal-actions"><button type="button" data-customer-link-action="close">Close</button></div>
+    </div>
+  `;
+  modal.addEventListener("click", (event) => {
+    if (event.target === modal) closeCustomerInvoiceShare();
+  });
+  document.body.appendChild(modal);
+
+  const status = modal.querySelector(".customer-invoice-share-status");
+  const actions = [...modal.querySelectorAll("[data-customer-link-action]")];
+  const disableActions = (disabled) => actions.forEach((button) => {
+    if (button.dataset.customerLinkAction !== "close") button.disabled = disabled;
+  });
+  actions.forEach((button) => button.addEventListener("click", async () => {
+    const kind = button.dataset.customerLinkAction;
+    if (kind === "close") return closeCustomerInvoiceShare();
+    if (kind === "revoke") {
+      if (!confirm("Revoke this customer invoice link? The current URL will stop working.")) return;
+      disableActions(true);
+      const { error } = await supabaseClient.rpc("admin_revoke_customer_invoice_link", { target_invoice_id: invoiceId });
+      if (error) {
+        status.textContent = `Could not revoke link: ${error.message}`;
+        disableActions(false);
+        return;
+      }
+      invoiceCustomerLinksByInvoiceId.delete(String(invoiceId));
+      status.textContent = "Link revoked. Selecting a copy or open action will generate a new link.";
+      disableActions(false);
+      renderInvoiceHistory();
+      return;
+    }
+    await copyCustomerInvoiceContent(invoiceId, kind);
+  }));
+
+  try {
+    await getOrCreateCustomerInvoiceToken(invoiceId);
+    modal.dataset.customerInvoiceTokenReady = "true";
+    status.textContent = "Customer Link Active. Repeated copies use the same secure URL.";
+    disableActions(false);
+    invoiceCustomerLinksByInvoiceId.set(String(invoiceId), invoiceCustomerLinksByInvoiceId.get(String(invoiceId)) || {
+      invoice_id: invoiceId,
+      created_at: new Date().toISOString(),
+    });
+    renderInvoiceHistory();
+  } catch (error) {
+    status.textContent = `Could not prepare link: ${error.message}`;
+  }
 }
 
 function printInvoicePreview() {

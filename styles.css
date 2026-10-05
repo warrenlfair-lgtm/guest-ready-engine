@@ -3536,6 +3536,38 @@ textarea{
     align-items: center;
     gap: 8px;
     vertical-align: middle;
+    flex-wrap: wrap;
+}
+
+.customer-invoice-link-status {
+    width: 100%;
+    color: #64748b;
+    font-size: 11px;
+}
+
+.customer-invoice-share-modal {
+    z-index: 12000;
+    overflow-y: auto;
+    padding: 20px 12px;
+}
+
+.customer-invoice-share-modal .modal-card {
+    width: 520px;
+    max-height: 100%;
+    overflow-y: auto;
+}
+
+.customer-invoice-share-status {
+    color: #475569;
+}
+
+.customer-invoice-share-actions {
+    display: grid;
+    gap: 8px;
+}
+
+.customer-invoice-share-actions button {
+    min-height: 44px;
 }
 
 .billing-report-amount,
