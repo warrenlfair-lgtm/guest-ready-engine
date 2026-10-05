@@ -5,7 +5,8 @@ const invoiceClient = window.supabase.createClient(INVOICE_SUPABASE_URL, INVOICE
 });
 
 const invoiceParams = new URLSearchParams(window.location.search);
-const invoiceToken = invoiceParams.get("t") || invoiceParams.get("token") || "";
+const invoicePathMatch = window.location.pathname.match(/^\/i\/([0-9a-f]{32}|[0-9a-f]{64})$/i);
+const invoiceToken = invoicePathMatch?.[1] || invoiceParams.get("t") || invoiceParams.get("token") || "";
 const loadingPanel = document.getElementById("invoiceLoading");
 const unavailablePanel = document.getElementById("invoiceUnavailable");
 const invoiceContent = document.getElementById("invoiceContent");
