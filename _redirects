@@ -1,1 +1,2 @@
 /i/:token /invoice.html?t=:token 200
+/vp2-work-order/:token /vp2_action_plan.html?token=:token 200

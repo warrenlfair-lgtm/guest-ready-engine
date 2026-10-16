@@ -72,6 +72,7 @@
     <button type="button" class="service-workspace-btn" data-service-workspace="lawn">Lawn</button>
     <button type="button" class="service-workspace-btn" data-service-workspace="maintenance">Maintenance</button>
     <button type="button" class="service-workspace-btn" data-service-workspace="housekeeping">Housekeeping</button>
+    <button type="button" class="service-workspace-btn admin-only" data-service-workspace="vp2">VP²</button>
   </div>
 
   <div class="top-actions admin-only">
@@ -218,6 +219,82 @@
     
     <div id="propertyList"></div>
   </section>
+
+  <section id="vp2View" class="view-panel admin-only">
+    <header class="vp2-brand-panel">
+      <img class="vp2-brand-image" src="assets/vp2-logo.png" alt="VP² Virtual Pool Pro. Remote Pool Care. Real Results.">
+      <div class="vp2-brand-copy">
+        <p class="vp2-affiliation">A Guest Ready Services Company</p>
+      </div>
+    </header>
+    <p id="vp2Status" class="vp2-status hidden" role="status" aria-live="polite"></p>
+
+    <div class="vp2-metrics" aria-label="Virtual Pool Pro dashboard summary">
+      <article class="vp2-metric"><span>Enrolled properties</span><strong id="vp2EnrolledCount">0</strong></article>
+      <article class="vp2-metric"><span>Properties with readings</span><strong id="vp2ReadingsCount">0</strong></article>
+      <article class="vp2-metric"><span>Upcoming reviews</span><strong id="vp2UpcomingCount">0</strong></article>
+      <article class="vp2-metric"><span>Reviews needing attention</span><strong id="vp2AttentionCount">0</strong></article>
+      <article class="vp2-metric"><span>Action plans</span><strong id="vp2ApprovalCount">0</strong></article>
+      <article class="vp2-metric"><span>Open technician assignments</span><strong id="vp2AssignmentsCount">0</strong></article>
+      <article class="vp2-metric"><span>Completed this month</span><strong id="vp2CompletedCount">0</strong></article>
+      <article class="vp2-metric vp2-revenue-metric"><span>Monthly VP² revenue</span><strong id="vp2RevenueAmount">$0.00</strong></article>
+    </div>
+
+    <div class="vp2-content-grid">
+      <section class="vp2-panel"><h3>Enrolled properties</h3><div id="vp2EnrolledProperties" class="vp2-list"></div></section>
+      <section class="vp2-panel"><h3>Latest chemistry readings</h3><div id="vp2LatestReadings" class="vp2-list"></div></section>
+      <section class="vp2-panel"><h3>Upcoming reviews</h3><div id="vp2UpcomingReviews" class="vp2-list"></div></section>
+      <section class="vp2-panel vp2-attention-panel"><h3>Reviews requiring attention</h3><div id="vp2AttentionReviews" class="vp2-list"></div></section>
+      <section class="vp2-panel"><h3>Technician Action Plans</h3><div id="vp2AwaitingPlans" class="vp2-list"></div></section>
+      <section class="vp2-panel"><h3>Technician assignments</h3><div id="vp2OpenWorkOrders" class="vp2-list"></div></section>
+      <section class="vp2-panel vp2-completed-panel"><h3>Recently completed reviews</h3><div id="vp2CompletedReviews" class="vp2-list"></div></section>
+    </div>
+  </section>
+
+  <div id="vp2ActionPlanModal" class="modal hidden">
+    <div class="modal-card vp2-action-plan-modal-card" role="dialog" aria-modal="true" aria-labelledby="vp2ActionPlanTitle">
+      <header class="edit-task-modal-header">
+        <div>
+          <h2 id="vp2ActionPlanTitle">VP² Technician Action Plan</h2>
+          <p><strong id="vp2ActionPlanPropertyName"></strong><span> · </span><span id="vp2ActionPlanDate"></span></p>
+        </div>
+        <button type="button" class="modal-close-x" aria-label="Close action plan" onclick="closeVp2ActionPlan()">×</button>
+      </header>
+      <div class="edit-task-modal-body vp2-action-plan-body">
+        <div id="vp2ActionPlanEditor">
+          <div class="vp2-plan-section">
+            <h3>Water Readings</h3>
+            <div class="vp2-plan-readings-grid">
+              <label>Free chlorine<input id="vp2PlanFreeChlorine" type="number" min="0" step="0.01"></label>
+              <label>pH<input id="vp2PlanPh" type="number" min="0" max="14" step="0.01"></label>
+              <label>Total alkalinity<input id="vp2PlanAlkalinity" type="number" min="0" step="1"></label>
+            </div>
+            <label class="vp2-plan-wide-field">Water analysis<textarea id="vp2PlanAnalysis" rows="4" placeholder="Describe the water condition and your analysis"></textarea></label>
+          </div>
+
+          <div class="vp2-plan-section">
+            <h3>Standard Pool Service Tasks</h3>
+            <ol id="vp2StandardActionList" class="vp2-standard-action-list"></ol>
+            <div class="vp2-plan-section-heading"><h3>Additional Recommended Actions</h3><button type="button" class="secondary-btn" onclick="addVp2ActionItem()">+ Add Action</button></div>
+            <div id="vp2ActionItems" class="vp2-action-items"></div>
+          </div>
+        </div>
+        <div id="vp2ActionPlanPreview" class="vp2-action-plan-preview hidden"></div>
+        <p id="vp2ActionPlanStatus" class="vp2-action-plan-status" role="status" aria-live="polite"></p>
+        <div id="vp2ActionPlanLinkPanel" class="vp2-action-plan-link hidden">
+          <label for="vp2ActionPlanLink">Technician Link</label>
+          <input id="vp2ActionPlanLink" type="url" readonly>
+          <div><button type="button" class="secondary-btn" onclick="copyVp2ActionPlanLink('link')">Copy Link</button><button type="button" class="secondary-btn" onclick="copyVp2ActionPlanLink('message')">Copy Text Message</button><button type="button" class="secondary-btn" onclick="openVp2TechnicianLink()">Open Technician View</button></div>
+        </div>
+      </div>
+      <footer class="modal-actions vp2-action-plan-footer">
+        <button id="vp2ActionPlanSaveBtn" type="button" class="secondary-btn" onclick="saveVp2ActionPlan()">Save</button>
+        <button id="vp2ActionPlanPreviewBtn" type="button" class="secondary-btn" onclick="previewVp2ActionPlan()">Preview</button>
+        <button id="vp2ActionPlanGenerateBtn" type="button" onclick="generateVp2ActionPlanLink()">Generate Link</button>
+        <button type="button" class="secondary-btn" onclick="closeVp2ActionPlan()">Close</button>
+      </footer>
+    </div>
+  </div>
 
   <section id="pipelineView" class="view-panel admin-only">
     <div class="view-header pipeline-header">
@@ -956,6 +1033,33 @@
         <option value="yes" selected>Yes</option>
         <option value="no">No</option>
       </select>
+
+      <div class="property-service-section vp2-property-section">
+        <h3>VP² — Virtual Pool Pro</h3>
+        <p id="vp2PropertySetupNotice" class="vp2-property-notice">Run the VP² core migration to enable these settings.</p>
+        <label for="propertyVp2Enabled">VP² Enrollment</label>
+        <select id="propertyVp2Enabled" disabled>
+          <option value="no" selected>Not enrolled</option>
+          <option value="yes">Enrolled</option>
+        </select>
+        <label for="propertyVp2ServiceDay">VP² Service Day</label>
+        <select id="propertyVp2ServiceDay" disabled>
+          <option>Monday</option><option>Tuesday</option><option selected>Wednesday</option>
+          <option>Thursday</option><option>Friday</option><option>Saturday</option><option>Sunday</option>
+        </select>
+        <label for="propertyVp2StartDate">VP² Service Start Date</label>
+        <input id="propertyVp2StartDate" type="date" disabled>
+        <label for="propertyVp2WeekStartDay">Billing Week Starts</label>
+        <select id="propertyVp2WeekStartDay" disabled>
+          <option value="Monday" selected>Monday</option><option value="Tuesday">Tuesday</option>
+          <option value="Wednesday">Wednesday</option><option value="Thursday">Thursday</option>
+          <option value="Friday">Friday</option><option value="Saturday">Saturday</option><option value="Sunday">Sunday</option>
+        </select>
+        <label for="propertyVp2FirstReviewPrice">First Review Price</label>
+        <input id="propertyVp2FirstReviewPrice" type="number" min="0" step="0.01" value="25.00" disabled>
+        <label for="propertyVp2AdditionalReviewPrice">Additional Review Price</label>
+        <input id="propertyVp2AdditionalReviewPrice" type="number" min="0" step="0.01" value="15.00" disabled>
+      </div>
 
       <div id="propertyBiweeklyAnchorDateRow" class="hidden">
         <label>First / Next Cleaning Date</label>

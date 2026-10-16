@@ -19,7 +19,7 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-const SYNC_VERSION = "ical-source-reconciliation-v1";
+const SYNC_VERSION = "ical-vp2-scheduling-v1";
 
 function createErrorResponse(message: string, status: number) {
   return new Response(JSON.stringify({ success: false, error: message }), {
@@ -75,6 +75,9 @@ function createSuccessResponse(
     guestReadyTasksCreated?: number;
     housekeepingTasksCreated?: number;
     housekeepingTasksUpdated?: number;
+    vp2CheckoutReviewsCreated?: number;
+    vp2WeeklyReviewsCreated?: number;
+    vp2SchedulingError?: string;
     staleTasksCancelled?: number;
     tasksRequiringReview?: number;
     protectedTasksPreserved?: number;
@@ -94,6 +97,9 @@ function createSuccessResponse(
     guestReadyTasksCreated: extras.guestReadyTasksCreated ?? 0,
     housekeepingTasksCreated: extras.housekeepingTasksCreated ?? 0,
     housekeepingTasksUpdated: extras.housekeepingTasksUpdated ?? 0,
+    vp2CheckoutReviewsCreated: extras.vp2CheckoutReviewsCreated ?? 0,
+    vp2WeeklyReviewsCreated: extras.vp2WeeklyReviewsCreated ?? 0,
+    vp2SchedulingError: extras.vp2SchedulingError ?? null,
     staleTasksCancelled: extras.staleTasksCancelled ?? 0,
     tasksRequiringReview: extras.tasksRequiringReview ?? 0,
     protectedTasksPreserved: extras.protectedTasksPreserved ?? 0,
@@ -345,6 +351,9 @@ Deno.serve(async (req: Request) => {
   let guestReadyTasksCreated = 0;
   let housekeepingTasksCreated = 0;
   let housekeepingTasksUpdated = 0;
+  let vp2CheckoutReviewsCreated = 0;
+  let vp2WeeklyReviewsCreated = 0;
+  let vp2SchedulingError: string | undefined;
   let staleTasksCancelled = 0;
   let tasksRequiringReview = 0;
   let protectedTasksPreserved = 0;
@@ -358,6 +367,9 @@ Deno.serve(async (req: Request) => {
     guestReadyTasksCreated,
     housekeepingTasksCreated,
     housekeepingTasksUpdated,
+    vp2CheckoutReviewsCreated,
+    vp2WeeklyReviewsCreated,
+    vp2SchedulingError,
     staleTasksCancelled,
     tasksRequiringReview,
     protectedTasksPreserved,
@@ -405,6 +417,7 @@ Deno.serve(async (req: Request) => {
       id: string;
       ical_url: string | null;
       active: boolean | null;
+      vp2_enabled: boolean | null;
       pool_service_active: boolean | null;
       housekeeping_service_active: boolean | null;
       housekeeping_default_charge: number | null;
@@ -422,9 +435,26 @@ Deno.serve(async (req: Request) => {
     const propertyStartDate = normalizeDateKey(property.task_generation_start_date);
     const poolServiceActive = property.pool_service_active !== false;
     const housekeepingServiceActive = property.housekeeping_service_active === true;
-    if (property.active === false || (!poolServiceActive && !housekeepingServiceActive)) {
-      return createSuccessResponse(reservationsCreated, tasksCreated, { reservationsParsed, activeReservations: activeReservationCount, oldIgnored, weeklyTasksCreated, guestReadyTasksCreated, housekeepingTasksCreated, housekeepingTasksUpdated });
+    const vp2Enabled = property.vp2_enabled === true;
+    if (property.active === false || (!poolServiceActive && !housekeepingServiceActive && !vp2Enabled)) {
+      return createSuccessResponse(reservationsCreated, tasksCreated, getSyncExtras());
     }
+
+    const syncVp2Reviews = async () => {
+      if (!vp2Enabled) return;
+      const { data, error } = await supabase.rpc("admin_sync_vp2_reviews", {
+        target_property_id: propertyId,
+      });
+      if (error) {
+        vp2SchedulingError = error.message || "VP² review scheduling failed.";
+        console.error("VP² review scheduling failed", vp2SchedulingError);
+        return;
+      }
+      const result = Array.isArray(data) ? data[0] : data;
+      vp2CheckoutReviewsCreated += Number(result?.checkout_reviews_created || 0);
+      vp2WeeklyReviewsCreated += Number(result?.weekly_reviews_created || 0);
+    };
+
     console.log("STEP 1 property loaded");
     if (!property.ical_url) {
       return createErrorResponse("Property does not have an iCal URL.", 422);
@@ -635,6 +665,7 @@ Deno.serve(async (req: Request) => {
     }
 
     if (!activeReservations.length) {
+      await syncVp2Reviews();
       return createSuccessResponse(reservationsCreated, tasksCreated, getSyncExtras());
     }
 
@@ -695,6 +726,8 @@ Deno.serve(async (req: Request) => {
       ((currentReservationRows || []) as CurrentReservationRow[])
         .map((reservation) => [getReservationIdentityKey(reservation), reservation])
     );
+
+    await syncVp2Reviews();
 
     if (housekeepingServiceActive) {
       const housekeepingDefaultCharge = Math.max(0, Number(property.housekeeping_default_charge || 0));
@@ -854,7 +887,7 @@ Deno.serve(async (req: Request) => {
     }
 
     if (!poolServiceActive) {
-      return createSuccessResponse(reservationsCreated, tasksCreated, { reservationsParsed, activeReservations: activeReservationCount, oldIgnored, weeklyTasksCreated, guestReadyTasksCreated, housekeepingTasksCreated, housekeepingTasksUpdated });
+      return createSuccessResponse(reservationsCreated, tasksCreated, getSyncExtras());
     }
 
     const standardDay = property.standard_service_day || "Wednesday";

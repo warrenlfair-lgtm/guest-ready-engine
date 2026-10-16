@@ -15,6 +15,16 @@ let propertyContractRevenueHistory = [];
 let taskScheduleHistoryByTaskId = new Map();
 let pipelineJobs = [];
 let pipelineApprovals = [];
+let vp2DashboardData = null;
+let vp2SchemaAvailable = false;
+let vp2DashboardError = "";
+let vp2SchedulingError = "";
+let vp2ReviewCharges = [];
+let vp2BillingError = "";
+let vp2ActionPlansError = "";
+let currentVp2ActionPlanReview = null;
+let currentVp2ActionPlanId = null;
+let currentVp2TechnicianUrl = "";
 let propertyContractRevenueHistoryAvailable = true;
 let invoicePropertyLabelById = new Map();
 let currentInvoiceDraft = null;
@@ -38,6 +48,22 @@ const SERVICE_BRANCH_POOL = "pool";
 const SERVICE_BRANCH_LAWN = "lawn";
 const SERVICE_BRANCH_MAINTENANCE = "maintenance";
 const SERVICE_BRANCH_HOUSEKEEPING = "housekeeping";
+const SERVICE_BRANCH_VP2 = "vp2";
+const VP2_STANDARD_ACTIONS = [
+  "Brush pool walls, steps, and floor",
+  "Skim surface and remove debris",
+  "Check filter pressure and record PSI",
+  "Inspect and empty skimmer basket",
+  "Inspect and empty pump basket as needed",
+  "Check pool water level and adjust if necessary",
+  "Verify pump operation and water circulation",
+  "Inspect pool returns and skimmer suction",
+  "Check for visible leaks or equipment issues",
+  "Independently test free chlorine and pH",
+  "Verify chemical treatment instructions and complete approved adjustments",
+  "Check overall water clarity and visible pool condition",
+  "Secure equipment area and leave pool area clean",
+];
 const BUSINESS_TIME_ZONE = "America/New_York";
 const LAST_AUTO_ICAL_SYNC_STORAGE_KEY = "guestReadyLastAutoIcalSync";
 const AUTO_ICAL_SYNC_COOLDOWN_MS = 10 * 60 * 1000;
@@ -123,7 +149,7 @@ async function loadCurrentAppAccess() {
 
 function normalizeServiceBranch(value) {
   const normalized = String(value || "").trim().toLowerCase();
-  return [SERVICE_BRANCH_POOL, SERVICE_BRANCH_LAWN, SERVICE_BRANCH_MAINTENANCE, SERVICE_BRANCH_HOUSEKEEPING].includes(normalized)
+  return [SERVICE_BRANCH_POOL, SERVICE_BRANCH_LAWN, SERVICE_BRANCH_MAINTENANCE, SERVICE_BRANCH_HOUSEKEEPING, SERVICE_BRANCH_VP2].includes(normalized)
     ? normalized
     : SERVICE_BRANCH_POOL;
 }
@@ -138,6 +164,7 @@ function getServiceBranchLabel(value) {
   if (branch === SERVICE_BRANCH_LAWN) return "Lawn";
   if (branch === SERVICE_BRANCH_MAINTENANCE) return "Maintenance";
   if (branch === SERVICE_BRANCH_HOUSEKEEPING) return "Housekeeping";
+  if (branch === SERVICE_BRANCH_VP2) return "VP²";
   return "Pool";
 }
 
@@ -162,6 +189,7 @@ function taskMatchesActiveWorkspace(task) {
 }
 
 function propertySupportsServiceBranch(property, branch = activeServiceWorkspace) {
+  if (branch === SERVICE_BRANCH_VP2) return property?.vp2_enabled === true;
   if (branch === SERVICE_BRANCH_LAWN) return property?.lawn_service_active === true;
   if (branch === SERVICE_BRANCH_MAINTENANCE) return true;
   if (branch === SERVICE_BRANCH_HOUSEKEEPING) return property?.housekeeping_service_active === true;
@@ -270,6 +298,7 @@ const INVOICE_ITEM_SOURCES = {
   TASK: "task",
   CHEMICAL: "chemical",
   SDS: "sds",
+  VP2: "vp2",
 };
 const INVOICE_SERVICE_BRANCH_OPTIONS = [
   { value: "", label: "Not Categorized" },
@@ -373,6 +402,13 @@ const propertyInvoiceNotes = document.getElementById("propertyInvoiceNotes");
 const propertyCompanyBranch = document.getElementById("propertyCompanyBranch");
 const propertyStatus = document.getElementById("propertyStatus");
 const propertyPoolServiceActive = document.getElementById("propertyPoolServiceActive");
+const propertyVp2Enabled = document.getElementById("propertyVp2Enabled");
+const propertyVp2ServiceDay = document.getElementById("propertyVp2ServiceDay");
+const propertyVp2StartDate = document.getElementById("propertyVp2StartDate");
+const propertyVp2WeekStartDay = document.getElementById("propertyVp2WeekStartDay");
+const propertyVp2FirstReviewPrice = document.getElementById("propertyVp2FirstReviewPrice");
+const propertyVp2AdditionalReviewPrice = document.getElementById("propertyVp2AdditionalReviewPrice");
+const vp2PropertySetupNotice = document.getElementById("vp2PropertySetupNotice");
 const propertyHousekeepingServiceActive = document.getElementById("propertyHousekeepingServiceActive");
 const propertyHousekeepingDefaultCharge = document.getElementById("propertyHousekeepingDefaultCharge");
 const propertyHousekeepingLaborAmount = document.getElementById("propertyHousekeepingLaborAmount");
@@ -1460,7 +1496,8 @@ function setActiveServiceWorkspace(branch) {
   const isLawn = activeServiceWorkspace === SERVICE_BRANCH_LAWN;
   const isMaintenance = activeServiceWorkspace === SERVICE_BRANCH_MAINTENANCE;
   const isHousekeeping = activeServiceWorkspace === SERVICE_BRANCH_HOUSEKEEPING;
-  const workspaceLabel = isLawn ? "Lawn" : isMaintenance ? "Maintenance" : isHousekeeping ? "Housekeeping" : "Pool Service";
+  const isVp2 = activeServiceWorkspace === SERVICE_BRANCH_VP2;
+  const workspaceLabel = isVp2 ? "VP²" : isLawn ? "Lawn" : isMaintenance ? "Maintenance" : isHousekeeping ? "Housekeeping" : "Pool Service";
   const todayHeader = document.querySelector("#todayView .view-header");
   const weekHeader = document.querySelector("#weekView .view-header");
   const propertiesHeader = document.querySelector("#propertiesView .view-header");
@@ -1472,14 +1509,24 @@ function setActiveServiceWorkspace(branch) {
   }
   if (weekHeader) weekHeader.querySelector("h2").textContent = `${workspaceLabel} Week`;
   if (weekHeader) weekHeader.querySelector("p").textContent = `${workspaceLabel} tasks due in the next 7 days grouped by date.`;
-  if (propertiesHeader) propertiesHeader.querySelector("p").textContent = `Manage ${workspaceLabel} properties and tasks.`;
+  if (propertiesHeader) propertiesHeader.querySelector("p").textContent = isVp2
+    ? "Manage VP² enrolled properties and settings."
+    : `Manage ${workspaceLabel} properties and tasks.`;
 
   document.querySelector(".top-actions")?.classList.toggle("hidden", activeServiceWorkspace !== SERVICE_BRANCH_POOL);
+  if (isVp2) {
+    showView("vp2");
+  } else if (document.getElementById("vp2View")?.classList.contains("active")) {
+    showView("today");
+  }
   renderTaskViews();
   if (isAdminUser()) renderProperties();
 }
 
 function showView(viewName) {
+  if (viewName === "vp2" && !isAdminUser()) {
+    viewName = "today";
+  }
   if (isStaffUser() && !["today", "week", "month"].includes(viewName)) {
     viewName = "today";
   }
@@ -1511,6 +1558,10 @@ function showView(viewName) {
 
   if (viewName === "pipeline") {
     renderPipeline();
+  }
+
+  if (viewName === "vp2") {
+    renderVp2Dashboard();
   }
 
   if (viewName === "routeFragmentation") {
@@ -2385,6 +2436,9 @@ function openAddModal() {
     if (propertyPoolServiceActive) propertyPoolServiceActive.value = "no";
     if (propertyLawnServiceActive) propertyLawnServiceActive.value = "yes";
   }
+  if (activeServiceWorkspace === SERVICE_BRANCH_VP2 && propertyVp2Enabled) {
+    propertyVp2Enabled.value = "yes";
+  }
   propertyModal.classList.remove("hidden");
 }
 
@@ -2433,6 +2487,12 @@ function openEditModal(id) {
   if (propertyCompanyBranch) propertyCompanyBranch.value = normalizeCompanyBranch(property.company_branch);
   if (propertyStatus) propertyStatus.value = isPropertyActive(property) ? "active" : "inactive";
   if (propertyPoolServiceActive) propertyPoolServiceActive.value = property.pool_service_active === false ? "no" : "yes";
+  if (propertyVp2Enabled) propertyVp2Enabled.value = property.vp2_enabled === true ? "yes" : "no";
+  if (propertyVp2ServiceDay) propertyVp2ServiceDay.value = property.vp2_service_day || property.standard_service_day || "Wednesday";
+  if (propertyVp2StartDate) propertyVp2StartDate.value = normalizeDateKey(property.vp2_start_date) || getBusinessDateValue();
+  if (propertyVp2WeekStartDay) propertyVp2WeekStartDay.value = property.vp2_week_start_day || "Monday";
+  if (propertyVp2FirstReviewPrice) propertyVp2FirstReviewPrice.value = Number(property.vp2_first_review_price ?? 25).toFixed(2);
+  if (propertyVp2AdditionalReviewPrice) propertyVp2AdditionalReviewPrice.value = Number(property.vp2_additional_review_price ?? 15).toFixed(2);
   if (propertyHousekeepingServiceActive) propertyHousekeepingServiceActive.value = property.housekeeping_service_active === true ? "yes" : "no";
   if (propertyHousekeepingDefaultCharge) propertyHousekeepingDefaultCharge.value = Number(property.housekeeping_default_charge || 0);
   if (propertyHousekeepingLaborAmount) propertyHousekeepingLaborAmount.value = Number(property.housekeeping_labor_amount || 0);
@@ -2448,6 +2508,7 @@ function openEditModal(id) {
   if (propertyLawnLaborAmount) propertyLawnLaborAmount.value = Number(property.lawn_labor_amount || 0);
   syncPropertyServiceFrequencyDependentFields();
   syncLawnServiceFrequencyDependentFields();
+  syncVp2PropertyControls();
 
   propertyModal.classList.remove("hidden");
 }
@@ -3163,6 +3224,7 @@ async function loadData() {
   await loadCompanyProfile();
   await initializeCompanyLogoUploadSupport();
   await loadProperties();
+  await loadVp2Dashboard();
   await loadPropertyContractRevenueHistory();
   await loadCleaningTasks();
   await loadTaskScheduleHistory();
@@ -3204,6 +3266,7 @@ async function loadData() {
   renderExpenseLedger();
   renderExpenseReport();
   renderPipeline();
+  renderVp2Dashboard();
   renderRouteFragmentationAnalytics();
   if (!document.getElementById("chemicalReportWorkspace")?.classList.contains("hidden")) {
     renderChemicalUsageReport();
@@ -4914,6 +4977,522 @@ async function loadProperties() {
   }));
 }
 
+async function loadVp2Dashboard() {
+  if (!isAdminUser()) return;
+
+  const { error: schedulingError } = await supabaseClient.rpc("admin_sync_vp2_reviews");
+  vp2SchedulingError = schedulingError?.message || "";
+  if (!schedulingError) {
+    const { error: billingError } = await supabaseClient.rpc("admin_sync_vp2_review_charges");
+    vp2BillingError = billingError?.message || "";
+  } else {
+    vp2BillingError = "";
+  }
+  await loadVp2ReviewCharges();
+
+  const { data: actionPlans, error: actionPlansError } = await supabaseClient.rpc("admin_list_vp2_action_plans");
+  vp2ActionPlansError = actionPlansError?.message || "";
+  const { data, error } = await supabaseClient.rpc("admin_get_vp2_dashboard");
+  if (error) {
+    vp2DashboardData = null;
+    vp2SchemaAvailable = false;
+    vp2DashboardError = error.message || "VP² database setup is unavailable.";
+  } else {
+    vp2DashboardData = {
+      ...(data && !Array.isArray(data) ? data : {}),
+      actionPlans: Array.isArray(actionPlans) ? actionPlans : [],
+    };
+    vp2SchemaAvailable = true;
+    vp2DashboardError = "";
+  }
+  syncVp2PropertyControls();
+  renderVp2Dashboard();
+}
+
+async function loadVp2ReviewCharges() {
+  if (!isAdminUser()) {
+    vp2ReviewCharges = [];
+    return;
+  }
+  const { data, error } = await supabaseClient
+    .from("vp2_review_charges")
+    .select("*")
+    .order("service_date", { ascending: true });
+  vp2ReviewCharges = error ? [] : (data || []);
+  if (error && !String(error.message || "").toLowerCase().includes("vp2_review_charges")) {
+    vp2BillingError = error.message || "VP² charges could not be loaded.";
+  }
+}
+
+function syncVp2PropertyControls() {
+  const controls = [
+    propertyVp2Enabled,
+    propertyVp2ServiceDay,
+    propertyVp2WeekStartDay,
+    propertyVp2FirstReviewPrice,
+    propertyVp2AdditionalReviewPrice,
+  ];
+  controls.forEach((control) => {
+    if (control) control.disabled = !vp2SchemaAvailable;
+  });
+  if (propertyVp2StartDate) {
+    propertyVp2StartDate.disabled = !vp2SchemaAvailable || Boolean(vp2SchedulingError);
+  }
+  if (vp2PropertySetupNotice) {
+    const notice = !vp2SchemaAvailable
+      ? "Run supabase_setup_vp2_core.sql in the Supabase SQL Editor to enable VP² settings."
+      : vp2SchedulingError
+        ? "Run supabase_setup_vp2_scheduling.sql to enable the VP² start date and automatic reviews."
+        : "";
+    vp2PropertySetupNotice.classList.toggle("hidden", !notice);
+    vp2PropertySetupNotice.textContent = notice;
+  }
+}
+
+function renderVp2List(elementId, rows, itemRenderer, emptyMessage) {
+  const container = document.getElementById(elementId);
+  if (!container) return;
+  if (!Array.isArray(rows) || rows.length === 0) {
+    container.innerHTML = `<p class="vp2-empty">${escapeHtml(emptyMessage)}</p>`;
+    return;
+  }
+  container.innerHTML = rows.map((row) => `<article class="vp2-list-item">${itemRenderer(row)}</article>`).join("");
+}
+
+function renderVp2Dashboard() {
+  const data = vp2DashboardData || {};
+  const enrolledProperties = (data.enrolledProperties || []).map((property) => ({
+    ...(properties.find((item) => item.id === property.id) || {}),
+    ...property,
+  }));
+  const latestReadings = data.latestReadings || [];
+  const upcomingReviews = data.upcomingReviews || [];
+  const attentionReviews = data.attentionReviews || [];
+  const actionPlans = data.actionPlans || [];
+  const openWorkOrders = data.openWorkOrders || [];
+  const completedReviews = data.completedReviews || [];
+  const status = document.getElementById("vp2Status");
+  const currentMonthStart = `${getBusinessDateValue().slice(0, 7)}-01`;
+  const [currentYear, currentMonth] = currentMonthStart.slice(0, 7).split("-").map(Number);
+  const nextMonthStart = currentMonth === 12
+    ? `${currentYear + 1}-01-01`
+    : `${currentYear}-${String(currentMonth + 1).padStart(2, "0")}-01`;
+  const currentMonthRevenue = vp2BillingError
+    ? Number(data.currentMonthRevenue || 0)
+    : vp2ReviewCharges
+      .filter((charge) => ["reconciled", "invoiced"].includes(String(charge.status || "").toLowerCase()))
+      .filter((charge) => charge.service_date >= currentMonthStart && charge.service_date < nextMonthStart)
+      .reduce((total, charge) => total + Number(charge.amount || 0), 0);
+
+  if (status) {
+    const statusText = !vp2SchemaAvailable
+      ? `VP² setup is not available. Run supabase_setup_vp2_core.sql in Supabase SQL Editor. ${vp2DashboardError ? `Details: ${vp2DashboardError}` : ""}`
+      : vp2SchedulingError
+        ? `Automatic VP² reviews are not available. Run supabase_setup_vp2_scheduling.sql and deploy the updated sync-ical function.`
+        : vp2BillingError
+          ? "VP² charge billing is not available. Run supabase_setup_vp2_billing.sql in the Supabase SQL Editor."
+          : vp2ActionPlansError
+            ? "VP² action plans are not available. Run supabase_setup_vp2_action_plans.sql in the Supabase SQL Editor."
+        : "";
+    status.classList.toggle("hidden", !statusText);
+    status.textContent = statusText;
+  }
+
+  const metrics = {
+    vp2EnrolledCount: enrolledProperties.length,
+    vp2ReadingsCount: latestReadings.length,
+    vp2UpcomingCount: upcomingReviews.length,
+    vp2AttentionCount: attentionReviews.length,
+    vp2ApprovalCount: actionPlans.length,
+    vp2AssignmentsCount: openWorkOrders.length,
+    vp2CompletedCount: Number(data.completedThisMonthCount || 0),
+    vp2RevenueAmount: `$${currentMonthRevenue.toFixed(2)}`,
+  };
+  Object.entries(metrics).forEach(([id, value]) => {
+    const element = document.getElementById(id);
+    if (element) element.textContent = String(value);
+  });
+
+  renderVp2List("vp2EnrolledProperties", enrolledProperties, (property) => `
+    <div class="vp2-property-title-row">
+      <strong>${escapeHtml(property.property_name || "Property")}</strong>
+      <button type="button" class="secondary-btn vp2-property-edit-btn" onclick="openEditModal('${escapeHtml(property.id)}')">Edit</button>
+    </div>
+    <span>${escapeHtml(property.address || "Address not entered")}</span>
+    <small>Start: ${escapeHtml(property.vp2_start_date || "Not set")} · Service day: ${escapeHtml(property.vp2_service_day || "Wednesday")} · First review $${Number(property.vp2_first_review_price || 0).toFixed(2)} · Additional $${Number(property.vp2_additional_review_price || 0).toFixed(2)}</small>
+  `, "No properties are enrolled in VP².");
+
+  renderVp2List("vp2LatestReadings", latestReadings, (reading) => `
+    <strong>${escapeHtml(reading.property_name || "Property")}</strong>
+    <span>FC ${reading.free_chlorine ?? "—"} · pH ${reading.ph ?? "—"} · TA ${reading.total_alkalinity ?? "—"}${reading.water_temperature == null ? "" : ` · ${reading.water_temperature}°${escapeHtml(reading.water_temperature_unit || "F")}`}</span>
+    <small>${escapeHtml(reading.source || "Reading")} · ${escapeHtml(reading.measured_at || "Timestamp unavailable")}</small>
+  `, "No chemistry readings have been recorded.");
+
+  const reviewRenderer = (review) => {
+    const charge = vp2ReviewCharges.find((entry) => entry.review_id === review.id);
+    const chargeStatus = String(charge?.status || "").toLowerCase();
+    const isChargeLocked = chargeStatus === "invoiced" || chargeStatus === "void";
+    const reviewStatus = String(review.status || "").toLowerCase();
+    const canCancel = chargeStatus === "pending" && ["scheduled", "needs_attention", "in_progress"].includes(reviewStatus);
+    const actionLabel = String(review.status || "").toLowerCase() === "completed"
+      ? "Reconcile"
+      : "Complete & Reconcile";
+    return `
+      <strong>${escapeHtml(review.property_name || "Property")}</strong>
+      <span>${escapeHtml(review.review_kind || "Review")} · ${escapeHtml(review.scheduled_date || "Date not set")}</span>
+      <small>${escapeHtml(review.status || "Scheduled")}${review.attention_reason ? ` · ${escapeHtml(review.attention_reason)}` : ""} · Charge ${toMoney(charge?.amount || 0)}</small>
+      ${chargeStatus === "reconciled" ? `<small class="vp2-charge-state">Reconciled · eligible for next invoice draft</small>` : ""}
+      ${chargeStatus === "invoiced" ? `<small class="vp2-charge-state">Invoiced</small>` : ""}
+      ${charge && !isChargeLocked && chargeStatus !== "reconciled" ? `<button type="button" class="vp2-reconcile-btn" onclick="completeAndReconcileVp2Review('${escapeHtml(review.id)}')">${actionLabel} · ${toMoney(charge.amount)}</button>` : ""}
+      ${canCancel ? `<button type="button" class="vp2-cancel-btn" onclick="cancelVp2Review('${escapeHtml(review.id)}')">Cancel Review</button>` : ""}
+      ${reviewStatus !== "cancelled" ? `<button type="button" class="vp2-create-plan-btn" onclick="openVp2ActionPlan('${escapeHtml(review.id)}')">Create Action Plan</button>` : ""}
+    `;
+  };
+  renderVp2List("vp2UpcomingReviews", upcomingReviews, reviewRenderer, "No upcoming reviews.");
+  renderVp2List("vp2AttentionReviews", attentionReviews, reviewRenderer, "No reviews currently need attention.");
+  renderVp2List("vp2AwaitingPlans", actionPlans, (plan) => `
+    <strong>${escapeHtml(plan.property_name || "Property")}</strong>
+    <span>${escapeHtml(plan.summary || "VP² Technician Action Plan")} · ${escapeHtml(plan.scheduled_date || "")}</span>
+    <small>${escapeHtml(plan.status || "draft")} · ${plan.active_link ? "Technician link active" : "No active link"}</small>
+    ${plan.status === "completed" ? "" : `<button type="button" class="secondary-btn" onclick="openVp2ActionPlan('${escapeHtml(plan.review_id)}')">Open Action Plan</button>`}
+  `, "No VP² technician action plans yet.");
+  renderVp2List("vp2OpenWorkOrders", openWorkOrders, (workOrder) => `
+    <strong>${escapeHtml(workOrder.property_name || "Property")}</strong>
+    <span>${escapeHtml(workOrder.technician_name || "Unassigned")}</span>
+    <small>${escapeHtml(workOrder.status || "Assigned")}${workOrder.due_date ? ` · Due ${escapeHtml(workOrder.due_date)}` : ""}</small>
+  `, "No open technician assignments.");
+  renderVp2List("vp2CompletedReviews", completedReviews, (review) => `
+    <strong>${escapeHtml(review.property_name || "Property")}</strong>
+    <span>${escapeHtml(review.completed_at || review.scheduled_date || "Completed")}</span>
+    <small>${escapeHtml(review.review_kind || "Review")} · Charge ${toMoney(vp2ReviewCharges.find((entry) => entry.review_id === review.id)?.amount || 0)}</small>
+    ${(() => {
+      const charge = vp2ReviewCharges.find((entry) => entry.review_id === review.id);
+      if (charge?.status === "invoiced") return `<small class="vp2-charge-state">Invoiced</small>`;
+      if (charge?.status === "reconciled") return `<small class="vp2-charge-state">Reconciled · eligible for next invoice draft</small>`;
+      if (!charge || charge.status === "void") return "";
+      return `<button type="button" class="vp2-reconcile-btn" onclick="completeAndReconcileVp2Review('${escapeHtml(review.id)}')">Reconcile · ${toMoney(charge.amount)}</button>`;
+    })()}
+  `, "No completed reviews yet.");
+}
+
+async function completeAndReconcileVp2Review(reviewId) {
+  if (!requireAdminAccess()) return;
+  const charge = vp2ReviewCharges.find((entry) => entry.review_id === reviewId);
+  if (!charge) {
+    alert("VP² charge is unavailable. Refresh the dashboard and try again.");
+    return;
+  }
+  const confirmed = window.confirm(`Mark this VP² review complete and reconcile ${toMoney(charge.amount)} for the next invoice draft?`);
+  if (!confirmed) return;
+
+  const { error } = await supabaseClient.rpc("admin_complete_and_reconcile_vp2_review", {
+    target_review_id: reviewId,
+    expected_charge_amount: Number(charge.amount),
+  });
+  if (error) {
+    alert("Could not complete and reconcile the VP² review: " + error.message);
+    return;
+  }
+  await loadVp2Dashboard();
+}
+
+async function cancelVp2Review(reviewId) {
+  if (!requireAdminAccess()) return;
+  const charge = vp2ReviewCharges.find((entry) => entry.review_id === reviewId);
+  const chargeText = charge ? ` Its ${toMoney(charge.amount)} charge will be voided.` : "";
+  if (!window.confirm(`Cancel this VP² review? It will remain in history and will not be replaced for this service week.${chargeText}`)) return;
+
+  const { error } = await supabaseClient.rpc("admin_cancel_vp2_review", {
+    target_review_id: reviewId,
+  });
+  if (error) {
+    alert("Could not cancel the VP² review: " + error.message);
+    return;
+  }
+
+  if (currentInvoiceDraft && charge) {
+    currentInvoiceDraft.items = currentInvoiceDraft.items.filter((item) => item.vp2ReviewChargeId !== charge.id);
+    recalculateInvoiceDraftTotals();
+    renderInvoicePreview();
+  }
+  await loadVp2Dashboard();
+}
+
+function setVp2ActionPlanStatus(message, isError = false) {
+  const status = document.getElementById("vp2ActionPlanStatus");
+  if (!status) return;
+  status.textContent = message || "";
+  status.classList.toggle("error", isError);
+}
+
+function renderVp2StandardActions() {
+  const list = document.getElementById("vp2StandardActionList");
+  if (!list) return;
+  list.replaceChildren();
+  VP2_STANDARD_ACTIONS.forEach((action) => {
+    const item = document.createElement("li");
+    item.textContent = action;
+    list.appendChild(item);
+  });
+}
+
+function resetVp2ActionPlanForm() {
+  ["vp2PlanFreeChlorine", "vp2PlanPh", "vp2PlanAlkalinity", "vp2PlanAnalysis"].forEach((id) => {
+    const field = document.getElementById(id);
+    if (field) field.value = "";
+  });
+  renderVp2StandardActions();
+  const actionList = document.getElementById("vp2ActionItems");
+  if (actionList) actionList.replaceChildren();
+  addVp2ActionItem();
+  document.getElementById("vp2ActionPlanPreview")?.classList.add("hidden");
+  document.getElementById("vp2ActionPlanEditor")?.classList.remove("hidden");
+  document.getElementById("vp2ActionPlanLinkPanel")?.classList.add("hidden");
+  const previewButton = document.getElementById("vp2ActionPlanPreviewBtn");
+  if (previewButton) previewButton.textContent = "Preview";
+  setVp2ActionPlanStatus("");
+}
+
+async function openVp2ActionPlan(reviewId) {
+  if (!requireAdminAccess()) return;
+  const dashboard = vp2DashboardData || {};
+  currentVp2ActionPlanReview = [
+    ...(dashboard.upcomingReviews || []),
+    ...(dashboard.attentionReviews || []),
+    ...(dashboard.completedReviews || []),
+  ].find((review) => String(review.id) === String(reviewId)) || null;
+  if (!currentVp2ActionPlanReview || currentVp2ActionPlanReview.status === "cancelled") {
+    alert("VP² review is unavailable for an action plan.");
+    return;
+  }
+
+  currentVp2ActionPlanId = null;
+  currentVp2TechnicianUrl = "";
+  resetVp2ActionPlanForm();
+  const propertyName = document.getElementById("vp2ActionPlanPropertyName");
+  const serviceDate = document.getElementById("vp2ActionPlanDate");
+  if (propertyName) propertyName.textContent = currentVp2ActionPlanReview.property_name || "Property";
+  if (serviceDate) serviceDate.textContent = currentVp2ActionPlanReview.scheduled_date || "Date not set";
+  document.getElementById("vp2ActionPlanModal")?.classList.remove("hidden");
+
+  const { data, error } = await supabaseClient.rpc("admin_get_vp2_action_plan", {
+    target_review_id: reviewId,
+  });
+  if (error) {
+    setVp2ActionPlanStatus("Could not load the saved action plan: " + error.message, true);
+    return;
+  }
+  const plan = Array.isArray(data) ? data[0] : data;
+  if (!plan) return;
+  currentVp2ActionPlanId = plan.id;
+  const planData = plan.plan_data || {};
+  const readings = planData.readings || {};
+  const fields = {
+    vp2PlanFreeChlorine: readings.free_chlorine,
+    vp2PlanPh: readings.ph,
+    vp2PlanAlkalinity: readings.total_alkalinity,
+    vp2PlanAnalysis: planData.analysis,
+  };
+  Object.entries(fields).forEach(([id, value]) => {
+    const field = document.getElementById(id);
+    if (field) field.value = value ?? "";
+  });
+  const actionList = document.getElementById("vp2ActionItems");
+  if (actionList) actionList.replaceChildren();
+  renderVp2StandardActions();
+  const standardKeys = new Set(VP2_STANDARD_ACTIONS.map((action) => action.trim().toLowerCase()));
+  const savedActions = Array.isArray(planData.actions) ? planData.actions : [];
+  const customActions = savedActions.filter((action) => {
+    const text = typeof action === "string" ? action : action.instructions || action.chemical || action.title || "";
+    return !standardKeys.has(String(text).trim().toLowerCase());
+  });
+  customActions.forEach((action) => {
+    const text = typeof action === "string"
+      ? action
+      : [action.chemical, action.amount ? `${action.amount}${action.unit ? ` ${action.unit}` : ""}` : "", action.instructions]
+        .filter(Boolean).join("\n");
+    if (text) addVp2ActionItem(text);
+  });
+  if (plan.active_link) {
+    const { data: token, error: tokenError } = await supabaseClient.rpc("admin_get_vp2_technician_token", {
+      target_action_plan_id: plan.id,
+    });
+    if (tokenError || !token) {
+      setVp2ActionPlanStatus("A technician link is active, but it could not be recovered. Generate Link to replace it.", true);
+      return;
+    }
+    currentVp2TechnicianUrl = buildVp2TechnicianUrl(token);
+    const linkField = document.getElementById("vp2ActionPlanLink");
+    if (linkField) linkField.value = currentVp2TechnicianUrl;
+    document.getElementById("vp2ActionPlanLinkPanel")?.classList.remove("hidden");
+    setVp2ActionPlanStatus("Technician link ready to copy or share.");
+  }
+}
+
+function addVp2ActionItem(value = "") {
+  const list = document.getElementById("vp2ActionItems");
+  if (!list) return;
+  const row = document.createElement("div");
+  row.className = "vp2-action-item";
+  const label = document.createElement("label");
+  label.className = "vp2-action-label";
+  label.textContent = `Action ${list.children.length + 1}`;
+  const field = document.createElement("textarea");
+  field.className = "vp2-action-text";
+  field.rows = 3;
+  field.value = value || "";
+  field.placeholder = "Paste one recommended task, including chemicals, amounts, and instructions";
+  label.appendChild(field);
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.className = "vp2-remove-action-btn secondary-btn";
+  remove.textContent = "Remove";
+  remove.addEventListener("click", () => {
+    row.remove();
+    Array.from(list.querySelectorAll(".vp2-action-label")).forEach((actionLabel, index) => {
+      actionLabel.firstChild.textContent = `Action ${index + 1}`;
+    });
+  });
+  row.append(label, remove);
+  list.appendChild(row);
+}
+
+function getVp2ActionPlanFormData() {
+  const getValue = (id) => String(document.getElementById(id)?.value || "").trim();
+  const additionalActions = Array.from(document.querySelectorAll("#vp2ActionItems .vp2-action-text"))
+    .map((field) => String(field.value || "").trim())
+    .filter(Boolean)
+    .map((instructions) => ({ instructions, required: false }));
+  const actions = [
+    ...VP2_STANDARD_ACTIONS.map((instructions) => ({ title: instructions, instructions, required: true })),
+    ...additionalActions,
+  ];
+  return {
+    readings: {
+      free_chlorine: getValue("vp2PlanFreeChlorine"),
+      ph: getValue("vp2PlanPh"),
+      total_alkalinity: getValue("vp2PlanAlkalinity"),
+    },
+    analysis: getValue("vp2PlanAnalysis"),
+    actions,
+  };
+}
+
+async function saveVp2ActionPlan() {
+  if (!requireAdminAccess() || !currentVp2ActionPlanReview) return null;
+  const form = getVp2ActionPlanFormData();
+  const { data, error } = await supabaseClient.rpc("admin_save_vp2_action_plan", {
+    target_review_id: currentVp2ActionPlanReview.id,
+    entered_readings: form.readings,
+    entered_analysis: form.analysis || null,
+    entered_actions: form.actions,
+  });
+  if (error || !data) {
+    setVp2ActionPlanStatus("Could not save action plan: " + (error?.message || "No plan ID returned."), true);
+    return null;
+  }
+  currentVp2ActionPlanId = Array.isArray(data) ? data[0] : data;
+  currentVp2TechnicianUrl = "";
+  document.getElementById("vp2ActionPlanLinkPanel")?.classList.add("hidden");
+  setVp2ActionPlanStatus("Action plan saved.");
+  await loadVp2Dashboard();
+  return currentVp2ActionPlanId;
+}
+
+function previewVp2ActionPlan() {
+  if (!currentVp2ActionPlanReview) return;
+  if (!document.getElementById("vp2ActionPlanPreview")?.classList.contains("hidden")) {
+    editVp2ActionPlan();
+    return;
+  }
+  const form = getVp2ActionPlanFormData();
+  const preview = document.getElementById("vp2ActionPlanPreview");
+  if (!preview) return;
+  const readings = form.readings;
+  const standardTasks = form.actions.filter((action) => action.required);
+  const additionalActions = form.actions.filter((action) => !action.required);
+  const standardChecklist = `<ol>${standardTasks.map((action) => `<li>${escapeHtml(action.title)}</li>`).join("")}</ol>`;
+  const actions = additionalActions.length
+    ? additionalActions.map((action, index) => `<article class="vp2-plan-preview-action"><strong>Additional action ${index + 1}</strong><p>${escapeHtml(action.instructions).replace(/\n/g, "<br>")}</p></article>`).join("")
+    : "<p>No recommended actions entered.</p>";
+  preview.innerHTML = `
+    <img class="vp2-plan-preview-logo" src="assets/vp2-logo.png" alt="VP² Virtual Pool Pro">
+    <p class="vp2-affiliation">A Guest Ready Services Company</p>
+    <h3>Technician Action Plan</h3>
+    <p><strong>Property:</strong> ${escapeHtml(currentVp2ActionPlanReview.property_name || "Property")}</p>
+    <p><strong>Service date:</strong> ${escapeHtml(currentVp2ActionPlanReview.scheduled_date || "Date not set")}</p>
+    <h4>Water readings</h4>
+    <p>Free chlorine: ${escapeHtml(readings.free_chlorine || "Not entered")} · pH: ${escapeHtml(readings.ph || "Not entered")} · Total alkalinity: ${escapeHtml(readings.total_alkalinity || "Not entered")}</p>
+    <h4>Water analysis</h4><p>${escapeHtml(form.analysis || "No analysis entered.").replace(/\n/g, "<br>")}</p>
+    <h4>Standard Pool Service Tasks</h4>${standardChecklist}
+    <h4>Recommended Actions</h4>${actions}
+  `;
+  preview.classList.remove("hidden");
+  document.getElementById("vp2ActionPlanEditor")?.classList.add("hidden");
+  const previewButton = document.getElementById("vp2ActionPlanPreviewBtn");
+  if (previewButton) previewButton.textContent = "Edit Plan";
+  setVp2ActionPlanStatus("Preview only. Save the plan before generating a technician link.");
+}
+
+function editVp2ActionPlan() {
+  document.getElementById("vp2ActionPlanPreview")?.classList.add("hidden");
+  document.getElementById("vp2ActionPlanEditor")?.classList.remove("hidden");
+  const previewButton = document.getElementById("vp2ActionPlanPreviewBtn");
+  if (previewButton) previewButton.textContent = "Preview";
+}
+
+function buildVp2TechnicianUrl(token) {
+  const localPreview = ["localhost", "127.0.0.1"].includes(window.location.hostname) || window.location.protocol === "file:";
+  const url = new URL(localPreview ? "vp2_action_plan.html" : `/vp2-work-order/${token}`, window.location.href);
+  url.search = "";
+  url.hash = "";
+  if (localPreview) url.searchParams.set("token", token);
+  return url.toString();
+}
+
+async function generateVp2ActionPlanLink() {
+  const actionPlanId = await saveVp2ActionPlan();
+  if (!actionPlanId) return;
+  const { data: token, error } = await supabaseClient.rpc("admin_generate_vp2_technician_link", {
+    target_action_plan_id: actionPlanId,
+  });
+  if (error || !token) {
+    setVp2ActionPlanStatus("Could not generate technician link: " + (error?.message || "No token returned."), true);
+    return;
+  }
+  currentVp2TechnicianUrl = buildVp2TechnicianUrl(token);
+  const output = document.getElementById("vp2ActionPlanLink");
+  if (output) output.value = currentVp2TechnicianUrl;
+  document.getElementById("vp2ActionPlanLinkPanel")?.classList.remove("hidden");
+  setVp2ActionPlanStatus("Secure technician link is active for 30 days.");
+  await loadVp2Dashboard();
+}
+
+async function copyVp2ActionPlanLink(kind) {
+  if (!currentVp2TechnicianUrl) return;
+  const propertyName = currentVp2ActionPlanReview?.property_name || "your pool";
+  const date = currentVp2ActionPlanReview?.scheduled_date || "";
+  const message = `VP² Technician Action Plan for ${propertyName}${date ? ` (${date})` : ""}: ${currentVp2TechnicianUrl}`;
+  try {
+    await copyTextToClipboard(kind === "message" ? message : currentVp2TechnicianUrl);
+    setVp2ActionPlanStatus(kind === "message" ? "Text message copied." : "Technician link copied.");
+  } catch (error) {
+    setVp2ActionPlanStatus("Could not copy the link: " + (error?.message || String(error)), true);
+  }
+}
+
+function openVp2TechnicianLink() {
+  if (!currentVp2TechnicianUrl) return;
+  window.open(currentVp2TechnicianUrl, "_blank", "noopener,noreferrer");
+}
+
+function closeVp2ActionPlan() {
+  document.getElementById("vp2ActionPlanModal")?.classList.add("hidden");
+  currentVp2ActionPlanReview = null;
+  currentVp2ActionPlanId = null;
+  currentVp2TechnicianUrl = "";
+}
+
 async function loadPropertyContractRevenueHistory() {
   const { data, error } = await supabaseClient
     .from("property_contract_revenue_history")
@@ -5046,6 +5625,7 @@ async function saveProperty() {
     : null;
   const selectedPropertyActive = String(propertyStatus?.value || "active") !== "inactive";
   const selectedPoolServiceActive = String(propertyPoolServiceActive?.value || "yes") === "yes";
+  const selectedVp2Enabled = String(propertyVp2Enabled?.value || "no") === "yes";
   const selectedLawnServiceActive = String(propertyLawnServiceActive?.value || "no") === "yes";
   const selectedHousekeepingServiceActive = String(propertyHousekeepingServiceActive?.value || "no") === "yes";
   const selectedLawnFrequency = normalizeServiceFrequency(propertyLawnServiceFrequency?.value);
@@ -5148,6 +5728,19 @@ async function saveProperty() {
     lawn_labor_amount: Math.max(0, Number(propertyLawnLaborAmount?.value || 0)),
     active: selectedPropertyActive
   };
+
+  if (vp2SchemaAvailable) {
+    Object.assign(propertyData, {
+      vp2_enabled: selectedVp2Enabled,
+      vp2_service_day: String(propertyVp2ServiceDay?.value || "Wednesday"),
+      vp2_week_start_day: String(propertyVp2WeekStartDay?.value || "Monday"),
+      vp2_first_review_price: Math.max(0, Number(propertyVp2FirstReviewPrice?.value || 25)),
+      vp2_additional_review_price: Math.max(0, Number(propertyVp2AdditionalReviewPrice?.value || 15)),
+    });
+    if (!vp2SchedulingError) {
+      propertyData.vp2_start_date = normalizeDateKey(propertyVp2StartDate?.value) || getBusinessDateValue();
+    }
+  }
 
   if (
     propertyData.weekly_contract_cleaning_amount > 0
@@ -5389,6 +5982,7 @@ async function runSyncAllIcal({ automatic }) {
     && (
       propertySupportsServiceBranch(p, SERVICE_BRANCH_POOL)
       || propertySupportsServiceBranch(p, SERVICE_BRANCH_HOUSEKEEPING)
+      || propertySupportsServiceBranch(p, SERVICE_BRANCH_VP2)
     ));
 
   if (icalProperties.length === 0) {
@@ -5416,8 +6010,10 @@ async function runSyncAllIcal({ automatic }) {
       results.push({ propertyName: p.property_name, skipped: true, skippedReason: "Property inactive" });
       continue;
     }
-    if (!propertySupportsServiceBranch(p, SERVICE_BRANCH_POOL) && !propertySupportsServiceBranch(p, SERVICE_BRANCH_HOUSEKEEPING)) {
-      results.push({ propertyName: p.property_name, skipped: true, skippedReason: "Pool and Housekeeping inactive" });
+    if (!propertySupportsServiceBranch(p, SERVICE_BRANCH_POOL)
+      && !propertySupportsServiceBranch(p, SERVICE_BRANCH_HOUSEKEEPING)
+      && !propertySupportsServiceBranch(p, SERVICE_BRANCH_VP2)) {
+      results.push({ propertyName: p.property_name, skipped: true, skippedReason: "Pool, Housekeeping, and VP² inactive" });
     }
   }
 
@@ -5439,13 +6035,13 @@ async function runSyncAllIcal({ automatic }) {
       if (error) {
         result.error = await getEdgeFunctionErrorMessage(error);
         console.log(`[SyncAll] ERROR for "${property.property_name}":`, result.error);
-      } else if (data?.syncVersion !== "ical-source-reconciliation-v1") {
-        result.error = "iCal source reconciliation is not deployed. Run its migration and deploy the updated sync-ical Edge Function.";
+      } else if (data?.syncVersion !== "ical-vp2-scheduling-v1") {
+        result.error = "VP² iCal scheduling is not deployed. Run supabase_setup_vp2_scheduling.sql and deploy the updated sync-ical Edge Function.";
         console.log(`[SyncAll] OUTDATED FUNCTION for "${property.property_name}":`, result.error);
       } else {
         result.success = true;
         result.data = data;
-        console.log(`[SyncAll] SUCCESS for "${property.property_name}": parsed=${data?.reservationsParsed ?? "?"} active=${data?.activeReservations ?? "?"} added=${data?.reservationsCreated ?? 0} updated=${data?.reservationsUpdated ?? 0} removed=${data?.reservationsRemoved ?? 0} tasksCreated=${data?.tasksCreated ?? 0} staleCancelled=${data?.staleTasksCancelled ?? 0} review=${data?.tasksRequiringReview ?? 0}`);
+        console.log(`[SyncAll] SUCCESS for "${property.property_name}": parsed=${data?.reservationsParsed ?? "?"} active=${data?.activeReservations ?? "?"} added=${data?.reservationsCreated ?? 0} updated=${data?.reservationsUpdated ?? 0} removed=${data?.reservationsRemoved ?? 0} tasksCreated=${data?.tasksCreated ?? 0} vp2ReviewsCreated=${Number(data?.vp2CheckoutReviewsCreated || 0) + Number(data?.vp2WeeklyReviewsCreated || 0)} staleCancelled=${data?.staleTasksCancelled ?? 0} review=${data?.tasksRequiringReview ?? 0}`);
       }
     } catch (invokeError) {
       result.error = invokeError?.message || String(invokeError);
@@ -5638,9 +6234,9 @@ async function syncPropertyIcal(propertyId) {
   }
 
   if (
-    data?.syncVersion !== "ical-source-reconciliation-v1"
+    data?.syncVersion !== "ical-vp2-scheduling-v1"
   ) {
-    statusMessage.textContent = "iCal source reconciliation is not deployed. Run its migration and deploy the updated sync-ical Edge Function.";
+    statusMessage.textContent = "VP² iCal scheduling is not deployed. Run supabase_setup_vp2_scheduling.sql and deploy the updated sync-ical Edge Function.";
     return;
   }
 
@@ -5650,7 +6246,8 @@ async function syncPropertyIcal(propertyId) {
     console.log("[SynciCal] loadData() threw after sync — suppressing to preserve result message:", loadError);
   }
 
-  const successMsg = `iCal sync complete: ${data?.reservationsCreated ?? 0} reservation(s) added, ${data?.reservationsUpdated ?? 0} updated, ${data?.reservationsRemoved ?? 0} removed; ${data?.tasksCreated ?? 0} task(s) created, ${data?.staleTasksCancelled ?? 0} stale task(s) cancelled, ${data?.tasksRequiringReview ?? 0} requiring review, ${data?.protectedTasksPreserved ?? 0} protected.`;
+  const vp2ReviewsCreated = Number(data?.vp2CheckoutReviewsCreated || 0) + Number(data?.vp2WeeklyReviewsCreated || 0);
+  const successMsg = `iCal sync complete: ${data?.reservationsCreated ?? 0} reservation(s) added, ${data?.reservationsUpdated ?? 0} updated, ${data?.reservationsRemoved ?? 0} removed; ${data?.tasksCreated ?? 0} task(s) created, ${vp2ReviewsCreated} VP² review(s) scheduled, ${data?.staleTasksCancelled ?? 0} stale task(s) cancelled, ${data?.tasksRequiringReview ?? 0} requiring review, ${data?.protectedTasksPreserved ?? 0} protected.`;
   console.log("[SynciCal] Success message:", successMsg);
   statusMessage.textContent = successMsg;
 }
@@ -6448,6 +7045,12 @@ function clearPropertyForm() {
   if (propertyCompanyBranch) propertyCompanyBranch.value = COMPANY_BRANCH_GUEST_READY;
   if (propertyStatus) propertyStatus.value = "active";
   if (propertyPoolServiceActive) propertyPoolServiceActive.value = "yes";
+  if (propertyVp2Enabled) propertyVp2Enabled.value = "no";
+  if (propertyVp2ServiceDay) propertyVp2ServiceDay.value = "Wednesday";
+  if (propertyVp2StartDate) propertyVp2StartDate.value = getBusinessDateValue();
+  if (propertyVp2WeekStartDay) propertyVp2WeekStartDay.value = "Monday";
+  if (propertyVp2FirstReviewPrice) propertyVp2FirstReviewPrice.value = "25.00";
+  if (propertyVp2AdditionalReviewPrice) propertyVp2AdditionalReviewPrice.value = "15.00";
   if (propertyHousekeepingServiceActive) propertyHousekeepingServiceActive.value = "no";
   if (propertyHousekeepingDefaultCharge) propertyHousekeepingDefaultCharge.value = 0;
   if (propertyHousekeepingLaborAmount) propertyHousekeepingLaborAmount.value = 0;
@@ -6461,6 +7064,7 @@ function clearPropertyForm() {
   if (propertyLawnLaborAmount) propertyLawnLaborAmount.value = 0;
   syncPropertyServiceFrequencyDependentFields();
   syncLawnServiceFrequencyDependentFields();
+  syncVp2PropertyControls();
 }
 
 function toggleInvoiceMarker(taskId) {
@@ -9373,6 +9977,7 @@ function getForecastAssignedTechnician(task) {
 function getForecastInvoiceItemSource(item) {
   const itemSource = String(item?.item_source || item?.source_type || item?.item_type || "").trim().toLowerCase();
   if (itemSource === INVOICE_ITEM_SOURCES.SDS || itemSource === "same-day surcharge" || itemSource === "same day surcharge") return INVOICE_ITEM_SOURCES.SDS;
+  if (itemSource === INVOICE_ITEM_SOURCES.VP2 || item?.vp2_review_charge_id) return INVOICE_ITEM_SOURCES.VP2;
   if (itemSource === INVOICE_ITEM_SOURCES.CHEMICAL) return INVOICE_ITEM_SOURCES.CHEMICAL;
   if (itemSource === INVOICE_ITEM_SOURCES.TASK) return INVOICE_ITEM_SOURCES.TASK;
   if (itemSource === INVOICE_ITEM_SOURCES.MANUAL) return INVOICE_ITEM_SOURCES.MANUAL;
@@ -9410,12 +10015,15 @@ function getForecastInvoiceRevenueData({ startDate, endDate, selectedPropertyId 
     const source = getForecastInvoiceItemSource(item);
     const taskId = normalizePropertyId(getInvoiceItemTaskId(item));
     const chemicalUsageId = normalizePropertyId(getInvoiceItemChemicalUsageId(item));
+    const vp2ReviewChargeId = normalizePropertyId(item?.vp2_review_charge_id);
     const sourceKey = source === INVOICE_ITEM_SOURCES.SDS && taskId
       ? `sds:${taskId}`
       : source === INVOICE_ITEM_SOURCES.TASK && taskId
         ? `task:${taskId}`
         : source === INVOICE_ITEM_SOURCES.CHEMICAL && chemicalUsageId
           ? `chemical:${chemicalUsageId}`
+          : source === INVOICE_ITEM_SOURCES.VP2 && vp2ReviewChargeId
+            ? `vp2:${vp2ReviewChargeId}`
           : `invoice-item:${itemId || String(item?.invoice_id || "")}:${auditRows.length + 1}`;
     if (countedSourceKeys.has(sourceKey)) return;
     countedSourceKeys.add(sourceKey);
@@ -9441,7 +10049,7 @@ function getForecastInvoiceRevenueData({ startDate, endDate, selectedPropertyId 
       serviceDate: normalizeDateKey(item?.service_date) || normalizeDateKey(invoiceRecord.invoice.invoice_date),
       propertyId: propertyKey,
       propertyName: propertyKey === SERVICE_PNL_UNASSIGNED_PROPERTY_ID ? "Unassigned / No Source Property" : getPropertyName(propertyKey),
-      sourceType: source === INVOICE_ITEM_SOURCES.SDS ? "Same-Day Surcharge" : source === INVOICE_ITEM_SOURCES.TASK ? "Task" : source === INVOICE_ITEM_SOURCES.CHEMICAL ? "Chemical Charge" : "Manual Invoice Item",
+      sourceType: source === INVOICE_ITEM_SOURCES.SDS ? "Same-Day Surcharge" : source === INVOICE_ITEM_SOURCES.VP2 ? "VP² Review" : source === INVOICE_ITEM_SOURCES.TASK ? "Task" : source === INVOICE_ITEM_SOURCES.CHEMICAL ? "Chemical Charge" : "Manual Invoice Item",
       description: item?.description || "Invoice item",
       revenueStatus: invoiceRecord.category === "draft" ? "Draft Invoiced" : "Finalized Invoiced",
       draftRevenue: invoiceRecord.category === "draft" ? amount : 0,
@@ -10301,8 +10909,9 @@ function hasInvoiceCandidatesForBillingFilters() {
     selectedClientName,
     includeNonBillableChemicals,
   });
+  const vp2Items = getInvoiceVp2Candidates({ startDate, endDate, selectedPropertyId, selectedClientName });
 
-  return chemicalItems.length > 0;
+  return chemicalItems.length > 0 || vp2Items.length > 0;
 }
 
 async function createInvoiceFromBillingReport() {
@@ -10876,6 +11485,41 @@ function getInvoiceSdsCandidates({ startDate, endDate, selectedPropertyId = "", 
   }));
 }
 
+function getInvoiceVp2Candidates({ startDate, endDate, selectedPropertyId = "", selectedClientName = "" }) {
+  if (!startDate || !endDate) return [];
+  const scopePropertyIds = new Set(resolvePropertyIdsForScope({ selectedPropertyId, selectedClientName }).map((id) => normalizePropertyId(id)));
+
+  return vp2ReviewCharges
+    .filter((charge) => charge.status === "reconciled")
+    .filter((charge) => charge.service_date >= startDate && charge.service_date <= endDate)
+    .filter((charge) => scopePropertyIds.has(normalizePropertyId(charge.property_id)))
+    .map((charge) => {
+      const property = properties.find((item) => normalizePropertyId(item.id) === normalizePropertyId(charge.property_id));
+      const propertyName = property?.property_name || getPropertyName(charge.property_id);
+      return {
+        sourceId: charge.id,
+        taskId: null,
+        chemicalUsageId: null,
+        vp2ReviewChargeId: charge.id,
+        propertyId: charge.property_id,
+        propertyName,
+        clientName: String(property?.client_name || "").trim(),
+        description: `${propertyName} - VP² Chemistry Review`,
+        serviceDate: charge.service_date,
+        quantity: 1,
+        unit: "review",
+        rate: Number(charge.amount || 0),
+        amount: Number(charge.amount || 0),
+        itemType: "vp2",
+        itemSource: INVOICE_ITEM_SOURCES.VP2,
+        serviceBranch: "other",
+        notes: "",
+      };
+    })
+    .sort((a, b) => String(a.propertyName || "").localeCompare(String(b.propertyName || ""))
+      || String(a.serviceDate || "").localeCompare(String(b.serviceDate || "")));
+}
+
 function formatInvoiceDate(date) {
   return formatDateValue(date || new Date());
 }
@@ -10984,13 +11628,20 @@ function buildDraftInvoiceModel({ property, clientName = "", propertyIds = [], s
     selectedPropertyId,
     selectedClientName,
   }).filter((item) => !propertyIds.length || propertyIds.some((id) => normalizePropertyId(id) === normalizePropertyId(item.propertyId)));
+  const vp2Items = getInvoiceVp2Candidates({
+    startDate,
+    endDate,
+    selectedPropertyId,
+    selectedClientName,
+  }).filter((item) => !propertyIds.length || propertyIds.some((id) => normalizePropertyId(id) === normalizePropertyId(item.propertyId)));
 
   latestInvoiceCandidates = {
     tasks: taskItems,
     chemicalRows: chemicalItems,
+    vp2Rows: vp2Items,
   };
 
-  const items = [...taskItems, ...chemicalItems, ...sdsItems];
+  const items = [...taskItems, ...chemicalItems, ...sdsItems, ...vp2Items];
   const subtotal = Number(items.reduce((sum, item) => sum + Number(item.amount || 0), 0).toFixed(2));
   const propertyTaxable = property?.billing_taxable !== false;
   const taxable = taxOverride === "yes" ? true : taxOverride === "no" ? false : propertyTaxable;
@@ -11170,13 +11821,14 @@ function renderInvoicePreview() {
     ? invoice.items.map((item, index) => {
       const isManualItem = item.itemSource === INVOICE_ITEM_SOURCES.MANUAL;
       const internalFieldState = isManualItem ? "" : " disabled";
+      const vp2AmountFieldState = item.itemSource === INVOICE_ITEM_SOURCES.VP2 ? " disabled" : "";
       return `
       <tr>
         <td><input type="text" value="${escapeHtml(item.description || "")}" onchange="updateInvoiceItemField(${index}, 'description', this.value)"></td>
-        <td><input type="date" value="${item.serviceDate || ""}" onchange="updateInvoiceItemField(${index}, 'serviceDate', this.value)"></td>
-        <td><input type="number" step="0.01" value="${Number(item.quantity || 0)}" onchange="updateInvoiceItemField(${index}, 'quantity', this.value)"></td>
-        <td><input type="text" value="${escapeHtml(item.unit || "")}" onchange="updateInvoiceItemField(${index}, 'unit', this.value)"></td>
-        <td><input type="number" step="0.01" value="${Number(item.rate || 0)}" onchange="updateInvoiceItemField(${index}, 'rate', this.value)"></td>
+        <td><input type="date" value="${item.serviceDate || ""}" onchange="updateInvoiceItemField(${index}, 'serviceDate', this.value)"${vp2AmountFieldState}></td>
+        <td><input type="number" step="0.01" value="${Number(item.quantity || 0)}" onchange="updateInvoiceItemField(${index}, 'quantity', this.value)"${vp2AmountFieldState}></td>
+        <td><input type="text" value="${escapeHtml(item.unit || "")}" onchange="updateInvoiceItemField(${index}, 'unit', this.value)"${vp2AmountFieldState}></td>
+        <td><input type="number" step="0.01" value="${Number(item.rate || 0)}" onchange="updateInvoiceItemField(${index}, 'rate', this.value)"${vp2AmountFieldState}></td>
         <td><select onchange="updateInvoiceItemField(${index}, 'serviceBranch', this.value)"${internalFieldState}>${getInvoiceServiceBranchOptionsMarkup(item.serviceBranch || "")}</select></td>
         <td><input type="number" min="0" step="0.01" value="${Number(item.laborCost || 0)}" onchange="updateInvoiceItemField(${index}, 'laborCost', this.value)"${internalFieldState}></td>
         <td><input type="number" min="0" step="0.01" value="${Number(item.materialCost || 0)}" onchange="updateInvoiceItemField(${index}, 'materialCost', this.value)"${internalFieldState}></td>
@@ -11387,7 +12039,9 @@ function renderInvoiceEligibilitySummary(groups = [], meta = {}) {
   const markup = groups.map((group) => {
     const cleaningTotal = group.taskItems.reduce((sum, item) => sum + Number(item.amount || 0), 0);
     const chemicalTotal = group.chemicalItems.reduce((sum, item) => sum + Number(item.amount || 0), 0);
-    const total = cleaningTotal + chemicalTotal;
+    const vp2Items = group.vp2Items || [];
+    const vp2Total = vp2Items.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+    const total = cleaningTotal + chemicalTotal + vp2Total;
     const diagnostics = diagnosticsByLabel[group.label] || null;
     const noCleaningMessage = cleaningTotal <= 0
       ? `<div class="invoice-no-cleaning-message"><strong>No eligible cleaning charges were found.</strong></div>`
@@ -11400,6 +12054,7 @@ function renderInvoiceEligibilitySummary(groups = [], meta = {}) {
         <div><strong>${escapeHtml(group.label)}</strong></div>
         <div>- ${group.taskItems.length} cleaning charges: ${toMoney(cleaningTotal)}</div>
         <div>- ${group.chemicalItems.length} chemical charges: ${toMoney(chemicalTotal)}</div>
+        <div>- ${vp2Items.length} VP² reviews: ${toMoney(vp2Total)}</div>
         <div><strong>Total eligible charges: ${toMoney(total)}</strong></div>
         ${noCleaningMessage}
         ${diagLine}
@@ -11513,8 +12168,8 @@ function generateInvoicePreviewFromFilters() {
   const taxOverride = invoiceTaxEnabled?.value || "property";
   const includeNonBillable = invoiceIncludeNonBillableChemicals?.checked === true;
   const emptyReasons = [
-    "No reconciled or completed chargeable tasks were found in the selected date range.",
-    "All eligible tasks may already be invoiced.",
+    "No reconciled or completed chargeable items were found in the selected date range.",
+    "All eligible cleaning tasks, chemical charges, and VP² reviews may already be invoiced.",
     "Included/no-charge services are excluded.",
     "Chemical entries may be non-billable or have a $0 rate.",
   ];
@@ -11541,7 +12196,8 @@ function generateInvoicePreviewFromFilters() {
 
     const taskItems = draft.items.filter((item) => item.itemSource === INVOICE_ITEM_SOURCES.TASK);
     const chemicalItems = draft.items.filter((item) => item.itemSource === INVOICE_ITEM_SOURCES.CHEMICAL);
-    renderInvoiceEligibilitySummary([{ label: property.property_name, taskItems, chemicalItems }], {
+    const vp2Items = draft.items.filter((item) => item.itemSource === INVOICE_ITEM_SOURCES.VP2);
+    renderInvoiceEligibilitySummary([{ label: property.property_name, taskItems, chemicalItems, vp2Items }], {
       emptyReasons,
       cleaningDiagnosticsByLabel: {
         [property.property_name]: draft.cleaningDiagnostics,
@@ -11575,7 +12231,8 @@ function generateInvoicePreviewFromFilters() {
 
     const taskItems = draft.items.filter((item) => item.itemSource === INVOICE_ITEM_SOURCES.TASK);
     const chemicalItems = draft.items.filter((item) => item.itemSource === INVOICE_ITEM_SOURCES.CHEMICAL);
-    renderInvoiceEligibilitySummary([{ label: selectedClientName, taskItems, chemicalItems }], {
+    const vp2Items = draft.items.filter((item) => item.itemSource === INVOICE_ITEM_SOURCES.VP2);
+    renderInvoiceEligibilitySummary([{ label: selectedClientName, taskItems, chemicalItems, vp2Items }], {
       emptyReasons,
       cleaningDiagnosticsByLabel: {
         [selectedClientName]: draft.cleaningDiagnostics,
@@ -11626,8 +12283,9 @@ function generateInvoicePreviewFromFilters() {
 
     const taskItems = draft.items.filter((item) => item.itemSource === INVOICE_ITEM_SOURCES.TASK);
     const chemicalItems = draft.items.filter((item) => item.itemSource === INVOICE_ITEM_SOURCES.CHEMICAL);
-    if (taskItems.length || chemicalItems.length) {
-      eligibilityGroups.push({ label, taskItems, chemicalItems });
+    const vp2Items = draft.items.filter((item) => item.itemSource === INVOICE_ITEM_SOURCES.VP2);
+    if (taskItems.length || chemicalItems.length || vp2Items.length) {
+      eligibilityGroups.push({ label, taskItems, chemicalItems, vp2Items });
       diagnosticsByLabel[label] = draft.cleaningDiagnostics;
       batchDrafts.push({
         ...draft,
@@ -11851,6 +12509,7 @@ async function saveInvoiceDraft(options = {}) {
     invoice_id: invoiceId,
     task_id: item.taskId || null,
     chemical_usage_id: item.chemicalUsageId || null,
+    vp2_review_charge_id: item.vp2ReviewChargeId || null,
     property_id: item.propertyId || currentInvoiceDraft.propertyId,
     description: item.description || null,
     service_date: item.serviceDate || null,
@@ -11859,7 +12518,7 @@ async function saveInvoiceDraft(options = {}) {
     rate: Number(item.rate || 0),
     amount: Number(item.amount || 0),
     item_type: item.itemType || "manual",
-    item_source: item.itemSource || (item.taskId ? INVOICE_ITEM_SOURCES.TASK : item.chemicalUsageId ? INVOICE_ITEM_SOURCES.CHEMICAL : INVOICE_ITEM_SOURCES.MANUAL),
+    item_source: item.itemSource || (item.vp2ReviewChargeId ? INVOICE_ITEM_SOURCES.VP2 : item.taskId ? INVOICE_ITEM_SOURCES.TASK : item.chemicalUsageId ? INVOICE_ITEM_SOURCES.CHEMICAL : INVOICE_ITEM_SOURCES.MANUAL),
     service_branch: item.serviceBranch || null,
     labor_cost: Number(item.laborCost || 0),
     material_cost: Number(item.materialCost || 0),
@@ -11903,6 +12562,9 @@ async function finalizeInvoiceDraft() {
   const chemicalUsageIds = Array.from(new Set(currentInvoiceDraft.items
     .filter((item) => item.chemicalUsageId)
     .map((item) => item.chemicalUsageId)));
+  const vp2ReviewChargeIds = Array.from(new Set(currentInvoiceDraft.items
+    .filter((item) => item.vp2ReviewChargeId)
+    .map((item) => item.vp2ReviewChargeId)));
 
   if (cleaningTaskIds.length) {
     const { data: latestTasks, error: latestTaskError } = await supabaseClient
@@ -11958,14 +12620,40 @@ async function finalizeInvoiceDraft() {
     }
   }
 
-  const { error: invoiceStatusError } = await supabaseClient
-    .from("invoices")
-    .update({ status: "finalized" })
-    .eq("id", currentInvoiceDraft.id);
+  if (vp2ReviewChargeIds.length) {
+    const { data: latestVp2Charges, error: latestVp2Error } = await supabaseClient
+      .from("vp2_review_charges")
+      .select("id, status")
+      .in("id", vp2ReviewChargeIds);
 
-  if (invoiceStatusError) {
-    alert("Could not finalize invoice: " + invoiceStatusError.message);
-    return;
+    if (latestVp2Error) {
+      alert("Could not verify VP² charge status before finalizing: " + latestVp2Error.message);
+      return;
+    }
+    if (vp2ReviewChargeIds.some((id) => !(latestVp2Charges || []).some((charge) => charge.id === id && charge.status === "reconciled"))) {
+      alert("One or more VP² charges are no longer reconciled and eligible. Finalize canceled to prevent duplicate billing.");
+      return;
+    }
+  }
+
+  if (vp2ReviewChargeIds.length) {
+    const { error: vp2FinalizeError } = await supabaseClient.rpc("admin_link_vp2_invoice_charges", {
+      target_invoice_id: currentInvoiceDraft.id,
+    });
+    if (vp2FinalizeError) {
+      alert("Could not finalize invoice and link VP² charges: " + vp2FinalizeError.message);
+      return;
+    }
+  } else {
+    const { error: invoiceStatusError } = await supabaseClient
+      .from("invoices")
+      .update({ status: "finalized" })
+      .eq("id", currentInvoiceDraft.id);
+
+    if (invoiceStatusError) {
+      alert("Could not finalize invoice: " + invoiceStatusError.message);
+      return;
+    }
   }
 
   if (cleaningTaskIds.length) {
@@ -12089,9 +12777,22 @@ async function updateInvoiceStatus(invoiceId, status) {
       alert("Invoice was voided, but chemical linkage release failed: " + chemicalReleaseError.message);
       return;
     }
+
+  }
+
+  if (normalizedStatus === "void" && existing) {
+    const { error: vp2ReleaseError } = await supabaseClient.rpc("admin_release_vp2_invoice_charges", {
+      target_invoice_id: invoiceId,
+    });
+    if (vp2ReleaseError && !isVp2BillingRpcUnavailable(vp2ReleaseError, "admin_release_vp2_invoice_charges")) {
+      alert("Invoice was voided, but VP² charge linkage release failed: " + vp2ReleaseError.message);
+      return;
+    }
+    if (vp2ReleaseError) console.warn("VP² invoice release RPC is unavailable until its migration is installed:", vp2ReleaseError.message);
   }
 
   await loadInvoices();
+  await loadVp2Dashboard();
   await loadCleaningTasks();
   await loadChemicalUsageEntries();
   renderInvoiceHistory();
@@ -12153,9 +12854,10 @@ async function openInvoiceDraft(invoiceId) {
     taxRate: Number(invoice.tax_rate ?? property?.billing_tax_rate ?? 0),
     includeNonBillableChemicals: false,
     items: (items || []).map((item) => ({
-      sourceId: item.chemical_usage_id || item.task_id || null,
+      sourceId: item.vp2_review_charge_id || item.chemical_usage_id || item.task_id || null,
       taskId: item.task_id || null,
       chemicalUsageId: item.chemical_usage_id || null,
+      vp2ReviewChargeId: item.vp2_review_charge_id || null,
       propertyId: item.property_id || invoice.property_id,
       property_name: item.property_name || "",
       propertyName: item.property_name || item.propertyName || "",
@@ -12166,14 +12868,14 @@ async function openInvoiceDraft(invoiceId) {
       rate: Number(item.rate || 0),
       amount: Number(item.amount || 0),
       itemType: item.item_type || "manual",
-      itemSource: item.item_source || (item.task_id ? INVOICE_ITEM_SOURCES.TASK : item.chemical_usage_id ? INVOICE_ITEM_SOURCES.CHEMICAL : INVOICE_ITEM_SOURCES.MANUAL),
+      itemSource: item.item_source || (item.vp2_review_charge_id ? INVOICE_ITEM_SOURCES.VP2 : item.task_id ? INVOICE_ITEM_SOURCES.TASK : item.chemical_usage_id ? INVOICE_ITEM_SOURCES.CHEMICAL : INVOICE_ITEM_SOURCES.MANUAL),
       serviceBranch: item.service_branch || null,
       laborCost: Number(item.labor_cost || 0),
       materialCost: Number(item.material_cost || 0),
       notes: item.notes || "",
     })),
     isManualInvoice: (items || []).length > 0 && (items || []).every((item) => (
-      (item.item_source || (item.task_id ? INVOICE_ITEM_SOURCES.TASK : item.chemical_usage_id ? INVOICE_ITEM_SOURCES.CHEMICAL : INVOICE_ITEM_SOURCES.MANUAL)) === INVOICE_ITEM_SOURCES.MANUAL
+      (item.item_source || (item.vp2_review_charge_id ? INVOICE_ITEM_SOURCES.VP2 : item.task_id ? INVOICE_ITEM_SOURCES.TASK : item.chemical_usage_id ? INVOICE_ITEM_SOURCES.CHEMICAL : INVOICE_ITEM_SOURCES.MANUAL)) === INVOICE_ITEM_SOURCES.MANUAL
     )),
     subtotal: Number(invoice.subtotal || 0),
     tax: Number(invoice.tax || 0),
@@ -12286,6 +12988,12 @@ async function updateInvoiceSourceReleaseRows(tableName, ids, fields) {
   return { error: lastError };
 }
 
+function isVp2BillingRpcUnavailable(error, rpcName) {
+  const message = String(error?.message || "").toLowerCase();
+  return message.includes(String(rpcName || "").toLowerCase())
+    && /schema cache|could not find|does not exist|not found/.test(message);
+}
+
 async function deleteFinalizedOrProtectedInvoice(invoiceId) {
   const invoice = invoices.find((row) => row.id === invoiceId);
   if (!invoice) return;
@@ -12348,6 +13056,15 @@ async function deleteFinalizedOrProtectedInvoice(invoiceId) {
     }
   }
 
+  const { error: vp2ReleaseError } = await supabaseClient.rpc("admin_release_vp2_invoice_charges", {
+    target_invoice_id: invoiceId,
+  });
+  if (vp2ReleaseError && !isVp2BillingRpcUnavailable(vp2ReleaseError, "admin_release_vp2_invoice_charges")) {
+    alert("Could not release linked VP² charges: " + vp2ReleaseError.message);
+    return;
+  }
+  if (vp2ReleaseError) console.warn("VP² invoice release RPC is unavailable until its migration is installed:", vp2ReleaseError.message);
+
   const { error: deleteItemsError } = await supabaseClient
     .from("invoice_items")
     .delete()
@@ -12374,6 +13091,7 @@ async function deleteFinalizedOrProtectedInvoice(invoiceId) {
   }
 
   await loadInvoices();
+  await loadVp2Dashboard();
   await loadCleaningTasks();
   await loadChemicalUsageEntries();
   renderInvoiceHistory();
@@ -14526,7 +15244,7 @@ function renderProperties() {
   }
 
   if (filteredProperties.length === 0) {
-    propertyList.innerHTML = `<div class="empty">No properties yet.</div>`;
+    propertyList.innerHTML = `<div class="empty">${activeServiceWorkspace === SERVICE_BRANCH_VP2 ? "No properties are enrolled in VP²." : "No properties yet."}</div>`;
     return;
   }
 
@@ -14544,8 +15262,10 @@ function renderProperties() {
     const toggleButtonText = isCollapsed ? "Expand" : "Collapse";
     const activeTab = activeServiceWorkspace === SERVICE_BRANCH_POOL ? getPropertyDetailTab(property.id) : "tasks";
 
-    const taskContent = tasks.length === 0
-      ? `<p>No ${getServiceBranchLabel(activeServiceWorkspace)} tasks scheduled.</p>`
+    const taskContent = activeServiceWorkspace === SERVICE_BRANCH_VP2
+      ? `<p>VP² reviews are managed in the Virtual Pool Pro dashboard.</p>`
+      : tasks.length === 0
+        ? `<p>No ${getServiceBranchLabel(activeServiceWorkspace)} tasks scheduled.</p>`
       : tasks.map((task) => {
           const taskBillingAmount = getTaskBillingAmount(task);
           const billingContext = getTaskBillingContext(task);
@@ -14670,6 +15390,12 @@ function renderProperties() {
             <div><strong>Additional / Billable Cleaning Labor:</strong> $${Number(property.additional_cleaning_labor || 0).toFixed(2)}</div>
             <div><strong>Default Cleaning Rate:</strong> $${Number(property.default_cleaning_rate ?? 0).toFixed(2)}</div>
             <div><strong>Same-Day Surcharge:</strong> $${Number(property.same_day_surcharge ?? 0).toFixed(2)}</div>
+          ` : activeServiceWorkspace === SERVICE_BRANCH_VP2 ? `
+            <div><strong>VP² Service Day:</strong> ${property.vp2_service_day || "Wednesday"}</div>
+            <div><strong>VP² Service Start:</strong> ${property.vp2_start_date || "Not set"}</div>
+            <div><strong>Billing Week Starts:</strong> ${property.vp2_week_start_day || "Monday"}</div>
+            <div><strong>First Review Price:</strong> $${Number(property.vp2_first_review_price ?? 25).toFixed(2)}</div>
+            <div><strong>Additional Review Price:</strong> $${Number(property.vp2_additional_review_price ?? 15).toFixed(2)}</div>
           ` : ""}
           <div><strong>Taxable:</strong> ${property.billing_taxable === false ? "No" : "Yes"}</div>
           <div><strong>Tax Rate:</strong> ${Number(property.billing_tax_rate || 0).toFixed(2)}%</div>
@@ -14678,13 +15404,13 @@ function renderProperties() {
         </div>
 
         <div class="card-actions">
-          <button onclick="openCleaningModal('${property.id}')">+ ${getServiceBranchLabel(activeServiceWorkspace)} Task</button>
-          ${activeServiceWorkspace !== SERVICE_BRANCH_HOUSEKEEPING ? `<button onclick="openPipelineJobModal('${property.id}')">+ Add to Pipeline</button>` : ""}
+          ${activeServiceWorkspace !== SERVICE_BRANCH_VP2 ? `<button onclick="openCleaningModal('${property.id}')">+ ${getServiceBranchLabel(activeServiceWorkspace)} Task</button>` : ""}
+          ${![SERVICE_BRANCH_HOUSEKEEPING, SERVICE_BRANCH_VP2].includes(activeServiceWorkspace) ? `<button onclick="openPipelineJobModal('${property.id}')">+ Add to Pipeline</button>` : ""}
           <button onclick="openEditModal('${property.id}')">Edit</button>
           <button class="delete-btn" onclick="deleteProperty('${property.id}')">Delete</button>
         </div>
 
-        <div class="reminders-section ${activeServiceWorkspace === SERVICE_BRANCH_LAWN ? "hidden" : ""}">
+        <div class="reminders-section ${[SERVICE_BRANCH_LAWN, SERVICE_BRANCH_VP2].includes(activeServiceWorkspace) ? "hidden" : ""}">
           <div class="reminders-header">
             <h4>Operations Reminders</h4>
             <button class="add-reminder-btn" onclick="openReminderModal('${property.id}')">+ Reminder</button>

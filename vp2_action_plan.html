@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="referrer" content="no-referrer">
+  <meta name="robots" content="noindex,nofollow,noarchive">
+  <title>VP² Technician Action Plan</title>
+  <link rel="stylesheet" href="vp2_action_plan.css">
+</head>
+<body>
+  <main class="vp2-tech-shell">
+    <section id="vp2TechLoading" class="vp2-tech-state" aria-live="polite"><p>Loading action plan...</p></section>
+    <section id="vp2TechUnavailable" class="vp2-tech-state hidden" aria-live="polite">
+      <h1>Action plan unavailable</h1>
+      <p>This technician link is invalid, expired, revoked, or unavailable.</p>
+    </section>
+    <article id="vp2TechContent" class="vp2-tech-paper hidden">
+      <header class="vp2-tech-brand">
+        <img id="vp2TechLogo" src="assets/vp2-logo.png" alt="VP² Virtual Pool Pro">
+        <p id="vp2TechAffiliation">A Guest Ready Services Company</p>
+      </header>
+      <p class="vp2-tech-eyebrow">Technician Action Plan</p>
+      <h1 id="vp2TechProperty"></h1>
+      <p class="vp2-tech-date">Service date: <strong id="vp2TechDate"></strong></p>
+
+      <section class="vp2-tech-section">
+        <h2>Water Readings</h2>
+        <dl id="vp2TechReadings" class="vp2-tech-readings"></dl>
+      </section>
+      <section class="vp2-tech-section">
+        <h2>Water Analysis</h2>
+        <p id="vp2TechAnalysis" class="vp2-tech-analysis"></p>
+      </section>
+      <section class="vp2-tech-section">
+        <h2>Recommended Actions</h2>
+        <div id="vp2TechActions" class="vp2-tech-actions"></div>
+      </section>
+      <form id="vp2TechCompletionForm" class="vp2-tech-completion hidden">
+        <h2>Work Completion</h2>
+        <fieldset id="vp2TechChecklist" class="vp2-tech-checklist">
+          <legend>Completed work</legend>
+        </fieldset>
+        <label>Technician comments<textarea id="vp2TechNotes" rows="4" maxlength="10000" placeholder="Add comments for the service record"></textarea></label>
+        <label>Work photos<input id="vp2TechPhotos" type="file" accept="image/jpeg,image/png,image/webp" multiple></label>
+        <p id="vp2TechPhotoStatus" class="vp2-tech-photo-status" aria-live="polite"></p>
+        <p id="vp2TechError" class="vp2-tech-error hidden" role="alert"></p>
+        <button id="vp2TechCompleteBtn" type="submit">Mark Complete</button>
+      </form>
+      <section id="vp2TechSavedPhotosSection" class="vp2-tech-section hidden">
+        <h2>Work Photos</h2>
+        <div id="vp2TechPhotoList" class="vp2-tech-photo-list"></div>
+      </section>
+      <section id="vp2TechCompleted" class="vp2-tech-completed hidden" aria-live="polite">
+        <h2>Work marked complete</h2>
+        <p id="vp2TechCompletedAt"></p>
+        <div id="vp2TechCompletedChecklist" class="vp2-tech-completed-checklist"></div>
+        <p id="vp2TechSavedNotes"></p>
+      </section>
+      <footer class="vp2-tech-footer">Remote Pool Care. Real Results.</footer>
+    </article>
+  </main>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="vp2_action_plan.js"></script>
+</body>
+</html>
