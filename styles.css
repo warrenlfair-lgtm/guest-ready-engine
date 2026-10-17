@@ -853,6 +853,100 @@ h1 {
     padding-left: 20px;
 }
 
+.vp2-action-plan-history {
+    display: grid;
+    gap: 16px;
+}
+
+.vp2-history-section {
+    display: grid;
+    gap: 10px;
+    padding: 14px;
+    border: 1px solid #d9e1df;
+    border-radius: 6px;
+    background: #ffffff;
+}
+
+.vp2-history-section h3,
+.vp2-history-section h4,
+.vp2-history-section p {
+    margin: 0;
+}
+
+.vp2-history-section h3 {
+    color: #153f3b;
+    font-size: 16px;
+}
+
+.vp2-history-section h4 {
+    color: #334155;
+    font-size: 13px;
+}
+
+.vp2-history-readings {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+    margin: 0;
+}
+
+.vp2-history-readings div {
+    min-width: 0;
+    padding: 9px;
+    border-radius: 4px;
+    background: #f3f7f5;
+}
+
+.vp2-history-readings dt,
+.vp2-history-readings dd {
+    margin: 0;
+}
+
+.vp2-history-readings dt {
+    color: #52615e;
+    font-size: 11px;
+}
+
+.vp2-history-readings dd {
+    margin-top: 3px;
+    color: #1f3633;
+    font-size: 13px;
+    font-weight: 700;
+    overflow-wrap: anywhere;
+}
+
+.vp2-history-checklist {
+    display: grid;
+    gap: 7px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.vp2-history-checklist li {
+    display: grid;
+    grid-template-columns: 90px minmax(0, 1fr);
+    gap: 8px;
+    font-size: 13px;
+}
+
+.vp2-history-checklist li span {
+    color: #52615e;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.vp2-history-completion {
+    color: #176b57;
+    font-weight: 700;
+}
+
+.vp2-view-action-plan-btn {
+    justify-self: start;
+    margin-top: 4px;
+}
+
 .vp2-plan-preview-actions {
     white-space: pre-wrap;
 }
@@ -947,6 +1041,15 @@ h1 {
 @media (max-width: 700px) {
     .vp2-plan-readings-grid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .vp2-history-readings {
+        grid-template-columns: 1fr;
+    }
+
+    .vp2-history-checklist li {
+        grid-template-columns: 1fr;
+        gap: 3px;
     }
 
     .vp2-action-item {

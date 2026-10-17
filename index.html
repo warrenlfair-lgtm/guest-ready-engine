@@ -297,6 +297,7 @@
           </div>
         </div>
         <div id="vp2ActionPlanPreview" class="vp2-action-plan-preview hidden"></div>
+        <div id="vp2ActionPlanHistory" class="vp2-action-plan-history hidden"></div>
         <p id="vp2ActionPlanStatus" class="vp2-action-plan-status" role="status" aria-live="polite"></p>
         <div id="vp2ActionPlanLinkPanel" class="vp2-action-plan-link hidden">
           <label for="vp2ActionPlanLink">Technician Link</label>
@@ -305,9 +306,11 @@
         </div>
       </div>
       <footer class="modal-actions vp2-action-plan-footer">
-        <button id="vp2ActionPlanSaveBtn" type="button" class="secondary-btn" onclick="saveVp2ActionPlan()">Save</button>
-        <button id="vp2ActionPlanPreviewBtn" type="button" class="secondary-btn" onclick="previewVp2ActionPlan()">Preview</button>
-        <button id="vp2ActionPlanGenerateBtn" type="button" onclick="generateVp2ActionPlanLink()">Generate Link</button>
+        <div id="vp2ActionPlanEditActions">
+          <button id="vp2ActionPlanSaveBtn" type="button" class="secondary-btn" onclick="saveVp2ActionPlan()">Save</button>
+          <button id="vp2ActionPlanPreviewBtn" type="button" class="secondary-btn" onclick="previewVp2ActionPlan()">Preview</button>
+          <button id="vp2ActionPlanGenerateBtn" type="button" onclick="generateVp2ActionPlanLink()">Generate Link</button>
+        </div>
         <button type="button" class="secondary-btn" onclick="closeVp2ActionPlan()">Close</button>
       </footer>
     </div>

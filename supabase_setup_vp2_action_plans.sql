@@ -203,6 +203,17 @@ BEGIN
     ),
     'work_order_id', work_order.id,
     'work_order_status', work_order.status,
+    'completion_checklist', COALESCE(work_order.completion_checklist, '[]'::jsonb),
+    'technician_notes', work_order.technician_notes,
+    'technician_photos', COALESCE(work_order.photographs, '[]'::jsonb),
+    'work_order_completed_at', work_order.completed_at,
+    'technician_plan_snapshot', (
+      SELECT link.plan_snapshot
+      FROM public.vp2_action_plan_links link
+      WHERE link.action_plan_id = plan.id
+      ORDER BY link.created_at DESC
+      LIMIT 1
+    ),
     'active_link', EXISTS (
       SELECT 1 FROM public.vp2_action_plan_links link
       WHERE link.action_plan_id = plan.id

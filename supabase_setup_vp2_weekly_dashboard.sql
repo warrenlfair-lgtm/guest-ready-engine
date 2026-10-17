@@ -148,7 +148,12 @@ BEGIN
         'property_name', property.property_name,
         'review_kind', review.review_kind,
         'scheduled_date', review.scheduled_date,
-        'completed_at', review.completed_at
+        'completed_at', review.completed_at,
+        'has_action_plan', EXISTS (
+          SELECT 1
+          FROM public.vp2_action_plans plan
+          WHERE plan.review_id = review.id
+        )
       ) ORDER BY review.completed_at DESC NULLS LAST, property.property_name)
       FROM public.vp2_reviews review
       JOIN public.properties property ON property.id = review.property_id

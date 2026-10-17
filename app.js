@@ -5231,6 +5231,7 @@ function renderVp2Dashboard() {
     <strong>${escapeHtml(review.property_name || "Property")}</strong>
     <span>${escapeHtml(review.completed_at || review.scheduled_date || "Completed")}</span>
     <small>${escapeHtml(review.review_kind || "Review")} · Charge ${toMoney(vp2ReviewCharges.find((entry) => entry.review_id === review.id)?.amount || 0)}</small>
+    ${review.has_action_plan ? `<button type="button" class="secondary-btn vp2-view-action-plan-btn" onclick="openVp2ActionPlan('${escapeHtml(review.id)}', { readOnly: true })">View Action Plan</button>` : ""}
     ${(() => {
       const charge = vp2ReviewCharges.find((entry) => entry.review_id === review.id);
       if (charge?.status === "invoiced") return `<small class="vp2-charge-state">Invoiced</small>`;
@@ -5310,11 +5311,15 @@ function renderVp2DashboardCalendar({
         : !charge || chargeStatus === "void"
           ? ""
           : `<button type="button" class="vp2-reconcile-btn" onclick="completeAndReconcileVp2Review('${escapeHtml(review.id)}')">Reconcile · ${toMoney(charge.amount)}</button>`;
+    const actionPlanMarkup = review.has_action_plan
+      ? `<button type="button" class="secondary-btn vp2-view-action-plan-btn" onclick="openVp2ActionPlan('${escapeHtml(review.id)}', { readOnly: true })">View Action Plan</button>`
+      : "";
     addEvent(date, "Completed review", "completed", `
       <div class="vp2-calendar-content">
         <strong>${escapeHtml(review.property_name || "Property")}</strong>
         <span>${escapeHtml(review.review_kind || "Review")} · ${escapeHtml(review.completed_at || review.scheduled_date || "Completed")}</span>
         <small>Charge ${toMoney(charge?.amount || 0)}</small>
+        ${actionPlanMarkup}
         ${chargeMarkup}
       </div>
     `);
@@ -5429,7 +5434,67 @@ function resetVp2ActionPlanForm() {
   setVp2ActionPlanStatus("");
 }
 
-async function openVp2ActionPlan(reviewId) {
+function renderVp2ActionPlanHistory(plan) {
+  const planData = plan.technician_plan_snapshot || plan.plan_data || {};
+  const readings = planData.readings || {};
+  const standardActions = Array.isArray(planData.standardTasks)
+    ? planData.standardTasks.map((action) => typeof action === "string" ? action : action.title || action.label || "Service task")
+    : VP2_STANDARD_ACTIONS;
+  const standardKeys = new Set(standardActions.map((action) => action.trim().toLowerCase()));
+  const actions = Array.isArray(planData.actions) ? planData.actions : [];
+  const customActions = actions.filter((action) => {
+    const text = typeof action === "string" ? action : action.instructions || action.chemical || action.title || "";
+    return String(text).trim() && !standardKeys.has(String(text).trim().toLowerCase());
+  });
+  const checklist = Array.isArray(plan.completion_checklist) ? plan.completion_checklist : [];
+  const technicianCompleted = plan.work_order_status === "completed";
+  const checklistResult = (index) => technicianCompleted
+    ? checklist[index] ? "Completed" : "Not checked"
+    : "Not submitted";
+  const completionTime = plan.work_order_completed_at
+    ? new Date(plan.work_order_completed_at).toLocaleString()
+    : "";
+  const formatAction = (action) => typeof action === "string"
+    ? action
+    : [action.title || action.chemical, action.amount ? `${action.amount}${action.unit ? ` ${action.unit}` : ""}` : "", action.instructions]
+      .filter(Boolean).join(" · ");
+  const standardChecklist = standardActions.map((action, index) => `
+    <li><span>${checklistResult(index)}</span>${escapeHtml(action)}</li>
+  `).join("");
+  const customChecklist = customActions.map((action, index) => {
+    const text = formatAction(action);
+    return `<li><span>${checklistResult(standardActions.length + index)}</span>${escapeHtml(text)}</li>`;
+  }).join("");
+  const photos = Array.isArray(plan.technician_photos) ? plan.technician_photos : [];
+  const photoName = (photo) => {
+    const path = typeof photo === "string" ? photo : photo?.path || "";
+    return typeof photo === "object" && photo?.name ? photo.name : path.split("/").pop() || "Work photo";
+  };
+
+  return `
+    <section class="vp2-history-section">
+      <h3>Saved action plan</h3>
+      <dl class="vp2-history-readings">
+        <div><dt>Free chlorine</dt><dd>${escapeHtml(readings.free_chlorine ?? "Not entered")}</dd></div>
+        <div><dt>pH</dt><dd>${escapeHtml(readings.ph ?? "Not entered")}</dd></div>
+        <div><dt>Total alkalinity</dt><dd>${escapeHtml(readings.total_alkalinity ?? "Not entered")}</dd></div>
+      </dl>
+      <h4>Water analysis</h4>
+      <p>${escapeHtml(planData.analysis || "No analysis entered.").replace(/\n/g, "<br>")}</p>
+      <h4>Standard pool service tasks</h4>
+      <ul class="vp2-history-checklist">${standardChecklist}</ul>
+      ${customActions.length ? `<h4>Additional recommended actions</h4><ul class="vp2-history-checklist">${customChecklist}</ul>` : ""}
+    </section>
+    <section class="vp2-history-section">
+      <h3>Technician completion</h3>
+      <p class="vp2-history-completion-state">${technicianCompleted ? `Technician marked complete${completionTime ? ` · ${escapeHtml(completionTime)}` : ""}` : "No technician completion report submitted."}</p>
+      ${plan.technician_notes ? `<h4>Technician comments</h4><p>${escapeHtml(plan.technician_notes).replace(/\n/g, "<br>")}</p>` : `<p>No technician comments.</p>`}
+      ${photos.length ? `<h4>Work photos</h4><ul>${photos.map((photo) => `<li>${escapeHtml(photoName(photo))}</li>`).join("")}</ul>` : `<p>No work photos attached.</p>`}
+    </section>
+  `;
+}
+
+async function openVp2ActionPlan(reviewId, { readOnly = false } = {}) {
   if (!requireAdminAccess()) return;
   const dashboard = vp2DashboardData || {};
   currentVp2ActionPlanReview = [
@@ -5445,6 +5510,12 @@ async function openVp2ActionPlan(reviewId) {
   currentVp2ActionPlanId = null;
   currentVp2TechnicianUrl = "";
   resetVp2ActionPlanForm();
+  const history = document.getElementById("vp2ActionPlanHistory");
+  if (history) history.classList.add("hidden");
+  document.getElementById("vp2ActionPlanEditActions")?.classList.toggle("hidden", readOnly);
+  document.getElementById("vp2ActionPlanEditor")?.classList.toggle("hidden", readOnly);
+  const title = document.getElementById("vp2ActionPlanTitle");
+  if (title) title.textContent = readOnly ? "VP² Action Plan History" : "VP² Technician Action Plan";
   const propertyName = document.getElementById("vp2ActionPlanPropertyName");
   const serviceDate = document.getElementById("vp2ActionPlanDate");
   if (propertyName) propertyName.textContent = currentVp2ActionPlanReview.property_name || "Property";
@@ -5459,8 +5530,21 @@ async function openVp2ActionPlan(reviewId) {
     return;
   }
   const plan = Array.isArray(data) ? data[0] : data;
-  if (!plan) return;
+  if (!plan) {
+    if (readOnly && history) {
+      history.innerHTML = "<p>No saved action plan was found for this review.</p>";
+      history.classList.remove("hidden");
+    }
+    return;
+  }
   currentVp2ActionPlanId = plan.id;
+  if (readOnly) {
+    if (history) {
+      history.innerHTML = renderVp2ActionPlanHistory(plan);
+      history.classList.remove("hidden");
+    }
+    return;
+  }
   const planData = plan.plan_data || {};
   const readings = planData.readings || {};
   const fields = {
