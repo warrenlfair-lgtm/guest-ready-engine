@@ -227,28 +227,45 @@
         <p class="vp2-affiliation">A Guest Ready Services Company</p>
       </div>
     </header>
+    <div class="vp2-week-navigation" role="group" aria-label="VP² review week">
+      <button type="button" class="secondary-btn" onclick="shiftVp2DashboardWeek(-7)" aria-label="Previous week">&lsaquo; Previous</button>
+      <label for="vp2DashboardWeekStart">Week of</label>
+      <input id="vp2DashboardWeekStart" type="date" aria-label="Week start date" onchange="setVp2DashboardWeekStart(this.value)">
+      <strong id="vp2DashboardWeekLabel">This week</strong>
+      <button type="button" class="secondary-btn" onclick="shiftVp2DashboardWeek(7)" aria-label="Next week">Next &rsaquo;</button>
+    </div>
     <p id="vp2Status" class="vp2-status hidden" role="status" aria-live="polite"></p>
 
     <div class="vp2-metrics" aria-label="Virtual Pool Pro dashboard summary">
       <article class="vp2-metric"><span>Enrolled properties</span><strong id="vp2EnrolledCount">0</strong></article>
       <article class="vp2-metric"><span>Properties with readings</span><strong id="vp2ReadingsCount">0</strong></article>
-      <article class="vp2-metric"><span>Upcoming reviews</span><strong id="vp2UpcomingCount">0</strong></article>
-      <article class="vp2-metric"><span>Reviews needing attention</span><strong id="vp2AttentionCount">0</strong></article>
-      <article class="vp2-metric"><span>Action plans</span><strong id="vp2ApprovalCount">0</strong></article>
-      <article class="vp2-metric"><span>Open technician assignments</span><strong id="vp2AssignmentsCount">0</strong></article>
-      <article class="vp2-metric"><span>Completed this month</span><strong id="vp2CompletedCount">0</strong></article>
+      <article class="vp2-metric"><span>Reviews this week</span><strong id="vp2UpcomingCount">0</strong></article>
+      <article class="vp2-metric"><span>Reviews needing attention this week</span><strong id="vp2AttentionCount">0</strong></article>
+      <article class="vp2-metric"><span>Active action plans</span><strong id="vp2ApprovalCount">0</strong></article>
+      <article class="vp2-metric"><span>Open assignments</span><strong id="vp2AssignmentsCount">0</strong></article>
+      <article class="vp2-metric"><span>Completed this week</span><strong id="vp2CompletedCount">0</strong></article>
       <article class="vp2-metric vp2-revenue-metric"><span>Monthly VP² revenue</span><strong id="vp2RevenueAmount">$0.00</strong></article>
     </div>
 
-    <div class="vp2-content-grid">
+    <div class="vp2-content-grid vp2-overview-grid">
       <section class="vp2-panel"><h3>Enrolled properties</h3><div id="vp2EnrolledProperties" class="vp2-list"></div></section>
       <section class="vp2-panel"><h3>Latest chemistry readings</h3><div id="vp2LatestReadings" class="vp2-list"></div></section>
-      <section class="vp2-panel"><h3>Upcoming reviews</h3><div id="vp2UpcomingReviews" class="vp2-list"></div></section>
-      <section class="vp2-panel vp2-attention-panel"><h3>Reviews requiring attention</h3><div id="vp2AttentionReviews" class="vp2-list"></div></section>
-      <section class="vp2-panel"><h3>Technician Action Plans</h3><div id="vp2AwaitingPlans" class="vp2-list"></div></section>
-      <section class="vp2-panel"><h3>Technician assignments</h3><div id="vp2OpenWorkOrders" class="vp2-list"></div></section>
-      <section class="vp2-panel vp2-completed-panel"><h3>Recently completed reviews</h3><div id="vp2CompletedReviews" class="vp2-list"></div></section>
     </div>
+    <div class="vp2-week-view-header">
+      <h3>VP² activity this week</h3>
+      <div class="week-view-toggle vp2-view-toggle" role="group" aria-label="VP² weekly activity view">
+        <button type="button" class="vp2-view-btn" data-vp2-mode="list" onclick="setVp2DashboardViewMode('list')" aria-pressed="false">List View</button>
+        <button type="button" class="vp2-view-btn" data-vp2-mode="calendar" onclick="setVp2DashboardViewMode('calendar')" aria-pressed="true">Calendar View</button>
+      </div>
+    </div>
+    <div id="vp2WeekListView" class="vp2-content-grid vp2-week-list-grid">
+      <section class="vp2-panel"><h3>Scheduled reviews this week</h3><div id="vp2UpcomingReviews" class="vp2-list"></div></section>
+      <section class="vp2-panel vp2-attention-panel"><h3>Reviews requiring attention this week</h3><div id="vp2AttentionReviews" class="vp2-list"></div></section>
+      <section class="vp2-panel"><h3>Active action plans this week</h3><div id="vp2AwaitingPlans" class="vp2-list"></div></section>
+      <section class="vp2-panel"><h3>Open assignments this week</h3><div id="vp2OpenWorkOrders" class="vp2-list"></div></section>
+      <section class="vp2-panel vp2-completed-panel"><h3>Completed reviews this week</h3><div id="vp2CompletedReviews" class="vp2-list"></div></section>
+    </div>
+    <div id="vp2WeekCalendarView" class="hidden"></div>
   </section>
 
   <div id="vp2ActionPlanModal" class="modal hidden">

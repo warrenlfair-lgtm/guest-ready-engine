@@ -25,6 +25,8 @@ let vp2ActionPlansError = "";
 let currentVp2ActionPlanReview = null;
 let currentVp2ActionPlanId = null;
 let currentVp2TechnicianUrl = "";
+let selectedVp2DashboardWeekStart = "";
+let vp2DashboardViewMode = localStorage.getItem("vp2DashboardViewMode") || "calendar";
 let propertyContractRevenueHistoryAvailable = true;
 let invoicePropertyLabelById = new Map();
 let currentInvoiceDraft = null;
@@ -4977,22 +4979,74 @@ async function loadProperties() {
   }));
 }
 
-async function loadVp2Dashboard() {
+function getVp2DashboardWeekRange() {
+  const referenceDate = normalizeDateKey(selectedVp2DashboardWeekStart) || getBusinessDateValue();
+  const parsedDate = new Date(`${referenceDate}T00:00:00Z`);
+  const weekday = parsedDate.getUTCDay();
+  const weekStartDate = addDaysToDateKey(referenceDate, -((weekday + 6) % 7));
+  return { startDate: weekStartDate, endDate: addDaysToDateKey(weekStartDate, 6) };
+}
+
+function setVp2DashboardWeekStart(dateValue) {
+  const date = normalizeDateKey(dateValue);
+  if (!date) return;
+  const parsedDate = new Date(`${date}T00:00:00Z`);
+  selectedVp2DashboardWeekStart = addDaysToDateKey(date, -((parsedDate.getUTCDay() + 6) % 7));
+  const weekInput = document.getElementById("vp2DashboardWeekStart");
+  if (weekInput) weekInput.value = selectedVp2DashboardWeekStart;
+  const weekLabel = document.getElementById("vp2DashboardWeekLabel");
+  if (weekLabel) {
+    weekLabel.textContent = `${formatInvoicePrintDateValue(selectedVp2DashboardWeekStart)} – ${formatInvoicePrintDateValue(addDaysToDateKey(selectedVp2DashboardWeekStart, 6))}`;
+  }
+  loadVp2Dashboard({ refreshSchedules: false });
+}
+
+function shiftVp2DashboardWeek(days) {
+  const { startDate } = getVp2DashboardWeekRange();
+  setVp2DashboardWeekStart(addDaysToDateKey(startDate, Number(days || 0)));
+}
+
+function setVp2DashboardViewMode(mode) {
+  if (!['list', 'calendar'].includes(mode)) return;
+  vp2DashboardViewMode = mode;
+  localStorage.setItem("vp2DashboardViewMode", mode);
+  renderVp2Dashboard();
+}
+
+window.setVp2DashboardViewMode = setVp2DashboardViewMode;
+
+async function loadVp2Dashboard({ refreshSchedules = true } = {}) {
   if (!isAdminUser()) return;
 
-  const { error: schedulingError } = await supabaseClient.rpc("admin_sync_vp2_reviews");
-  vp2SchedulingError = schedulingError?.message || "";
-  if (!schedulingError) {
-    const { error: billingError } = await supabaseClient.rpc("admin_sync_vp2_review_charges");
-    vp2BillingError = billingError?.message || "";
-  } else {
-    vp2BillingError = "";
+  const { startDate, endDate } = getVp2DashboardWeekRange();
+  if (!selectedVp2DashboardWeekStart) {
+    selectedVp2DashboardWeekStart = startDate;
+    const weekInput = document.getElementById("vp2DashboardWeekStart");
+    if (weekInput) weekInput.value = startDate;
+    const weekLabel = document.getElementById("vp2DashboardWeekLabel");
+    if (weekLabel) weekLabel.textContent = `${formatInvoicePrintDateValue(startDate)} – ${formatInvoicePrintDateValue(endDate)}`;
   }
-  await loadVp2ReviewCharges();
+  if (refreshSchedules) {
+    const { error: schedulingError } = await supabaseClient.rpc("admin_sync_vp2_reviews");
+    vp2SchedulingError = schedulingError?.message || "";
+    if (!schedulingError) {
+      const { error: billingError } = await supabaseClient.rpc("admin_sync_vp2_review_charges");
+      vp2BillingError = billingError?.message || "";
+    } else {
+      vp2BillingError = "";
+    }
+  }
+  await loadVp2ReviewCharges(startDate, endDate);
 
-  const { data: actionPlans, error: actionPlansError } = await supabaseClient.rpc("admin_list_vp2_action_plans");
+  const { data: actionPlans, error: actionPlansError } = await supabaseClient.rpc("admin_list_vp2_action_plans_for_week", {
+    target_week_start_date: startDate,
+    target_week_end_date: endDate,
+  });
   vp2ActionPlansError = actionPlansError?.message || "";
-  const { data, error } = await supabaseClient.rpc("admin_get_vp2_dashboard");
+  const { data, error } = await supabaseClient.rpc("admin_get_vp2_dashboard_for_week", {
+    target_week_start_date: startDate,
+    target_week_end_date: endDate,
+  });
   if (error) {
     vp2DashboardData = null;
     vp2SchemaAvailable = false;
@@ -5009,15 +5063,18 @@ async function loadVp2Dashboard() {
   renderVp2Dashboard();
 }
 
-async function loadVp2ReviewCharges() {
+async function loadVp2ReviewCharges(startDate = "", endDate = "") {
   if (!isAdminUser()) {
     vp2ReviewCharges = [];
     return;
   }
-  const { data, error } = await supabaseClient
+  let query = supabaseClient
     .from("vp2_review_charges")
     .select("*")
     .order("service_date", { ascending: true });
+  if (startDate) query = query.gte("service_date", startDate);
+  if (endDate) query = query.lte("service_date", endDate);
+  const { data, error } = await query;
   vp2ReviewCharges = error ? [] : (data || []);
   if (error && !String(error.message || "").toLowerCase().includes("vp2_review_charges")) {
     vp2BillingError = error.message || "VP² charges could not be loaded.";
@@ -5086,13 +5143,13 @@ function renderVp2Dashboard() {
 
   if (status) {
     const statusText = !vp2SchemaAvailable
-      ? `VP² setup is not available. Run supabase_setup_vp2_core.sql in Supabase SQL Editor. ${vp2DashboardError ? `Details: ${vp2DashboardError}` : ""}`
+      ? `VP² setup or weekly dashboard migration is not available. Run supabase_setup_vp2_weekly_dashboard.sql in Supabase SQL Editor. ${vp2DashboardError ? `Details: ${vp2DashboardError}` : ""}`
       : vp2SchedulingError
         ? `Automatic VP² reviews are not available. Run supabase_setup_vp2_scheduling.sql and deploy the updated sync-ical function.`
         : vp2BillingError
           ? "VP² charge billing is not available. Run supabase_setup_vp2_billing.sql in the Supabase SQL Editor."
           : vp2ActionPlansError
-            ? "VP² action plans are not available. Run supabase_setup_vp2_action_plans.sql in the Supabase SQL Editor."
+            ? "VP² weekly action plans are not available. Run supabase_setup_vp2_weekly_dashboard.sql in the Supabase SQL Editor."
         : "";
     status.classList.toggle("hidden", !statusText);
     status.textContent = statusText;
@@ -5105,12 +5162,21 @@ function renderVp2Dashboard() {
     vp2AttentionCount: attentionReviews.length,
     vp2ApprovalCount: actionPlans.length,
     vp2AssignmentsCount: openWorkOrders.length,
-    vp2CompletedCount: Number(data.completedThisMonthCount || 0),
+    vp2CompletedCount: Number(data.completedThisWeekCount || 0),
     vp2RevenueAmount: `$${currentMonthRevenue.toFixed(2)}`,
   };
   Object.entries(metrics).forEach(([id, value]) => {
     const element = document.getElementById(id);
     if (element) element.textContent = String(value);
+  });
+
+  const showCalendar = vp2DashboardViewMode === "calendar";
+  document.getElementById("vp2WeekListView")?.classList.toggle("hidden", showCalendar);
+  document.getElementById("vp2WeekCalendarView")?.classList.toggle("hidden", !showCalendar);
+  document.querySelectorAll(".vp2-view-btn").forEach((button) => {
+    const active = button.dataset.vp2Mode === vp2DashboardViewMode;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
   });
 
   renderVp2List("vp2EnrolledProperties", enrolledProperties, (property) => `
@@ -5173,6 +5239,116 @@ function renderVp2Dashboard() {
       return `<button type="button" class="vp2-reconcile-btn" onclick="completeAndReconcileVp2Review('${escapeHtml(review.id)}')">Reconcile · ${toMoney(charge.amount)}</button>`;
     })()}
   `, "No completed reviews yet.");
+
+  renderVp2DashboardCalendar({
+    ...getVp2DashboardWeekRange(),
+    upcomingReviews,
+    attentionReviews,
+    actionPlans,
+    openWorkOrders,
+    completedReviews,
+    reviewRenderer,
+  });
+}
+
+function renderVp2DashboardCalendar({
+  startDate,
+  upcomingReviews,
+  attentionReviews,
+  actionPlans,
+  openWorkOrders,
+  completedReviews,
+  reviewRenderer,
+}) {
+  const container = document.getElementById("vp2WeekCalendarView");
+  if (!container) return;
+
+  const weekDates = Array.from({ length: 7 }, (_, index) => addDaysToDateKey(startDate, index));
+  const eventsByDate = new Map(weekDates.map((date) => [date, []]));
+  const addEvent = (date, category, type, content) => {
+    const normalizedDate = normalizeDateKey(date);
+    if (!eventsByDate.has(normalizedDate)) return;
+    eventsByDate.get(normalizedDate).push({ category, type, content });
+  };
+
+  upcomingReviews.forEach((review) => addEvent(review.scheduled_date, "Scheduled review", "review", reviewRenderer(review)));
+  attentionReviews.forEach((review) => addEvent(review.scheduled_date, "Needs attention", "attention", reviewRenderer(review)));
+  actionPlans.forEach((plan) => addEvent(plan.scheduled_date, "Action plan", "plan", `
+    <div class="vp2-calendar-content">
+      <strong>${escapeHtml(plan.property_name || "Property")}</strong>
+      <span>${escapeHtml(plan.summary || "VP² Technician Action Plan")}</span>
+      <small>${escapeHtml(plan.status || "draft")} · ${plan.active_link ? "Technician link active" : "No active link"}</small>
+      <button type="button" class="secondary-btn" onclick="openVp2ActionPlan('${escapeHtml(plan.review_id)}')">Open Action Plan</button>
+    </div>
+  `));
+  openWorkOrders.forEach((workOrder) => addEvent(workOrder.due_date, "Open assignment", "assignment", `
+    <div class="vp2-calendar-content">
+      <strong>${escapeHtml(workOrder.property_name || "Property")}</strong>
+      <span>${escapeHtml(workOrder.technician_name || "Unassigned")}</span>
+      <small>${escapeHtml(workOrder.status || "Assigned")}${workOrder.due_date ? ` · Due ${escapeHtml(workOrder.due_date)}` : ""}</small>
+    </div>
+  `));
+  completedReviews.forEach((review) => {
+    const completedAt = review.completed_at ? new Date(review.completed_at) : null;
+    const completedDate = completedAt && !Number.isNaN(completedAt.getTime())
+      ? new Intl.DateTimeFormat("en-US", {
+        timeZone: "America/New_York",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).formatToParts(completedAt).reduce((parts, part) => ({ ...parts, [part.type]: part.value }), {})
+      : null;
+    const date = completedDate
+      ? `${completedDate.year}-${completedDate.month}-${completedDate.day}`
+      : review.scheduled_date;
+    const charge = vp2ReviewCharges.find((entry) => entry.review_id === review.id);
+    const chargeStatus = String(charge?.status || "").toLowerCase();
+    const chargeMarkup = chargeStatus === "invoiced"
+      ? `<small>Invoiced</small>`
+      : chargeStatus === "reconciled"
+        ? `<small>Reconciled · eligible for next invoice draft</small>`
+        : !charge || chargeStatus === "void"
+          ? ""
+          : `<button type="button" class="vp2-reconcile-btn" onclick="completeAndReconcileVp2Review('${escapeHtml(review.id)}')">Reconcile · ${toMoney(charge.amount)}</button>`;
+    addEvent(date, "Completed review", "completed", `
+      <div class="vp2-calendar-content">
+        <strong>${escapeHtml(review.property_name || "Property")}</strong>
+        <span>${escapeHtml(review.review_kind || "Review")} · ${escapeHtml(review.completed_at || review.scheduled_date || "Completed")}</span>
+        <small>Charge ${toMoney(charge?.amount || 0)}</small>
+        ${chargeMarkup}
+      </div>
+    `);
+  });
+
+  const today = getBusinessDateValue();
+  container.innerHTML = `
+    <div class="week-calendar vp2-week-calendar">
+      ${weekDates.map((date) => {
+        const dateValue = new Date(`${date}T00:00:00Z`);
+        const dayName = new Intl.DateTimeFormat("en-US", { weekday: "long", timeZone: "UTC" }).format(dateValue);
+        const events = eventsByDate.get(date) || [];
+        return `
+          <div class="calendar-day-column ${date === today ? "today" : ""}">
+            <div class="calendar-day-header">
+              <div class="calendar-day-name">${dayName}</div>
+              <div class="calendar-day-date">${escapeHtml(date)}</div>
+              <div class="calendar-task-count">${events.length} item${events.length === 1 ? "" : "s"}</div>
+            </div>
+            <div class="calendar-day-tasks">
+              ${events.length
+                ? events.map((event) => `
+                  <article class="calendar-task-card vp2-calendar-task vp2-calendar-task-${event.type}">
+                    <span class="vp2-calendar-kind">${escapeHtml(event.category)}</span>
+                    ${event.content}
+                  </article>
+                `).join("")
+                : `<p class="no-tasks">No VP² activity</p>`}
+            </div>
+          </div>
+        `;
+      }).join("")}
+    </div>
+  `;
 }
 
 async function completeAndReconcileVp2Review(reviewId) {
