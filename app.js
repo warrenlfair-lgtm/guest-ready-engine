@@ -2823,10 +2823,10 @@ function syncCleaningServiceTypeDependentFields() {
   }
 }
 
-function populateCleaningPropertySelect(selectedPropertyId = null) {
+function populateCleaningPropertySelect(selectedPropertyId = null, serviceBranch = activeServiceWorkspace) {
   if (!cleaningPropertySelect) return;
   const activeProps = properties
-    .filter((p) => isPropertyActive(p))
+    .filter((p) => isPropertyActive(p) && propertySupportsServiceBranch(p, serviceBranch))
     .sort((a, b) => (a.property_name || "").localeCompare(b.property_name || ""));
 
   cleaningPropertySelect.innerHTML = activeProps
@@ -2842,16 +2842,20 @@ function populateCleaningPropertySelect(selectedPropertyId = null) {
 
 function openCleaningModal(propertyId = null, prefilledDate = null) {
   if (isStaffUser()) return;
-  const activeProps = properties.filter((p) => isPropertyActive(p));
-  const fallbackPropertyId = activeProps.length > 0 ? activeProps[0].id : (properties.length > 0 ? properties[0].id : null);
+  const activeProps = properties.filter((p) =>
+    isPropertyActive(p) && propertySupportsServiceBranch(p, activeServiceWorkspace)
+  );
+  const fallbackPropertyId = activeProps.length > 0 ? activeProps[0].id : null;
 
   selectedCleaningPropertyId = propertyId || fallbackPropertyId;
   editingCleaningId = null;
   if (cleaningModalTitle) {
-    cleaningModalTitle.textContent = "Add Task";
+    cleaningModalTitle.textContent = activeServiceWorkspace === SERVICE_BRANCH_VP2
+      ? "Add VP² Manual Task"
+      : "Add Task";
   }
 
-  populateCleaningPropertySelect(selectedCleaningPropertyId);
+  populateCleaningPropertySelect(selectedCleaningPropertyId, activeServiceWorkspace);
 
   cleaningDate.value = prefilledDate || new Date().toISOString().split("T")[0];
   if (cleaningServiceBranch) cleaningServiceBranch.value = activeServiceWorkspace;
@@ -2919,7 +2923,7 @@ function openEditCleaning(taskId) {
     cleaningModalTitle.textContent = "Edit Task";
   }
 
-  populateCleaningPropertySelect(task.property_id);
+  populateCleaningPropertySelect(task.property_id, normalizeServiceBranch(task.service_branch));
 
   cleaningDate.value = task.service_date || task.scheduled_date || "";
   if (cleaningServiceBranch) cleaningServiceBranch.value = normalizeServiceBranch(task.service_branch);
@@ -5182,6 +5186,7 @@ function renderVp2Dashboard() {
   renderVp2List("vp2EnrolledProperties", enrolledProperties, (property) => `
     <div class="vp2-property-title-row">
       <strong>${escapeHtml(property.property_name || "Property")}</strong>
+      ${isPropertyActive(property) ? `<button type="button" class="secondary-btn vp2-property-edit-btn" onclick="openCleaningModal('${escapeHtml(property.id)}')">+ Manual Task</button>` : ""}
       <button type="button" class="secondary-btn vp2-property-edit-btn" onclick="openEditModal('${escapeHtml(property.id)}')">Edit</button>
     </div>
     <span>${escapeHtml(property.address || "Address not entered")}</span>
@@ -15522,11 +15527,13 @@ function renderProperties() {
     const toggleButtonText = isCollapsed ? "Expand" : "Collapse";
     const activeTab = activeServiceWorkspace === SERVICE_BRANCH_POOL ? getPropertyDetailTab(property.id) : "tasks";
 
-    const taskContent = activeServiceWorkspace === SERVICE_BRANCH_VP2
-      ? `<p>VP² reviews are managed in the Virtual Pool Pro dashboard.</p>`
-      : tasks.length === 0
+    const taskContent = `
+      ${activeServiceWorkspace === SERVICE_BRANCH_VP2
+        ? `<p>VP² reviews are managed in the Virtual Pool Pro dashboard. Off-schedule project tasks are listed here.</p>`
+        : ""}
+      ${tasks.length === 0
         ? `<p>No ${getServiceBranchLabel(activeServiceWorkspace)} tasks scheduled.</p>`
-      : tasks.map((task) => {
+        : tasks.map((task) => {
           const taskBillingAmount = getTaskBillingAmount(task);
           const billingContext = getTaskBillingContext(task);
           const guestReadyBilling = billingContext.guestReadyBilling || null;
@@ -15606,7 +15613,8 @@ function renderProperties() {
               </div>
             </div>
           `;
-        }).join("");
+        }).join("")}
+    `;
 
     return `
       <div class="property-card ${propertyIsActive ? "property-card-active" : "property-card-inactive"}">
@@ -15664,7 +15672,9 @@ function renderProperties() {
         </div>
 
         <div class="card-actions">
-          ${activeServiceWorkspace !== SERVICE_BRANCH_VP2 ? `<button onclick="openCleaningModal('${property.id}')">+ ${getServiceBranchLabel(activeServiceWorkspace)} Task</button>` : ""}
+          ${propertyIsActive || activeServiceWorkspace !== SERVICE_BRANCH_VP2
+            ? `<button onclick="openCleaningModal('${property.id}')">+ ${activeServiceWorkspace === SERVICE_BRANCH_VP2 ? "Manual" : getServiceBranchLabel(activeServiceWorkspace)} Task</button>`
+            : ""}
           ${![SERVICE_BRANCH_HOUSEKEEPING, SERVICE_BRANCH_VP2].includes(activeServiceWorkspace) ? `<button onclick="openPipelineJobModal('${property.id}')">+ Add to Pipeline</button>` : ""}
           <button onclick="openEditModal('${property.id}')">Edit</button>
           <button class="delete-btn" onclick="deleteProperty('${property.id}')">Delete</button>
