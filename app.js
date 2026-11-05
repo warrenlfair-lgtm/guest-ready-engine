@@ -11627,7 +11627,7 @@ function getInvoiceCandidateTasks({ startDate, endDate, selectedPropertyId = "",
     propertyName: row.propertyName || getPropertyName(row.property_id),
     clientName: row.clientName || "",
     description: isWeeklyContractObligationTask(row)
-      ? "Scheduled Weekly Contract Cleaning"
+      ? `${row.propertyName || getPropertyName(row.property_id)} - Scheduled Weekly Contract Cleaning`
       : isHousekeepingTask(row)
       ? `${row.propertyName || getPropertyName(row.property_id)} - Housekeeping`
       : isLawnTask(row)
