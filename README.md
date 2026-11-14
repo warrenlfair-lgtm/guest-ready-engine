@@ -46,6 +46,10 @@ Run `supabase_setup_maintenance_branch.sql` in the Supabase SQL Editor before de
 
 Run `supabase_setup_month_task_rescheduling.sql` in the Supabase SQL Editor before deploying Month View drag-and-drop. The migration adds a role-checked Admin/Manager RPC and a non-financial Manager eligibility flag. Rescheduling updates only the existing task's `service_date`, `scheduled_date`, and `manually_modified` fields; it never inserts or duplicates a task. Completed, historical, reconciled, and invoice-linked tasks remain locked. Operational "today" is evaluated in the `America/New_York` business timezone so work scheduled for the current local date remains movable after UTC midnight.
 
+## VP² Enhanced Monitoring Billing
+
+Run `supabase_setup_vp2e_billing.sql` after the existing invoice, Same-Day Surcharge, and VP² invoice migrations, then deploy the matching frontend. The additive migration defaults existing properties to VP²E disabled with a $15.00 weekly fee and enforces one VP²E invoice line per property and Monday-start billing week. VP²E has no separate reconcile control: its line is added only when a billable Weekly Standard or weekly contract-obligation task for that property and week is reconciled. Charges use the existing invoice workflow and are retained as invoice line-item snapshots.
+
 ## Existing Task Branch Editing
 
 Run `supabase_setup_task_service_branch_editing.sql` in the Supabase SQL Editor before deploying existing-task branch editing. Its role-checked Admin/Manager RPC updates only `cleaning_tasks.service_branch` on the existing task ID. Completed, historical, reconciled, and invoice-linked tasks remain locked; Staff receives no branch-edit control or write permission.

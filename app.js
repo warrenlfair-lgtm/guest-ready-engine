@@ -301,6 +301,7 @@ const INVOICE_ITEM_SOURCES = {
   CHEMICAL: "chemical",
   SDS: "sds",
   VP2: "vp2",
+  VP2E: "vp2e",
 };
 const INVOICE_SERVICE_BRANCH_OPTIONS = [
   { value: "", label: "Not Categorized" },
@@ -397,6 +398,9 @@ const propertyGuestReadyLaborRate = document.getElementById("propertyGuestReadyL
 const propertyAdditionalLaborRate = document.getElementById("propertyAdditionalLaborRate");
 const propertyDefaultCleaningRate = document.getElementById("propertyDefaultCleaningRate");
 const propertySameDaySurcharge = document.getElementById("propertySameDaySurcharge");
+const propertyVp2eEnabled = document.getElementById("propertyVp2eEnabled");
+const propertyVp2eWeeklyFee = document.getElementById("propertyVp2eWeeklyFee");
+const propertyVp2eWeeklyTotal = document.getElementById("propertyVp2eWeeklyTotal");
 const propertyTaxable = document.getElementById("propertyTaxable");
 const propertyTaxRate = document.getElementById("propertyTaxRate");
 const propertyPaymentTerms = document.getElementById("propertyPaymentTerms");
@@ -2482,6 +2486,9 @@ function openEditModal(id) {
   if (propertyAdditionalLaborRate) propertyAdditionalLaborRate.value = Number(property.additional_cleaning_labor || 0);
   if (propertyDefaultCleaningRate) propertyDefaultCleaningRate.value = Number(property.default_cleaning_rate || 0);
   if (propertySameDaySurcharge) propertySameDaySurcharge.value = Number(property.same_day_surcharge || 0);
+  if (propertyVp2eEnabled) propertyVp2eEnabled.value = property.vp2e_enabled === true ? "yes" : "no";
+  if (propertyVp2eWeeklyFee) propertyVp2eWeeklyFee.value = Number(property.vp2e_weekly_fee ?? 0).toFixed(2);
+  updateVp2eWeeklyTotal();
   if (propertyTaxable) propertyTaxable.value = property.billing_taxable === false ? "no" : "yes";
   if (propertyTaxRate) propertyTaxRate.value = Number(property.billing_tax_rate || 0);
   if (propertyPaymentTerms) propertyPaymentTerms.value = getPropertyInvoiceTerms(property);
@@ -2517,6 +2524,17 @@ function openEditModal(id) {
 
 function closePropertyModal() {
   propertyModal.classList.add("hidden");
+}
+
+function updateVp2eWeeklyTotal() {
+  if (!propertyVp2eWeeklyTotal) return;
+  const fee = String(propertyVp2eEnabled?.value || "no") === "yes"
+    ? Math.max(0, Number(propertyVp2eWeeklyFee?.value || 0))
+    : 0;
+  const baseWeeklyCharge = Math.max(0, Number(propertyWeeklyContractCleaningAmount?.value || 0));
+  propertyVp2eWeeklyTotal.textContent = baseWeeklyCharge > 0
+    ? `Weekly service total: $${(baseWeeklyCharge + fee).toFixed(2)}`
+    : `VP²E weekly addition: $${fee.toFixed(2)}${fee > 0 ? " (added to the service charge)" : ""}`;
 }
 
 const SERVICE_FREQUENCY_WEEKLY = "weekly";
@@ -5974,6 +5992,8 @@ async function saveProperty() {
     additional_cleaning_labor: Math.max(0, Number(propertyAdditionalLaborRate?.value || 0)),
     default_cleaning_rate: Number(propertyDefaultCleaningRate?.value || 0),
     same_day_surcharge: Number(propertySameDaySurcharge?.value || 0),
+    vp2e_enabled: String(propertyVp2eEnabled?.value || "no") === "yes",
+    vp2e_weekly_fee: Math.max(0, Number(propertyVp2eWeeklyFee?.value || 0)),
     billing_taxable: taxable,
     billing_tax_rate: taxable ? Number(propertyTaxRate?.value || 0) : 0,
     payment_terms: String(propertyPaymentTerms?.value || "").trim() || DEFAULT_INVOICE_TERMS,
@@ -7303,6 +7323,9 @@ function clearPropertyForm() {
   if (propertyAdditionalLaborRate) propertyAdditionalLaborRate.value = 0;
   if (propertyDefaultCleaningRate) propertyDefaultCleaningRate.value = 0;
   if (propertySameDaySurcharge) propertySameDaySurcharge.value = 0;
+  if (propertyVp2eEnabled) propertyVp2eEnabled.value = "no";
+  if (propertyVp2eWeeklyFee) propertyVp2eWeeklyFee.value = "15.00";
+  updateVp2eWeeklyTotal();
   if (propertyTaxable) propertyTaxable.value = "yes";
   if (propertyTaxRate) propertyTaxRate.value = 0;
   if (propertyPaymentTerms) propertyPaymentTerms.value = DEFAULT_INVOICE_TERMS;
@@ -7398,14 +7421,23 @@ function refreshBillingCard() {
     selectedPropertyId,
     selectedClientName,
   });
+  const eligibleVp2eRows = getVp2eBillingRowsForFilters({
+    startDate,
+    endDate,
+    selectedPropertyId,
+    selectedClientName,
+  });
   const billingReportRows = getBillingReportRows();
 
   logBillingSummaryEligibleTasks(eligibleTasks);
   logBillingSummaryDebugRows(billingReportRows, "included in billing summary billed/invoiced totals");
 
-  const totalBillableAmount = Number(eligibleTasks.reduce((sum, task) => sum + Number(task.billableAmount || 0), 0).toFixed(2));
+  const totalBillableAmount = Number((
+    eligibleTasks.reduce((sum, task) => sum + Number(task.billableAmount || 0), 0)
+    + eligibleVp2eRows.reduce((sum, row) => sum + Number(row.billableAmount || 0), 0)
+  ).toFixed(2));
   const invoicedAmount = Number(billingReportRows.reduce((sum, row) => sum + Number(row.billableAmount || row.amount || 0), 0).toFixed(2));
-  const totalBillableTaskCount = eligibleTasks.length;
+  const totalBillableTaskCount = eligibleTasks.length + eligibleVp2eRows.length;
   const invoicedTaskCount = billingReportRows.length;
 
   console.log({
@@ -10242,6 +10274,7 @@ function getForecastAssignedTechnician(task) {
 function getForecastInvoiceItemSource(item) {
   const itemSource = String(item?.item_source || item?.source_type || item?.item_type || "").trim().toLowerCase();
   if (itemSource === INVOICE_ITEM_SOURCES.SDS || itemSource === "same-day surcharge" || itemSource === "same day surcharge") return INVOICE_ITEM_SOURCES.SDS;
+  if (itemSource === INVOICE_ITEM_SOURCES.VP2E) return INVOICE_ITEM_SOURCES.VP2E;
   if (itemSource === INVOICE_ITEM_SOURCES.VP2 || item?.vp2_review_charge_id) return INVOICE_ITEM_SOURCES.VP2;
   if (itemSource === INVOICE_ITEM_SOURCES.CHEMICAL) return INVOICE_ITEM_SOURCES.CHEMICAL;
   if (itemSource === INVOICE_ITEM_SOURCES.TASK) return INVOICE_ITEM_SOURCES.TASK;
@@ -10281,6 +10314,8 @@ function getForecastInvoiceRevenueData({ startDate, endDate, selectedPropertyId 
     const taskId = normalizePropertyId(getInvoiceItemTaskId(item));
     const chemicalUsageId = normalizePropertyId(getInvoiceItemChemicalUsageId(item));
     const vp2ReviewChargeId = normalizePropertyId(item?.vp2_review_charge_id);
+    const vp2ePropertyId = normalizePropertyId(item?.property_id || item?.propertyId);
+    const vp2eWeekStart = normalizeDateKey(item?.service_date);
     const sourceKey = source === INVOICE_ITEM_SOURCES.SDS && taskId
       ? `sds:${taskId}`
       : source === INVOICE_ITEM_SOURCES.TASK && taskId
@@ -10289,6 +10324,8 @@ function getForecastInvoiceRevenueData({ startDate, endDate, selectedPropertyId 
           ? `chemical:${chemicalUsageId}`
           : source === INVOICE_ITEM_SOURCES.VP2 && vp2ReviewChargeId
             ? `vp2:${vp2ReviewChargeId}`
+            : source === INVOICE_ITEM_SOURCES.VP2E && vp2ePropertyId && vp2eWeekStart
+              ? `vp2e:${vp2ePropertyId}:${vp2eWeekStart}`
           : `invoice-item:${itemId || String(item?.invoice_id || "")}:${auditRows.length + 1}`;
     if (countedSourceKeys.has(sourceKey)) return;
     countedSourceKeys.add(sourceKey);
@@ -10314,7 +10351,7 @@ function getForecastInvoiceRevenueData({ startDate, endDate, selectedPropertyId 
       serviceDate: normalizeDateKey(item?.service_date) || normalizeDateKey(invoiceRecord.invoice.invoice_date),
       propertyId: propertyKey,
       propertyName: propertyKey === SERVICE_PNL_UNASSIGNED_PROPERTY_ID ? "Unassigned / No Source Property" : getPropertyName(propertyKey),
-      sourceType: source === INVOICE_ITEM_SOURCES.SDS ? "Same-Day Surcharge" : source === INVOICE_ITEM_SOURCES.VP2 ? "VP² Review" : source === INVOICE_ITEM_SOURCES.TASK ? "Task" : source === INVOICE_ITEM_SOURCES.CHEMICAL ? "Chemical Charge" : "Manual Invoice Item",
+      sourceType: source === INVOICE_ITEM_SOURCES.SDS ? "Same-Day Surcharge" : source === INVOICE_ITEM_SOURCES.VP2E ? "VP² Enhanced Monitoring" : source === INVOICE_ITEM_SOURCES.VP2 ? "VP² Review" : source === INVOICE_ITEM_SOURCES.TASK ? "Task" : source === INVOICE_ITEM_SOURCES.CHEMICAL ? "Chemical Charge" : "Manual Invoice Item",
       description: item?.description || "Invoice item",
       revenueStatus: invoiceRecord.category === "draft" ? "Draft Invoiced" : "Finalized Invoiced",
       draftRevenue: invoiceRecord.category === "draft" ? amount : 0,
@@ -10956,12 +10993,19 @@ function getBillingReportRows() {
     includeInvoiced: true,
   });
 
-  const combinedRows = [...rows, ...sdsRows];
+  const vp2eRows = getVp2eBillingRowsForFilters({
+    startDate,
+    endDate,
+    selectedPropertyId,
+    selectedClientName,
+  });
+  const combinedRows = [...rows, ...sdsRows, ...vp2eRows];
 
   return reconciledOnly ? combinedRows.filter((row) => isBillingRowReconciled(row)) : combinedRows;
 }
 
 function isBillingRowReconciled(row) {
+  if (row?.item_source === INVOICE_ITEM_SOURCES.VP2E) return row.invoiced === true;
   return isTaskReconciled(row) || isTaskLinkedToFinalizedInvoice(row);
 }
 
@@ -10995,7 +11039,7 @@ function logBillingSummaryDebugRows(rows, reason) {
       serviceDate: row.serviceDate || row.service_date || row.scheduled_date || "",
       amount: Number(row.billableAmount || 0),
       billingReason: row.billingReasonLabel || "Chargeable",
-      sourceType: "task",
+      sourceType: row.item_source || "task",
       whyIncluded: reason,
     });
   });
@@ -11661,6 +11705,87 @@ function getInvoiceCandidateTasks({ startDate, endDate, selectedPropertyId = "",
   return items;
 }
 
+function getVp2eInvoiceItemForPropertyWeek(propertyId, weekStart) {
+  return invoiceItems.find((item) => item.item_source === INVOICE_ITEM_SOURCES.VP2E
+    && normalizePropertyId(item.property_id) === normalizePropertyId(propertyId)
+    && normalizeDateKey(item.service_date) === weekStart) || null;
+}
+
+function getVp2eBillingRowsForFilters({
+  startDate,
+  endDate,
+  selectedPropertyId = "",
+  selectedClientName = "",
+  includeInvoiced = true,
+} = {}) {
+  if (!startDate || !endDate) return [];
+
+  const scopePropertyIds = new Set(
+    resolvePropertyIdsForScope({ selectedPropertyId, selectedClientName })
+      .map((id) => normalizePropertyId(id))
+  );
+  const weeklyServiceRows = getBillingReportRowsForFilters({
+    startDate,
+    endDate,
+    selectedPropertyId,
+    selectedClientName,
+    includeInvoiced,
+  }).filter((task) => (
+    (task.service_type === "Weekly Standard" || isWeeklyContractObligationTask(task))
+    && isTaskReconciled(task)
+    && Number(task.billableAmount || 0) > 0
+  ));
+  const rows = [];
+
+  for (const property of properties) {
+    if (!scopePropertyIds.has(normalizePropertyId(property.id))) continue;
+    const configuredAmount = Math.max(0, Number(property.vp2e_weekly_fee ?? 0));
+    if (property.vp2e_enabled !== true && configuredAmount <= 0) continue;
+
+    const serviceWeeks = new Set(
+      weeklyServiceRows
+        .filter((task) => normalizePropertyId(task.property_id) === normalizePropertyId(property.id))
+        .map((task) => formatIsoDateUtc(getMondayStartForDate(task.serviceDate || task.service_date || task.scheduled_date)))
+        .filter(Boolean)
+    );
+    for (const weekStart of serviceWeeks) {
+      const invoiceItem = getVp2eInvoiceItemForPropertyWeek(property.id, weekStart);
+      if (!invoiceItem && property.vp2e_enabled !== true) continue;
+
+      const amount = invoiceItem ? Number(invoiceItem.amount ?? 0) : configuredAmount;
+      if (amount <= 0) continue;
+
+      const invoice = invoiceItem
+        ? invoices.find((row) => String(row.id) === String(invoiceItem.invoice_id))
+        : null;
+      const linkedToFinalizedInvoice = Boolean(invoice && isFinalizedInvoiceStatus(invoice.status));
+      rows.push({
+        id: `vp2e:${property.id}:${weekStart}`,
+        property_id: property.id,
+        propertyName: property.property_name || getPropertyName(property.id),
+        clientName: String(property.client_name || "").trim(),
+        service_date: weekStart,
+        serviceDate: weekStart,
+        service_type: "VP² Enhanced Monitoring",
+        serviceLabel: "VP² Enhanced Monitoring",
+        billableAmount: amount,
+        billingReasonLabel: "VP² Enhanced Monitoring",
+        quantity: Number(invoiceItem?.quantity ?? 1),
+        unit: invoiceItem?.unit || "week",
+        rate: Number(invoiceItem?.rate ?? amount),
+        item_source: INVOICE_ITEM_SOURCES.VP2E,
+        vp2e_week_start: weekStart,
+        invoiced: linkedToFinalizedInvoice,
+        invoice_id: invoiceItem?.invoice_id || null,
+        invoiced_invoice_id: linkedToFinalizedInvoice ? invoiceItem.invoice_id : null,
+      });
+    }
+  }
+
+  return rows.sort((a, b) => String(a.propertyName || "").localeCompare(String(b.propertyName || ""))
+    || String(a.serviceDate || "").localeCompare(String(b.serviceDate || "")));
+}
+
 function getInvoiceChemicalCandidates({ startDate, endDate, selectedPropertyId = "", selectedClientName = "", includeNonBillableChemicals = false }) {
   const rows = getChemicalReportRowsForFilters({
     startDate,
@@ -11748,6 +11873,36 @@ function getInvoiceSdsCandidates({ startDate, endDate, selectedPropertyId = "", 
     itemSource: INVOICE_ITEM_SOURCES.SDS,
     notes: "",
   }));
+}
+
+function getInvoiceVp2eCandidates({ startDate, endDate, selectedPropertyId = "", selectedClientName = "" }) {
+  return getVp2eBillingRowsForFilters({
+    startDate,
+    endDate,
+    selectedPropertyId,
+    selectedClientName,
+    includeInvoiced: false,
+  })
+    .filter((row) => !getVp2eInvoiceItemForPropertyWeek(row.property_id, row.vp2e_week_start))
+    .map((row) => ({
+      sourceId: null,
+      taskId: null,
+      chemicalUsageId: null,
+      propertyId: row.property_id,
+      propertyName: row.propertyName,
+      clientName: row.clientName,
+      description: `${row.propertyName} - VP² Enhanced Monitoring`,
+      serviceDate: row.vp2e_week_start,
+      quantity: 1,
+      unit: "week",
+      rate: row.rate,
+      amount: row.billableAmount,
+      itemType: INVOICE_ITEM_SOURCES.VP2E,
+      itemSource: INVOICE_ITEM_SOURCES.VP2E,
+      serviceBranch: SERVICE_BRANCH_POOL,
+      vp2eWeekStart: row.vp2e_week_start,
+      notes: "",
+    }));
 }
 
 function getInvoiceVp2Candidates({ startDate, endDate, selectedPropertyId = "", selectedClientName = "" }) {
@@ -11899,14 +12054,21 @@ function buildDraftInvoiceModel({ property, clientName = "", propertyIds = [], s
     selectedPropertyId,
     selectedClientName,
   }).filter((item) => !propertyIds.length || propertyIds.some((id) => normalizePropertyId(id) === normalizePropertyId(item.propertyId)));
+  const vp2eItems = getInvoiceVp2eCandidates({
+    startDate,
+    endDate,
+    selectedPropertyId,
+    selectedClientName,
+  }).filter((item) => !propertyIds.length || propertyIds.some((id) => normalizePropertyId(id) === normalizePropertyId(item.propertyId)));
 
   latestInvoiceCandidates = {
     tasks: taskItems,
     chemicalRows: chemicalItems,
     vp2Rows: vp2Items,
+    vp2eRows: vp2eItems,
   };
 
-  const items = [...taskItems, ...chemicalItems, ...sdsItems, ...vp2Items];
+  const items = [...taskItems, ...chemicalItems, ...sdsItems, ...vp2Items, ...vp2eItems];
   const subtotal = Number(items.reduce((sum, item) => sum + Number(item.amount || 0), 0).toFixed(2));
   const propertyTaxable = property?.billing_taxable !== false;
   const taxable = taxOverride === "yes" ? true : taxOverride === "no" ? false : propertyTaxable;
@@ -12023,6 +12185,12 @@ function getInvoiceItemPropertyName(item) {
   const directName = normalizeInvoicePropertyLabelName(item?.property_name || item?.propertyName || item?.property);
   if (directName) return directName;
 
+  const propertyId = normalizePropertyId(item?.property_id || item?.propertyId);
+  if (propertyId) {
+    const property = properties.find((entry) => normalizePropertyId(entry.id) === propertyId);
+    if (property?.property_name) return normalizeInvoicePropertyLabelName(property.property_name);
+  }
+
   const description = String(item?.description || "").trim();
   if (!description.includes(" - ")) return "";
   const prefix = String(description.split(" - ")[0] || "").trim();
@@ -12086,7 +12254,9 @@ function renderInvoicePreview() {
     ? invoice.items.map((item, index) => {
       const isManualItem = item.itemSource === INVOICE_ITEM_SOURCES.MANUAL;
       const internalFieldState = isManualItem ? "" : " disabled";
-      const vp2AmountFieldState = item.itemSource === INVOICE_ITEM_SOURCES.VP2 ? " disabled" : "";
+      const vp2AmountFieldState = item.itemSource === INVOICE_ITEM_SOURCES.VP2 || item.itemSource === INVOICE_ITEM_SOURCES.VP2E
+        ? " disabled"
+        : "";
       return `
       <tr>
         <td><input type="text" value="${escapeHtml(item.description || "")}" onchange="updateInvoiceItemField(${index}, 'description', this.value)"></td>
@@ -12306,7 +12476,9 @@ function renderInvoiceEligibilitySummary(groups = [], meta = {}) {
     const chemicalTotal = group.chemicalItems.reduce((sum, item) => sum + Number(item.amount || 0), 0);
     const vp2Items = group.vp2Items || [];
     const vp2Total = vp2Items.reduce((sum, item) => sum + Number(item.amount || 0), 0);
-    const total = cleaningTotal + chemicalTotal + vp2Total;
+    const vp2eItems = group.vp2eItems || [];
+    const vp2eTotal = vp2eItems.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+    const total = cleaningTotal + chemicalTotal + vp2Total + vp2eTotal;
     const diagnostics = diagnosticsByLabel[group.label] || null;
     const noCleaningMessage = cleaningTotal <= 0
       ? `<div class="invoice-no-cleaning-message"><strong>No eligible cleaning charges were found.</strong></div>`
@@ -12320,6 +12492,7 @@ function renderInvoiceEligibilitySummary(groups = [], meta = {}) {
         <div>- ${group.taskItems.length} cleaning charges: ${toMoney(cleaningTotal)}</div>
         <div>- ${group.chemicalItems.length} chemical charges: ${toMoney(chemicalTotal)}</div>
         <div>- ${vp2Items.length} VP² reviews: ${toMoney(vp2Total)}</div>
+        <div>- ${vp2eItems.length} VP² Enhanced Monitoring charges: ${toMoney(vp2eTotal)}</div>
         <div><strong>Total eligible charges: ${toMoney(total)}</strong></div>
         ${noCleaningMessage}
         ${diagLine}
@@ -12434,7 +12607,7 @@ function generateInvoicePreviewFromFilters() {
   const includeNonBillable = invoiceIncludeNonBillableChemicals?.checked === true;
   const emptyReasons = [
     "No reconciled or completed chargeable items were found in the selected date range.",
-    "All eligible cleaning tasks, chemical charges, and VP² reviews may already be invoiced.",
+    "All eligible cleaning tasks, chemical charges, VP² reviews, and VP² Enhanced Monitoring weeks may already be invoiced.",
     "Included/no-charge services are excluded.",
     "Chemical entries may be non-billable or have a $0 rate.",
   ];
@@ -12462,7 +12635,8 @@ function generateInvoicePreviewFromFilters() {
     const taskItems = draft.items.filter((item) => item.itemSource === INVOICE_ITEM_SOURCES.TASK);
     const chemicalItems = draft.items.filter((item) => item.itemSource === INVOICE_ITEM_SOURCES.CHEMICAL);
     const vp2Items = draft.items.filter((item) => item.itemSource === INVOICE_ITEM_SOURCES.VP2);
-    renderInvoiceEligibilitySummary([{ label: property.property_name, taskItems, chemicalItems, vp2Items }], {
+    const vp2eItems = draft.items.filter((item) => item.itemSource === INVOICE_ITEM_SOURCES.VP2E);
+    renderInvoiceEligibilitySummary([{ label: property.property_name, taskItems, chemicalItems, vp2Items, vp2eItems }], {
       emptyReasons,
       cleaningDiagnosticsByLabel: {
         [property.property_name]: draft.cleaningDiagnostics,
@@ -12497,7 +12671,8 @@ function generateInvoicePreviewFromFilters() {
     const taskItems = draft.items.filter((item) => item.itemSource === INVOICE_ITEM_SOURCES.TASK);
     const chemicalItems = draft.items.filter((item) => item.itemSource === INVOICE_ITEM_SOURCES.CHEMICAL);
     const vp2Items = draft.items.filter((item) => item.itemSource === INVOICE_ITEM_SOURCES.VP2);
-    renderInvoiceEligibilitySummary([{ label: selectedClientName, taskItems, chemicalItems, vp2Items }], {
+    const vp2eItems = draft.items.filter((item) => item.itemSource === INVOICE_ITEM_SOURCES.VP2E);
+    renderInvoiceEligibilitySummary([{ label: selectedClientName, taskItems, chemicalItems, vp2Items, vp2eItems }], {
       emptyReasons,
       cleaningDiagnosticsByLabel: {
         [selectedClientName]: draft.cleaningDiagnostics,
@@ -12549,8 +12724,9 @@ function generateInvoicePreviewFromFilters() {
     const taskItems = draft.items.filter((item) => item.itemSource === INVOICE_ITEM_SOURCES.TASK);
     const chemicalItems = draft.items.filter((item) => item.itemSource === INVOICE_ITEM_SOURCES.CHEMICAL);
     const vp2Items = draft.items.filter((item) => item.itemSource === INVOICE_ITEM_SOURCES.VP2);
-    if (taskItems.length || chemicalItems.length || vp2Items.length) {
-      eligibilityGroups.push({ label, taskItems, chemicalItems, vp2Items });
+    const vp2eItems = draft.items.filter((item) => item.itemSource === INVOICE_ITEM_SOURCES.VP2E);
+    if (taskItems.length || chemicalItems.length || vp2Items.length || vp2eItems.length) {
+      eligibilityGroups.push({ label, taskItems, chemicalItems, vp2Items, vp2eItems });
       diagnosticsByLabel[label] = draft.cleaningDiagnostics;
       batchDrafts.push({
         ...draft,
@@ -15658,6 +15834,7 @@ function renderProperties() {
             <div><strong>Additional / Billable Cleaning Labor:</strong> $${Number(property.additional_cleaning_labor || 0).toFixed(2)}</div>
             <div><strong>Default Cleaning Rate:</strong> $${Number(property.default_cleaning_rate ?? 0).toFixed(2)}</div>
             <div><strong>Same-Day Surcharge:</strong> $${Number(property.same_day_surcharge ?? 0).toFixed(2)}</div>
+            <div><strong>VP² Enhanced Monitoring:</strong> ${property.vp2e_enabled === true ? `Enabled ($${Number(property.vp2e_weekly_fee ?? 0).toFixed(2)} / week)` : "Disabled"}</div>
           ` : activeServiceWorkspace === SERVICE_BRANCH_VP2 ? `
             <div><strong>VP² Service Day:</strong> ${property.vp2_service_day || "Wednesday"}</div>
             <div><strong>VP² Service Start:</strong> ${property.vp2_start_date || "Not set"}</div>

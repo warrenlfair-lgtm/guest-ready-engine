@@ -1115,7 +1115,7 @@
       </select>
 
       <label>Weekly Contract Cleaning Amount</label>
-      <input id="propertyWeeklyContractCleaningAmount" type="number" min="0" step="0.01" value="0">
+      <input id="propertyWeeklyContractCleaningAmount" type="number" min="0" step="0.01" value="0" oninput="updateVp2eWeeklyTotal()">
 
       <label>Task Billing Effective Date</label>
       <input id="propertyWeeklyContractBillingEffectiveDate" type="date" value="2026-10-01">
@@ -1131,6 +1131,18 @@
 
       <label>Same-Day Surcharge (SDS)</label>
       <input id="propertySameDaySurcharge" type="number" min="0" step="0.01" value="0">
+
+      <div class="property-service-section">
+        <h3>VP² Enhanced Monitoring</h3>
+        <label for="propertyVp2eEnabled">VP²E Enabled</label>
+        <select id="propertyVp2eEnabled" onchange="updateVp2eWeeklyTotal()">
+          <option value="no" selected>No</option>
+          <option value="yes">Yes</option>
+        </select>
+        <label for="propertyVp2eWeeklyFee">VP²E Weekly Fee ($)</label>
+        <input id="propertyVp2eWeeklyFee" type="number" min="0" step="0.01" value="15.00" oninput="updateVp2eWeeklyTotal()">
+        <p id="propertyVp2eWeeklyTotal" class="field-hint">VP²E weekly addition: $0.00</p>
+      </div>
 
       <div class="property-service-section">
         <h3>Lawn</h3>
