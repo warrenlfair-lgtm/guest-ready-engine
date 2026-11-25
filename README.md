@@ -50,6 +50,18 @@ Run `supabase_setup_month_task_rescheduling.sql` in the Supabase SQL Editor befo
 
 Run `supabase_setup_vp2e_billing.sql` after the existing invoice, Same-Day Surcharge, and VP² invoice migrations, then deploy the matching frontend. The additive migration defaults existing properties to VP²E disabled with a $15.00 weekly fee and enforces one VP²E invoice line per property and Monday-start billing week. VP²E has no separate reconcile control: its line is added only when a billable Weekly Standard or weekly contract-obligation task for that property and week is reconciled. Charges use the existing invoice workflow and are retained as invoice line-item snapshots.
 
+## Foul Weather Fee
+
+Run `supabase_setup_foul_weather_fee.sql` after the invoice, role-based access, SDS, and VP²E billing migrations before deploying the matching frontend. Admins and managers can mark completed Guest Ready pool tasks in the task editor; the selection saves immediately and is locked once the task is on a finalized invoice. A marked task adds a separate $20 Foul Weather Fee immediately after its billable Guest Ready invoice line. Included/no-charge Guest Ready visits do not incur the fee, and staff cannot change the selection. If a selection changes after a draft was created, regenerate the draft before finalizing it.
+
+On macOS, run `/System/Library/Frameworks/JavaScriptCore.framework/Versions/A/Helpers/jsc tests/foul_weather_fee.test.js` from the repository root for the focused invoice-line test. The migration and role/finalization workflows must also be tested against a staging Supabase database.
+
+## Heavy Debris Fee
+
+Run `supabase_setup_heavy_debris_fee.sql` after `supabase_setup_foul_weather_fee.sql` before deploying the matching frontend. Admins and managers can select a Heavy Debris Fee in the editor for a completed Guest Ready pool task. The amount defaults to $20.00 and can be adjusted from $20.00 to $50.00; changes save immediately and are locked after invoice finalization. The fee applies only when the Guest Ready task is billable and appears as a separate property-labeled invoice line. When both fees apply, their order is Guest Ready, Foul Weather Fee, then Heavy Debris Fee. Regenerate drafts after changing a selection or amount.
+
+The focused JavaScriptCore test above also covers heavy debris fees. Test both migrations, permissions, invoice finalization, and reporting against a staging Supabase database before deployment.
+
 ## Existing Task Branch Editing
 
 Run `supabase_setup_task_service_branch_editing.sql` in the Supabase SQL Editor before deploying existing-task branch editing. Its role-checked Admin/Manager RPC updates only `cleaning_tasks.service_branch` on the existing task ID. Completed, historical, reconciled, and invoice-linked tasks remain locked; Staff receives no branch-edit control or write permission.

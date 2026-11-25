@@ -1385,6 +1385,24 @@
       <label id="cleaningSdsAmountLabel" class="admin-task-field hidden">Same-Day Surcharge (SDS)</label>
       <input id="cleaningSdsAmount" class="admin-task-field hidden" type="number" min="0" step="0.01" placeholder="Uses property default if blank">
 
+      <div id="cleaningFoulWeatherRow" class="hidden">
+        <label for="cleaningFoulWeather">
+          <input id="cleaningFoulWeather" type="checkbox">
+          Pool cleaning was conducted in foul weather (Foul Weather Fee)
+        </label>
+        <div class="field-hint">Saved immediately. The $20 fee applies only to a billable Guest Ready charge.</div>
+      </div>
+
+      <div id="cleaningHeavyDebrisRow" class="hidden">
+        <label for="cleaningHeavyDebris">
+          <input id="cleaningHeavyDebris" type="checkbox">
+          Heavy debris required additional cleaning (Heavy Debris Fee)
+        </label>
+        <label for="cleaningHeavyDebrisAmount">Heavy Debris Fee ($20–$50)</label>
+        <input id="cleaningHeavyDebrisAmount" type="number" min="20" max="50" step="0.01" value="20.00" disabled>
+        <div class="field-hint">Changes save immediately. The fee applies only to a billable Guest Ready charge.</div>
+      </div>
+
       <label class="admin-task-field">Labor Amount</label>
       <input id="cleaningLaborAmount" class="admin-task-field" type="number" min="0" step="0.01" placeholder="Manual tasks only">
       <div class="field-hint admin-task-field">Manual tasks: enter labor amount to snapshot on completion. Weekly Standard and Guest Ready use property labor rules.</div>

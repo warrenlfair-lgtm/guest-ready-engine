@@ -300,6 +300,8 @@ const INVOICE_ITEM_SOURCES = {
   TASK: "task",
   CHEMICAL: "chemical",
   SDS: "sds",
+  FOUL_WEATHER: "foul_weather",
+  HEAVY_DEBRIS: "heavy_debris",
   VP2: "vp2",
   VP2E: "vp2e",
 };
@@ -439,6 +441,11 @@ const cleaningTechnician = document.getElementById("cleaningTechnician");
 const cleaningCharge = document.getElementById("cleaningCharge");
 const cleaningSdsAmount = document.getElementById("cleaningSdsAmount");
 const cleaningSdsAmountLabel = document.getElementById("cleaningSdsAmountLabel");
+const cleaningFoulWeatherRow = document.getElementById("cleaningFoulWeatherRow");
+const cleaningFoulWeather = document.getElementById("cleaningFoulWeather");
+const cleaningHeavyDebrisRow = document.getElementById("cleaningHeavyDebrisRow");
+const cleaningHeavyDebris = document.getElementById("cleaningHeavyDebris");
+const cleaningHeavyDebrisAmount = document.getElementById("cleaningHeavyDebrisAmount");
 const cleaningLaborAmount = document.getElementById("cleaningLaborAmount");
 const cleaningPartsCost = document.getElementById("cleaningPartsCost");
 const cleaningWeeklyServiceLevelRow = document.getElementById("cleaningWeeklyServiceLevelRow");
@@ -753,6 +760,12 @@ if (cleaningStatus) {
 if (cleaningServiceType) {
   cleaningServiceType.addEventListener("change", syncCleaningServiceTypeDependentFields);
 }
+
+if (cleaningFoulWeather) {
+  cleaningFoulWeather.addEventListener("change", saveFoulWeatherSelection);
+}
+if (cleaningHeavyDebris) cleaningHeavyDebris.addEventListener("change", saveHeavyDebrisSelection);
+if (cleaningHeavyDebrisAmount) cleaningHeavyDebrisAmount.addEventListener("change", saveHeavyDebrisSelection);
 
 if (propertyServiceFrequency) {
   propertyServiceFrequency.addEventListener("change", syncPropertyServiceFrequencyDependentFields);
@@ -2860,6 +2873,8 @@ function populateCleaningPropertySelect(selectedPropertyId = null, serviceBranch
 
 function openCleaningModal(propertyId = null, prefilledDate = null) {
   if (isStaffUser()) return;
+  if (cleaningFoulWeatherRow) cleaningFoulWeatherRow.classList.add("hidden");
+  if (cleaningHeavyDebrisRow) cleaningHeavyDebrisRow.classList.add("hidden");
   const activeProps = properties.filter((p) =>
     isPropertyActive(p) && propertySupportsServiceBranch(p, activeServiceWorkspace)
   );
@@ -2976,6 +2991,115 @@ function openEditCleaning(taskId) {
 
   cleaningModal.classList.remove("hidden");
   cleaningModalInitialState = getCleaningModalStateSnapshot();
+  loadFoulWeatherSelection(task);
+  loadHeavyDebrisSelection(task);
+}
+
+async function loadHeavyDebrisSelection(task) {
+  if (!cleaningHeavyDebrisRow || !cleaningHeavyDebris || !cleaningHeavyDebrisAmount) return;
+  cleaningHeavyDebrisRow.classList.add("hidden");
+  if ((!isAdminUser() && !isManagerUser()) || !isTaskGuestReady(task)
+      || normalizeServiceBranch(task.service_branch) !== SERVICE_BRANCH_POOL
+      || String(task.status || "").toLowerCase() !== "completed") return;
+  const { data, error } = await supabaseClient.rpc("get_task_heavy_debris", { target_task_id: task.id });
+  if (editingCleaningId !== task.id) return;
+  if (error) {
+    alert("Could not load heavy debris fee: " + error.message);
+    return;
+  }
+  const amount = data?.heavy_debris_amount;
+  if (!data || !Object.prototype.hasOwnProperty.call(data, "heavy_debris_amount") || typeof data.locked !== "boolean"
+      || (amount !== null && (!Number.isFinite(Number(amount)) || Number(amount) < 20 || Number(amount) > 50))) {
+    alert("Could not load heavy debris fee: invalid server response.");
+    return;
+  }
+  cleaningHeavyDebris.checked = amount !== null;
+  cleaningHeavyDebrisAmount.value = (amount === null ? 20 : Number(amount)).toFixed(2);
+  cleaningHeavyDebris.disabled = data.locked;
+  cleaningHeavyDebrisAmount.disabled = data.locked || amount === null;
+  cleaningHeavyDebrisRow.classList.remove("hidden");
+}
+
+async function saveHeavyDebrisSelection() {
+  const taskId = editingCleaningId;
+  if (!taskId || !cleaningHeavyDebris || !cleaningHeavyDebrisAmount) return;
+  const selected = cleaningHeavyDebris.checked;
+  const rawAmount = cleaningHeavyDebrisAmount.value.trim();
+  const amount = selected ? Number(rawAmount) : null;
+  if (selected && (!rawAmount || !Number.isFinite(amount) || amount < 20 || amount > 50
+      || !/^\d+(?:\.\d{1,2})?$/.test(rawAmount))) {
+    alert("Enter a Heavy Debris Fee between $20.00 and $50.00 with at most two decimal places.");
+    const task = cleaningTasks.find((item) => item.id === taskId) || monthCleaningTasks.find((item) => item.id === taskId);
+    if (task) await loadHeavyDebrisSelection(task);
+    return;
+  }
+  cleaningHeavyDebris.disabled = true;
+  cleaningHeavyDebrisAmount.disabled = true;
+  const { error } = await supabaseClient.rpc("set_task_heavy_debris", {
+    target_task_id: taskId,
+    selected_amount: amount,
+  });
+  if (error) {
+    alert("Could not save heavy debris fee: " + error.message);
+    const task = cleaningTasks.find((item) => item.id === taskId) || monthCleaningTasks.find((item) => item.id === taskId);
+    if (editingCleaningId === taskId && task) await loadHeavyDebrisSelection(task);
+    return;
+  }
+  for (const task of [...cleaningTasks, ...monthCleaningTasks]) {
+    if (task.id === taskId) task.heavy_debris_amount = amount;
+  }
+  if (isAdminUser()) refreshBillingCard();
+  if (editingCleaningId === taskId) {
+    cleaningHeavyDebris.disabled = false;
+    cleaningHeavyDebrisAmount.disabled = !selected;
+    if (selected) cleaningHeavyDebrisAmount.value = amount.toFixed(2);
+  }
+}
+
+async function loadFoulWeatherSelection(task) {
+  if (!cleaningFoulWeatherRow || !cleaningFoulWeather) return;
+  cleaningFoulWeatherRow.classList.add("hidden");
+  if ((!isAdminUser() && !isManagerUser()) || !isTaskGuestReady(task)
+      || normalizeServiceBranch(task.service_branch) !== SERVICE_BRANCH_POOL
+      || String(task.status || "").toLowerCase() !== "completed") return;
+
+  const { data, error } = await supabaseClient.rpc("get_task_foul_weather", { target_task_id: task.id });
+  if (editingCleaningId !== task.id) return;
+  if (error) {
+    alert("Could not load foul weather status: " + error.message);
+    return;
+  }
+  if (!data || typeof data.foul_weather !== "boolean" || typeof data.locked !== "boolean") {
+    alert("Could not load foul weather status: invalid server response.");
+    return;
+  }
+  cleaningFoulWeather.checked = data.foul_weather === true;
+  cleaningFoulWeather.disabled = data.locked === true;
+  cleaningFoulWeatherRow.classList.remove("hidden");
+}
+
+async function saveFoulWeatherSelection() {
+  const taskId = editingCleaningId;
+  if (!taskId || !cleaningFoulWeather) return;
+  const selected = cleaningFoulWeather.checked;
+  cleaningFoulWeather.disabled = true;
+  const { error } = await supabaseClient.rpc("set_task_foul_weather", {
+    target_task_id: taskId,
+    selected_foul_weather: selected,
+  });
+  if (error) {
+    if (editingCleaningId === taskId) {
+      cleaningFoulWeather.checked = !selected;
+      cleaningFoulWeather.disabled = false;
+    }
+    alert("Could not save foul weather status: " + error.message);
+    return;
+  }
+  for (const task of [...cleaningTasks, ...monthCleaningTasks]) {
+    if (task.id === taskId) task.foul_weather = selected;
+  }
+  if (isAdminUser()) refreshBillingCard();
+  if (editingCleaningId === taskId) cleaningFoulWeather.disabled = false;
 }
 
 function getCleaningModalStateSnapshot() {
@@ -7434,11 +7558,13 @@ function refreshBillingCard() {
 
   const totalBillableAmount = Number((
     eligibleTasks.reduce((sum, task) => sum + Number(task.billableAmount || 0), 0)
+    + eligibleTasks.filter(isFoulWeatherChargeableTask).length * 20
+    + eligibleTasks.filter(isHeavyDebrisChargeableTask).reduce((sum, task) => sum + Number(task.heavy_debris_amount), 0)
     + eligibleVp2eRows.reduce((sum, row) => sum + Number(row.billableAmount || 0), 0)
   ).toFixed(2));
   const invoicedAmount = Number(billingReportRows.reduce((sum, row) => sum + Number(row.billableAmount || row.amount || 0), 0).toFixed(2));
   const totalBillableTaskCount = eligibleTasks.length + eligibleVp2eRows.length;
-  const invoicedTaskCount = billingReportRows.length;
+  const invoicedTaskCount = billingReportRows.filter((row) => !["Foul Weather Fee", "Heavy Debris Fee"].includes(row.service_type)).length;
 
   console.log({
     displayedBillingRows: billingReportRows,
@@ -10274,6 +10400,8 @@ function getForecastAssignedTechnician(task) {
 function getForecastInvoiceItemSource(item) {
   const itemSource = String(item?.item_source || item?.source_type || item?.item_type || "").trim().toLowerCase();
   if (itemSource === INVOICE_ITEM_SOURCES.SDS || itemSource === "same-day surcharge" || itemSource === "same day surcharge") return INVOICE_ITEM_SOURCES.SDS;
+  if (itemSource === INVOICE_ITEM_SOURCES.FOUL_WEATHER) return INVOICE_ITEM_SOURCES.FOUL_WEATHER;
+  if (itemSource === INVOICE_ITEM_SOURCES.HEAVY_DEBRIS) return INVOICE_ITEM_SOURCES.HEAVY_DEBRIS;
   if (itemSource === INVOICE_ITEM_SOURCES.VP2E) return INVOICE_ITEM_SOURCES.VP2E;
   if (itemSource === INVOICE_ITEM_SOURCES.VP2 || item?.vp2_review_charge_id) return INVOICE_ITEM_SOURCES.VP2;
   if (itemSource === INVOICE_ITEM_SOURCES.CHEMICAL) return INVOICE_ITEM_SOURCES.CHEMICAL;
@@ -10318,6 +10446,10 @@ function getForecastInvoiceRevenueData({ startDate, endDate, selectedPropertyId 
     const vp2eWeekStart = normalizeDateKey(item?.service_date);
     const sourceKey = source === INVOICE_ITEM_SOURCES.SDS && taskId
       ? `sds:${taskId}`
+      : source === INVOICE_ITEM_SOURCES.FOUL_WEATHER && taskId
+        ? `foul-weather:${taskId}`
+      : source === INVOICE_ITEM_SOURCES.HEAVY_DEBRIS && taskId
+        ? `heavy-debris:${taskId}`
       : source === INVOICE_ITEM_SOURCES.TASK && taskId
         ? `task:${taskId}`
         : source === INVOICE_ITEM_SOURCES.CHEMICAL && chemicalUsageId
@@ -10351,7 +10483,7 @@ function getForecastInvoiceRevenueData({ startDate, endDate, selectedPropertyId 
       serviceDate: normalizeDateKey(item?.service_date) || normalizeDateKey(invoiceRecord.invoice.invoice_date),
       propertyId: propertyKey,
       propertyName: propertyKey === SERVICE_PNL_UNASSIGNED_PROPERTY_ID ? "Unassigned / No Source Property" : getPropertyName(propertyKey),
-      sourceType: source === INVOICE_ITEM_SOURCES.SDS ? "Same-Day Surcharge" : source === INVOICE_ITEM_SOURCES.VP2E ? "VP² Enhanced Monitoring" : source === INVOICE_ITEM_SOURCES.VP2 ? "VP² Review" : source === INVOICE_ITEM_SOURCES.TASK ? "Task" : source === INVOICE_ITEM_SOURCES.CHEMICAL ? "Chemical Charge" : "Manual Invoice Item",
+      sourceType: source === INVOICE_ITEM_SOURCES.SDS ? "Same-Day Surcharge" : source === INVOICE_ITEM_SOURCES.FOUL_WEATHER ? "Foul Weather Fee" : source === INVOICE_ITEM_SOURCES.HEAVY_DEBRIS ? "Heavy Debris Fee" : source === INVOICE_ITEM_SOURCES.VP2E ? "VP² Enhanced Monitoring" : source === INVOICE_ITEM_SOURCES.VP2 ? "VP² Review" : source === INVOICE_ITEM_SOURCES.TASK ? "Task" : source === INVOICE_ITEM_SOURCES.CHEMICAL ? "Chemical Charge" : "Manual Invoice Item",
       description: item?.description || "Invoice item",
       revenueStatus: invoiceRecord.category === "draft" ? "Draft Invoiced" : "Finalized Invoiced",
       draftRevenue: invoiceRecord.category === "draft" ? amount : 0,
@@ -10999,7 +11131,33 @@ function getBillingReportRows() {
     selectedPropertyId,
     selectedClientName,
   });
-  const combinedRows = [...rows, ...sdsRows, ...vp2eRows];
+  const foulWeatherRows = rows.filter(isFoulWeatherChargeableTask).map((task) => ({
+    id: `foul-weather:${task.id}`,
+    property_id: task.property_id,
+    propertyName: task.propertyName,
+    service_date: task.serviceDate,
+    serviceDate: task.serviceDate,
+    service_type: "Foul Weather Fee",
+    billableAmount: 20,
+    billingReasonLabel: "Foul Weather Fee",
+    invoiced: isTaskReconciled(task),
+    invoice_id: task.invoice_id || null,
+    invoiced_invoice_id: task.invoiced_invoice_id || null,
+  }));
+  const heavyDebrisRows = rows.filter(isHeavyDebrisChargeableTask).map((task) => ({
+    id: `heavy-debris:${task.id}`,
+    property_id: task.property_id,
+    propertyName: task.propertyName,
+    service_date: task.serviceDate,
+    serviceDate: task.serviceDate,
+    service_type: "Heavy Debris Fee",
+    billableAmount: Number(task.heavy_debris_amount),
+    billingReasonLabel: "Heavy Debris Fee",
+    invoiced: isTaskReconciled(task),
+    invoice_id: task.invoice_id || null,
+    invoiced_invoice_id: task.invoiced_invoice_id || null,
+  }));
+  const combinedRows = [...rows, ...foulWeatherRows, ...heavyDebrisRows, ...sdsRows, ...vp2eRows];
 
   return reconciledOnly ? combinedRows.filter((row) => isBillingRowReconciled(row)) : combinedRows;
 }
@@ -11686,6 +11844,8 @@ function getInvoiceCandidateTasks({ startDate, endDate, selectedPropertyId = "",
     itemSource: INVOICE_ITEM_SOURCES.TASK,
     serviceBranch: normalizeServiceBranch(row.service_branch),
     notes: stripManualBillingOverrideTag(row.notes || ""),
+    foulWeather: isFoulWeatherChargeableTask(row),
+    heavyDebrisAmount: isHeavyDebrisChargeableTask(row) ? Number(row.heavy_debris_amount) : null,
   }));
 
   if (enableDebugLog) {
@@ -11703,6 +11863,71 @@ function getInvoiceCandidateTasks({ startDate, endDate, selectedPropertyId = "",
   }
 
   return items;
+}
+
+function isFoulWeatherChargeableTask(task) {
+  return task.foul_weather === true
+    && isTaskGuestReady(task)
+    && normalizeServiceBranch(task.service_branch) === SERVICE_BRANCH_POOL
+    && String(task.status || "").toLowerCase() === "completed"
+    && Number(task.billableAmount || 0) > 0;
+}
+
+function isHeavyDebrisChargeableTask(task) {
+  const amount = task.heavy_debris_amount;
+  return amount !== null && amount !== undefined && Number(amount) >= 20 && Number(amount) <= 50
+    && isTaskGuestReady(task)
+    && normalizeServiceBranch(task.service_branch) === SERVICE_BRANCH_POOL
+    && String(task.status || "").toLowerCase() === "completed"
+    && Number(task.billableAmount || 0) > 0;
+}
+
+function addFoulWeatherInvoiceItems(taskItems) {
+  return taskItems.flatMap((item) => {
+    if (!item.foulWeather || Number(item.amount || 0) <= 0) return [item];
+    return [item, {
+      sourceId: item.taskId,
+      taskId: item.taskId,
+      chemicalUsageId: null,
+      propertyId: item.propertyId,
+      propertyName: item.propertyName,
+      clientName: item.clientName,
+      description: `${item.propertyName} - Foul Weather Fee`,
+      serviceDate: item.serviceDate,
+      quantity: 1,
+      unit: "service",
+      rate: 20,
+      amount: 20,
+      itemType: INVOICE_ITEM_SOURCES.FOUL_WEATHER,
+      itemSource: INVOICE_ITEM_SOURCES.FOUL_WEATHER,
+      serviceBranch: SERVICE_BRANCH_POOL,
+      notes: "",
+    }];
+  });
+}
+
+function addHeavyDebrisInvoiceItems(taskItems) {
+  return taskItems.flatMap((item) => {
+    if (item.heavyDebrisAmount === null || item.heavyDebrisAmount === undefined || Number(item.amount || 0) <= 0) return [item];
+    return [item, {
+      sourceId: item.taskId,
+      taskId: item.taskId,
+      chemicalUsageId: null,
+      propertyId: item.propertyId,
+      propertyName: item.propertyName,
+      clientName: item.clientName,
+      description: `${item.propertyName} - Heavy Debris Fee`,
+      serviceDate: item.serviceDate,
+      quantity: 1,
+      unit: "service",
+      rate: item.heavyDebrisAmount,
+      amount: item.heavyDebrisAmount,
+      itemType: INVOICE_ITEM_SOURCES.HEAVY_DEBRIS,
+      itemSource: INVOICE_ITEM_SOURCES.HEAVY_DEBRIS,
+      serviceBranch: SERVICE_BRANCH_POOL,
+      notes: "",
+    }];
+  });
 }
 
 function getVp2eInvoiceItemForPropertyWeek(propertyId, weekStart) {
@@ -12068,7 +12293,7 @@ function buildDraftInvoiceModel({ property, clientName = "", propertyIds = [], s
     vp2eRows: vp2eItems,
   };
 
-  const items = [...taskItems, ...chemicalItems, ...sdsItems, ...vp2Items, ...vp2eItems];
+  const items = [...addFoulWeatherInvoiceItems(addHeavyDebrisInvoiceItems(taskItems)), ...chemicalItems, ...sdsItems, ...vp2Items, ...vp2eItems];
   const subtotal = Number(items.reduce((sum, item) => sum + Number(item.amount || 0), 0).toFixed(2));
   const propertyTaxable = property?.billing_taxable !== false;
   const taxable = taxOverride === "yes" ? true : taxOverride === "no" ? false : propertyTaxable;
@@ -12254,7 +12479,7 @@ function renderInvoicePreview() {
     ? invoice.items.map((item, index) => {
       const isManualItem = item.itemSource === INVOICE_ITEM_SOURCES.MANUAL;
       const internalFieldState = isManualItem ? "" : " disabled";
-      const vp2AmountFieldState = item.itemSource === INVOICE_ITEM_SOURCES.VP2 || item.itemSource === INVOICE_ITEM_SOURCES.VP2E
+      const vp2AmountFieldState = item.itemSource === INVOICE_ITEM_SOURCES.VP2 || item.itemSource === INVOICE_ITEM_SOURCES.VP2E || item.itemSource === INVOICE_ITEM_SOURCES.FOUL_WEATHER || item.itemSource === INVOICE_ITEM_SOURCES.HEAVY_DEBRIS
         ? " disabled"
         : "";
       return `
@@ -12474,11 +12699,15 @@ function renderInvoiceEligibilitySummary(groups = [], meta = {}) {
   const markup = groups.map((group) => {
     const cleaningTotal = group.taskItems.reduce((sum, item) => sum + Number(item.amount || 0), 0);
     const chemicalTotal = group.chemicalItems.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+    const foulWeatherItems = group.foulWeatherItems || [];
+    const foulWeatherTotal = foulWeatherItems.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+    const heavyDebrisItems = group.heavyDebrisItems || [];
+    const heavyDebrisTotal = heavyDebrisItems.reduce((sum, item) => sum + Number(item.amount || 0), 0);
     const vp2Items = group.vp2Items || [];
     const vp2Total = vp2Items.reduce((sum, item) => sum + Number(item.amount || 0), 0);
     const vp2eItems = group.vp2eItems || [];
     const vp2eTotal = vp2eItems.reduce((sum, item) => sum + Number(item.amount || 0), 0);
-    const total = cleaningTotal + chemicalTotal + vp2Total + vp2eTotal;
+    const total = cleaningTotal + chemicalTotal + foulWeatherTotal + heavyDebrisTotal + vp2Total + vp2eTotal;
     const diagnostics = diagnosticsByLabel[group.label] || null;
     const noCleaningMessage = cleaningTotal <= 0
       ? `<div class="invoice-no-cleaning-message"><strong>No eligible cleaning charges were found.</strong></div>`
@@ -12491,6 +12720,8 @@ function renderInvoiceEligibilitySummary(groups = [], meta = {}) {
         <div><strong>${escapeHtml(group.label)}</strong></div>
         <div>- ${group.taskItems.length} cleaning charges: ${toMoney(cleaningTotal)}</div>
         <div>- ${group.chemicalItems.length} chemical charges: ${toMoney(chemicalTotal)}</div>
+        <div>- ${foulWeatherItems.length} foul weather fees: ${toMoney(foulWeatherTotal)}</div>
+        <div>- ${heavyDebrisItems.length} heavy debris fees: ${toMoney(heavyDebrisTotal)}</div>
         <div>- ${vp2Items.length} VP² reviews: ${toMoney(vp2Total)}</div>
         <div>- ${vp2eItems.length} VP² Enhanced Monitoring charges: ${toMoney(vp2eTotal)}</div>
         <div><strong>Total eligible charges: ${toMoney(total)}</strong></div>
@@ -12634,9 +12865,11 @@ function generateInvoicePreviewFromFilters() {
 
     const taskItems = draft.items.filter((item) => item.itemSource === INVOICE_ITEM_SOURCES.TASK);
     const chemicalItems = draft.items.filter((item) => item.itemSource === INVOICE_ITEM_SOURCES.CHEMICAL);
+    const foulWeatherItems = draft.items.filter((item) => item.itemSource === INVOICE_ITEM_SOURCES.FOUL_WEATHER);
+    const heavyDebrisItems = draft.items.filter((item) => item.itemSource === INVOICE_ITEM_SOURCES.HEAVY_DEBRIS);
     const vp2Items = draft.items.filter((item) => item.itemSource === INVOICE_ITEM_SOURCES.VP2);
     const vp2eItems = draft.items.filter((item) => item.itemSource === INVOICE_ITEM_SOURCES.VP2E);
-    renderInvoiceEligibilitySummary([{ label: property.property_name, taskItems, chemicalItems, vp2Items, vp2eItems }], {
+    renderInvoiceEligibilitySummary([{ label: property.property_name, taskItems, chemicalItems, foulWeatherItems, heavyDebrisItems, vp2Items, vp2eItems }], {
       emptyReasons,
       cleaningDiagnosticsByLabel: {
         [property.property_name]: draft.cleaningDiagnostics,
@@ -12670,9 +12903,11 @@ function generateInvoicePreviewFromFilters() {
 
     const taskItems = draft.items.filter((item) => item.itemSource === INVOICE_ITEM_SOURCES.TASK);
     const chemicalItems = draft.items.filter((item) => item.itemSource === INVOICE_ITEM_SOURCES.CHEMICAL);
+    const foulWeatherItems = draft.items.filter((item) => item.itemSource === INVOICE_ITEM_SOURCES.FOUL_WEATHER);
+    const heavyDebrisItems = draft.items.filter((item) => item.itemSource === INVOICE_ITEM_SOURCES.HEAVY_DEBRIS);
     const vp2Items = draft.items.filter((item) => item.itemSource === INVOICE_ITEM_SOURCES.VP2);
     const vp2eItems = draft.items.filter((item) => item.itemSource === INVOICE_ITEM_SOURCES.VP2E);
-    renderInvoiceEligibilitySummary([{ label: selectedClientName, taskItems, chemicalItems, vp2Items, vp2eItems }], {
+    renderInvoiceEligibilitySummary([{ label: selectedClientName, taskItems, chemicalItems, foulWeatherItems, heavyDebrisItems, vp2Items, vp2eItems }], {
       emptyReasons,
       cleaningDiagnosticsByLabel: {
         [selectedClientName]: draft.cleaningDiagnostics,
@@ -12723,10 +12958,12 @@ function generateInvoicePreviewFromFilters() {
 
     const taskItems = draft.items.filter((item) => item.itemSource === INVOICE_ITEM_SOURCES.TASK);
     const chemicalItems = draft.items.filter((item) => item.itemSource === INVOICE_ITEM_SOURCES.CHEMICAL);
+    const foulWeatherItems = draft.items.filter((item) => item.itemSource === INVOICE_ITEM_SOURCES.FOUL_WEATHER);
+    const heavyDebrisItems = draft.items.filter((item) => item.itemSource === INVOICE_ITEM_SOURCES.HEAVY_DEBRIS);
     const vp2Items = draft.items.filter((item) => item.itemSource === INVOICE_ITEM_SOURCES.VP2);
     const vp2eItems = draft.items.filter((item) => item.itemSource === INVOICE_ITEM_SOURCES.VP2E);
     if (taskItems.length || chemicalItems.length || vp2Items.length || vp2eItems.length) {
-      eligibilityGroups.push({ label, taskItems, chemicalItems, vp2Items, vp2eItems });
+      eligibilityGroups.push({ label, taskItems, chemicalItems, foulWeatherItems, heavyDebrisItems, vp2Items, vp2eItems });
       diagnosticsByLabel[label] = draft.cleaningDiagnostics;
       batchDrafts.push({
         ...draft,
@@ -12869,6 +13106,10 @@ async function saveInvoiceDraft(options = {}) {
   if (!requireAdminAccess()) return false;
   const silent = options?.silent === true;
   if (!currentInvoiceDraft) return;
+  if (String(currentInvoiceDraft.status || "draft").toLowerCase() !== "draft") {
+    if (!silent) alert("Only draft invoices can be saved.");
+    return false;
+  }
   if (!currentInvoiceDraft.propertyId) {
     if (!silent) alert("Select a property before saving an invoice draft.");
     return false;
@@ -12918,17 +13159,29 @@ async function saveInvoiceDraft(options = {}) {
 
   let invoiceId = currentInvoiceDraft.id;
   if (invoiceId) {
-    const { error } = await supabaseClient
+    const { data: updatedDraft, error } = await supabaseClient
       .from("invoices")
       .update(invoicePayload)
-      .eq("id", invoiceId);
+      .eq("id", invoiceId)
+      .eq("status", "draft")
+      .select("id")
+      .maybeSingle();
 
     if (error) {
       if (!silent) alert("Error updating invoice draft: " + error.message);
       return false;
     }
 
-    await supabaseClient.from("invoice_items").delete().eq("invoice_id", invoiceId);
+    if (!updatedDraft) {
+      if (!silent) alert("The invoice is no longer a draft. Reload it before making changes.");
+      return false;
+    }
+
+    const { error: deleteError } = await supabaseClient.from("invoice_items").delete().eq("invoice_id", invoiceId);
+    if (deleteError) {
+      if (!silent) alert("Could not replace invoice draft line items: " + deleteError.message);
+      return false;
+    }
   } else {
     const { data, error } = await supabaseClient
       .from("invoices")
@@ -12946,8 +13199,11 @@ async function saveInvoiceDraft(options = {}) {
     currentInvoiceDraft.invoiceNumber = data.invoice_number;
   }
 
-  const itemsPayload = currentInvoiceDraft.items.map((item) => ({
+  const preserveLineOrder = currentInvoiceDraft.items.some((item) => [INVOICE_ITEM_SOURCES.FOUL_WEATHER, INVOICE_ITEM_SOURCES.HEAVY_DEBRIS].includes(item.itemSource));
+  const lineOrderStart = Date.now();
+  const itemsPayload = currentInvoiceDraft.items.map((item, index) => ({
     invoice_id: invoiceId,
+    ...(preserveLineOrder ? { created_at: new Date(lineOrderStart + index).toISOString() } : {}),
     task_id: item.taskId || null,
     chemical_usage_id: item.chemicalUsageId || null,
     vp2_review_charge_id: item.vp2ReviewChargeId || null,
