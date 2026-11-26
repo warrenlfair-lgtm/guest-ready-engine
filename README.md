@@ -38,6 +38,20 @@ Staff can use Pool Service, Lawn, and Maintenance Today/Week operations and star
 
 Managers can use Pool Service, Lawn, and Maintenance Today, Week, Month, and Properties views. The Properties view is limited to Current Month and Next Month. Manager reads use dedicated operational-only views, and task assignments, service levels, notes, starts, completions, and completed-task reconciliation use role-checked RPC functions. Reconciliation eligibility is exposed only as boolean fields; configured charges and invoice data remain server-side, Manager views expose no financial columns, and Managers cannot access the Invoices page.
 
+## Guest Ready Command Center
+
+`command-center.html` is a read-only display, and `command-center-manage.html` is the task and note editor for active admins and managers. The Command Center link in the application opens a new tab; managers can use the separate Tasks & Notes link. Display accounts have no task or note write access. The dashboard never runs scheduling or iCal synchronization.
+
+Before deploying, test and run `supabase_setup_command_center.sql` in a staging Supabase project after the role, VP², reservation, and task migrations. This migration adds separate task/note tables and narrow role-checked RPCs. To provision a display, create a dedicated Supabase Auth user and insert its UUID into `public.command_center_display_accounts` using the Supabase SQL Editor as a database administrator. Set `active` to false to revoke display access. Do not assign the kiosk an admin or manager role. Sign in on the kiosk; Supabase retains and refreshes the session when the browser supports persistent storage. The dashboard clears data if authorization expires or is revoked and displays stale data during temporary network failures. Kiosk and main-app tabs on the same origin share a browser session, so use a separate browser profile or device for the display account.
+
+Run `/System/Library/Frameworks/JavaScriptCore.framework/Versions/A/Helpers/jsc tests/command_center.test.js` for focused date and counter tests. Verify authorization, migrations, live refresh, overflow, and display readability in staging on the target kiosk browser before production deployment.
+
+The overdue counter separates today's unfinished carried-forward service tasks, overdue VP² reviews, and overdue special tasks. Historical service tasks outside today's route are not counted. Overdue VP² reviews are limited to the current Monday–Sunday week, matching the main VP² dashboard's default week; outstanding reviews from earlier weeks remain unchanged and can be found by browsing prior weeks there. The Command Center also shows upcoming reviews through six days after today. After updating an existing Command Center installation, rerun the updated `supabase_setup_command_center.sql` before deploying the matching frontend.
+
+Today's and tomorrow's services appear in the schedule. Guest arrivals are shown in the check-in counter and seven-day outlook rather than separate arrivals panels.
+The Command Center display does not show pinned notes; existing notes remain available in the task and note editor.
+The dashboard refreshes data every five minutes and updates the clock every second. It also refreshes on reconnection and at the Eastern midnight rollover. The footer shows the connection status and the date and time of the last successful data update in Eastern Time; a stale connection retains that last successful timestamp.
+
 ## Maintenance Branch Setup
 
 Run `supabase_setup_maintenance_branch.sql` in the Supabase SQL Editor before deploying the three-branch frontend. This additive migration allows `maintenance` in existing branch constraints and updates Manager task creation and Pipeline scheduling to preserve it. It does not update or reclassify historical rows; existing `lawn` tasks and recurring Lawn generation remain Lawn.

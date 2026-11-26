@@ -362,7 +362,7 @@ h1 {
     color: #ffffff;
 }
 
-.view-btn {
+.view-btn, .command-center-link {
     background: #e2e8f0;
     color: #0f172a;
 }

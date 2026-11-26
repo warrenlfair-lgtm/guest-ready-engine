@@ -808,6 +808,12 @@ viewButtons.forEach((button) => {
   });
 });
 
+document.querySelectorAll(".command-center-link").forEach((button) => {
+  button.addEventListener("click", () => {
+    window.open(button.dataset.url, "_blank", "noopener,noreferrer");
+  });
+});
+
 previousRouteDateBtn?.addEventListener("click", () => changeDailyRouteDate(-1));
 nextRouteDateBtn?.addEventListener("click", () => changeDailyRouteDate(1));
 todayRouteDateBtn?.addEventListener("click", () => setDailyRouteDate(getBusinessDateValue()));

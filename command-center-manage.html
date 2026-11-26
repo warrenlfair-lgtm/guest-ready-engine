@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Command Center Tasks &amp; Notes</title>
+  <link rel="stylesheet" href="command-center-manage.css">
+</head>
+<body>
+  <main>
+    <h1>Command Center Tasks &amp; Notes</h1>
+    <p>Manage the read-only display. These items do not create services or charges.</p>
+    <form id="login">
+      <label>Email <input id="email" type="email" autocomplete="username" required></label>
+      <label>Password <input id="password" type="password" autocomplete="current-password" required></label>
+      <button>Sign in</button>
+    </form>
+    <p id="message" role="status"></p>
+    <div id="manager" hidden>
+      <div class="grid">
+        <section>
+          <h2>Special task</h2>
+          <form id="task-form">
+            <label>Title <input name="title" maxlength="100" required></label>
+            <label>Description <textarea name="description"></textarea></label>
+            <label>Property <select name="property"></select></label>
+            <label>Assigned employee <select name="technician"></select></label>
+            <label>Due date <input name="date" type="date"></label>
+            <label>Priority <select name="priority"><option>Low</option><option selected>Normal</option><option>High</option><option>Urgent</option></select></label>
+            <label>Status <select name="status"><option>Open</option><option>In Progress</option><option>Completed</option></select></label>
+            <label class="check"><input name="pinned" type="checkbox"> Pin to Command Center</label>
+            <button type="submit">Save task</button><button type="button" id="new-task">New task</button>
+          </form>
+          <h3>Tasks and history</h3><div id="tasks"></div>
+        </section>
+        <section>
+          <h2>Pinned note</h2>
+          <form id="note-form">
+            <label>Title <input name="title" maxlength="100" required></label>
+            <label>Content <textarea name="content" required></textarea></label>
+            <label>Property <select name="property"></select></label>
+            <label>Expiration date <input name="date" type="date"></label>
+            <label class="check"><input name="pinned" type="checkbox"> Pin to Command Center</label>
+            <label class="check"><input name="archived" type="checkbox"> Archived</label>
+            <button type="submit">Save note</button><button type="button" id="new-note">New note</button>
+          </form>
+          <h3>Notes and history</h3><div id="notes"></div>
+        </section>
+      </div>
+    </div>
+  </main>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/supabase.js"></script>
+  <script src="command-center-manage.js"></script>
+</body>
+</html>

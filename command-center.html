@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Guest Ready Command Center</title>
+  <link rel="stylesheet" href="command-center.css">
+</head>
+<body>
+  <main id="auth" class="auth">
+    <form id="login" class="login">
+      <h1>Guest Ready Command Center</h1>
+      <p>Sign in with an authorized display account.</p>
+      <label>Email <input id="email" type="email" autocomplete="username" required></label>
+      <label>Password <input id="password" type="password" autocomplete="current-password" required></label>
+      <button type="submit">Sign in</button>
+      <p id="login-error" role="alert"></p>
+    </form>
+  </main>
+  <main id="dashboard" class="dashboard" hidden>
+    <header class="header">
+      <div><span class="brand">GUEST READY</span><h1>Operations Command Center</h1></div>
+      <div class="clock"><div id="date"></div><strong id="clock"></strong></div>
+    </header>
+    <section id="counters" class="counters" aria-label="Today's summary"></section>
+    <div class="columns">
+      <div class="column left">
+        <section class="panel"><h2>Today's Services</h2><div id="today-services" class="list"></div></section>
+      </div>
+      <div class="column center">
+        <section class="panel"><h2>Tomorrow's Services</h2><div id="tomorrow-services" class="list"></div></section>
+      </div>
+      <div class="column right">
+        <section class="panel"><h2>Special Tasking</h2><div id="special-tasks" class="list"></div></section>
+        <section class="panel reviews-panel"><h2>VP² Reports Due</h2><div id="reviews" class="list"></div></section>
+      </div>
+    </div>
+    <section class="outlook"><h2>Seven-Day Operational Outlook</h2><div id="outlook" class="outlook-grid"></div></section>
+    <footer>
+      <div class="sync-status" role="status">
+        <span id="connection">Connecting…</span>
+        <strong id="last-sync">Last successful update: Not yet synced</strong>
+      </div>
+      <span>Automatic refresh: 5 minutes</span>
+    </footer>
+  </main>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/supabase.js"></script>
+  <script src="command-center-core.js"></script>
+  <script src="command-center.js"></script>
+</body>
+</html>

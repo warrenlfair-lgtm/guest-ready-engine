@@ -1,0 +1,13 @@
+:root { color-scheme: dark; font-family: system-ui, sans-serif; background: #071321; color: #f5f8ff; }
+body { margin: 0; }
+main { max-width: 1200px; margin: auto; padding: 1rem; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr)); gap: 1rem; }
+section { background: #12263d; border-radius: 8px; padding: 1rem; }
+label { display: block; margin: .6rem 0; }
+input:not([type=checkbox]), select, textarea { box-sizing: border-box; display: block; width: 100%; padding: .5rem; font: inherit; }
+button { font: inherit; padding: .5rem .8rem; margin: .2rem; }
+.check { display: flex; gap: .5rem; }
+.record { border-top: 1px solid #476078; padding: .5rem 0; overflow-wrap: anywhere; }
+.record small { display: block; color: #b7c8da; }
+#message { color: #f1c96a; }
+[hidden] { display: none !important; }
