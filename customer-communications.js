@@ -216,8 +216,9 @@ $("history").addEventListener("click", async (event) => {
       const { data: token, error } = await supabaseClient.rpc("admin_get_communication_token", { target_link_id: link.id });
       if (error) throw new Error(error.message);
       if (!/^[0-9a-f]{64}$/i.test(token || "")) throw new Error("The server returned an invalid greeting link.");
-      const url = new URL("greeting.html", location.href);
-      url.hash = `t=${token}`;
+      const localPreview = ["localhost", "127.0.0.1"].includes(location.hostname) || location.protocol === "file:";
+      const url = new URL(localPreview ? "greeting.html" : "/g", location.href);
+      url.hash = encodeGreetingToken(token);
       if (action === "open") {
         greetingWindow.location.replace(url.href);
         greetingWindow = null;

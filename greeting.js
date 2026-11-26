@@ -19,13 +19,14 @@ async function loadGreeting() {
   currentGreeting = null;
   clearSavedImage();
   document.getElementById("save-controls").hidden = true;
-  const token = new URLSearchParams(location.hash.slice(1)).get("t") || "";
+  const fragment = location.hash.slice(1);
+  const token = decodeGreetingToken(fragment.startsWith("t=") ? new URLSearchParams(fragment).get("t") || "" : fragment);
   const status = document.getElementById("status");
   document.getElementById("greeting").hidden = true;
   status.hidden = false;
   status.textContent = "Loading greeting…";
   document.title = "A Greeting from Guest Ready";
-  if (!/^[0-9a-f]{64}$/i.test(token)) { status.textContent = "This greeting link is invalid or unavailable."; return; }
+  if (!token) { status.textContent = "This greeting link is invalid or unavailable."; return; }
   let response;
   try {
     response = await greetingClient.rpc("get_public_communication", { greeting_token: token });
