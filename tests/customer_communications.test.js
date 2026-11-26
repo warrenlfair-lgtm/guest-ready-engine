@@ -1,5 +1,5 @@
 // Run with JavaScriptCore: jsc tests/customer_communications.test.js
-const core = new Function(`${readFile("customer-communications-core.js")}; return { escapeText, validateGreeting };`)();
+const core = new Function(`${readFile("customer-communications-core.js")}; return { escapeText, validateGreeting, validateCommunicationPreview };`)();
 function assert(value, message) { if (!value) throw new Error(message); }
 function rejects(data, message) {
   try { core.validateGreeting(data, true); } catch (error) { return; }
@@ -16,5 +16,13 @@ rejects({ ...greeting, recipients: [{ name: "Alex" }, { name: "alex" }] }, "Dupl
 rejects({ ...greeting, personalize: true }, "Personalization needs reviewed first names");
 rejects({ ...greeting, greeting_banner_url: "http://example.test/a.png" }, "Banner images require HTTPS");
 core.validateGreeting({ ...greeting, personalize: true, recipients: [{ name: "Alex", first_name: "Alex" }] }, true);
+core.validateCommunicationPreview({ ...greeting, recipients: [], test_link: true, test_first_name: "" });
+core.validateCommunicationPreview({ ...greeting, recipients: [], test_link: true, test_first_name: "Alex" });
+try {
+  core.validateCommunicationPreview({ ...greeting, recipients: [], test_link: false, test_first_name: "" });
+  throw new Error("Customer greetings must still require recipients");
+} catch (error) {
+  assert(error.message === "Select at least one customer.", "Customer selection must remain required");
+}
 assert(core.escapeText('<img src="x" onerror=\'alert(1)\'>') === '&lt;img src=&quot;x&quot; onerror=&#39;alert(1)&#39;&gt;', "Admin HTML must escape recipient-supplied values");
 print("PASS: Customer Communications validation, duplicate review and HTML escaping");

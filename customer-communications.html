@@ -29,12 +29,17 @@
     </section>
     <section>
       <h2>Recipients</h2>
+      <label class="inline"><input id="test-link" type="checkbox"> Create a test link instead (no customers required)</label>
+      <label id="test-name-field" hidden>Test first name (optional) <input id="test-first-name" maxlength="100" placeholder="Leave blank for a generic greeting"></label>
+      <p id="test-link-help" hidden>Test links can be copied and sent to anyone. They appear separately in history and do not record customer sends.</p>
+      <div id="customer-selection">
       <p>Customers are grouped by their client/owner name on active properties. Review and edit names before publishing; similar names may be different customers.</p>
       <p id="customer-warning"></p>
       <label class="inline"><input id="select-all" type="checkbox"> Select all active customers</label>
       <label class="inline"><input id="personalize" type="checkbox"> Personalize with first name (one link per customer)</label>
       <div id="recipients"></div>
       <p>A personalized link displays the first name to anyone who receives it. Only use a name you are comfortable sharing.</p>
+      </div>
       <button id="preview" type="button">Preview greeting</button>
       <button id="publish" type="button" disabled>Publish greeting</button>
     </section>

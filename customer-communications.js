@@ -19,9 +19,14 @@ function clearWorkspace() {
   $("email").value = "";
   $("password").value = "";
   for (const id of ["recipients", "history"]) $(id).replaceChildren();
-  for (const id of ["template-name", "title", "message", "banner", "signature"]) $(id).value = "";
+  for (const id of ["template-name", "title", "message", "banner", "signature", "test-first-name"]) $(id).value = "";
+  $("test-link").checked = false;
+  $("test-name-field").hidden = true;
+  $("test-link-help").hidden = true;
+  $("customer-selection").hidden = false;
   $("preview-section").hidden = true;
   $("publish").disabled = true;
+  $("publish").textContent = "Publish greeting";
 }
 
 function validateData(data) {
@@ -43,13 +48,13 @@ function renderHistory(data) {
     const disabled = Boolean(greeting.archived_at || greeting.deactivated_at);
     const state = greeting.archived_at ? "Archived" : greeting.deactivated_at ? "Deactivated" : "Active";
     return `<article class="history-item"><h3>${escapeText(greeting.title)}</h3>
-      <p>${escapeText(state)} · ${greeting.personalized ? "Personalized" : "Generic shared link"} · Published ${escapeText(greeting.created_at)}</p>
+      <p>${escapeText(state)} · ${greeting.is_test ? "Test link" : greeting.personalized ? "Personalized" : "Generic shared link"} · Published ${escapeText(greeting.created_at)}</p>
       ${greeting.archived_at ? "" : `<button type="button" data-action="archive" data-id="${escapeText(greeting.id)}">Archive</button>`}
       ${disabled ? "" : `<button type="button" data-action="deactivate" data-id="${escapeText(greeting.id)}">Deactivate link</button>`}
       ${greeting.links.map((link, index) => `<div class="link-row"><strong>${escapeText(link.recipient_name)}</strong>
-        ${disabled ? "" : `<button type="button" data-action="copy" data-id="${escapeText(greeting.id)}" data-index="${index}">Copy text message</button><button type="button" data-action="open" data-id="${escapeText(greeting.id)}" data-index="${index}">Open greeting / save image</button><button type="button" data-action="record" data-id="${escapeText(greeting.id)}" data-index="${index}">Record manual send</button>`}
+        ${disabled ? "" : `<button type="button" data-action="copy" data-id="${escapeText(greeting.id)}" data-index="${index}">Copy text message</button><button type="button" data-action="open" data-id="${escapeText(greeting.id)}" data-index="${index}">Open greeting / save image</button>${greeting.is_test ? "" : `<button type="button" data-action="record" data-id="${escapeText(greeting.id)}" data-index="${index}">Record manual send</button>`}`}
       </div>`).join("")}
-      <p>Manual sends recorded: ${greeting.sends.length}</p>
+      ${greeting.is_test ? "<p>Test link: no customer sends recorded.</p>" : `<p>Manual sends recorded: ${greeting.sends.length}</p>`}
       ${greeting.sends.map((send) => `<p>${escapeText(send.recipient_name)} · ${escapeText(send.recorded_at)} · Manually recorded, delivery unconfirmed</p>`).join("")}
     </article>`;
   }).join("") || "<p>No published greetings.</p>";
@@ -89,6 +94,7 @@ function inputData() {
     greeting_title: $("title").value.trim(), greeting_message: $("message").value.trim(),
     greeting_banner_url: $("banner").value.trim() || null, greeting_signature: $("signature").value.trim(),
     personalize: $("personalize").checked, recipients: recipients(),
+    test_link: $("test-link").checked, test_first_name: $("test-first-name").value.trim(),
   };
 }
 
@@ -100,6 +106,13 @@ function invalidatePreview() {
 
 $("workspace").addEventListener("input", invalidatePreview);
 $("workspace").addEventListener("change", invalidatePreview);
+$("test-link").addEventListener("change", () => {
+  const isTest = $("test-link").checked;
+  $("customer-selection").hidden = isTest;
+  $("test-name-field").hidden = !isTest;
+  $("test-link-help").hidden = !isTest;
+  $("publish").textContent = isTest ? "Create test link" : "Publish greeting";
+});
 $("select-all").addEventListener("change", (event) => {
   document.querySelectorAll(".recipient .selected").forEach((checkbox) => { checkbox.checked = event.target.checked; });
 });
@@ -132,9 +145,10 @@ $("save-new-template").addEventListener("click", () => void saveTemplate(true));
 
 $("preview").addEventListener("click", () => {
   const data = inputData();
-  try { validateGreeting(data, true); } catch (error) { showStatus(error.message); return; }
+  try { validateCommunicationPreview(data); } catch (error) { showStatus(error.message); return; }
   $("preview-title").textContent = data.greeting_title;
-  $("preview-name").textContent = data.personalize ? `Dear ${data.recipients[0].first_name},` : "";
+  const firstName = data.test_link ? data.test_first_name : data.personalize ? data.recipients[0].first_name : "";
+  $("preview-name").textContent = firstName ? `Dear ${firstName},` : "";
   $("preview-message").textContent = data.greeting_message;
   $("preview-signature").textContent = data.greeting_signature;
   const banner = $("preview-banner");
@@ -144,7 +158,7 @@ $("preview").addEventListener("click", () => {
   previewSnapshot = JSON.stringify(data);
   $("preview-section").hidden = false;
   $("publish").disabled = publishing;
-  showStatus(data.personalize ? `Preview shows the first of ${data.recipients.length} personalized greetings.` : "Preview ready.");
+  showStatus(data.test_link ? "Test greeting preview ready." : data.personalize ? `Preview shows the first of ${data.recipients.length} personalized greetings.` : "Preview ready.");
 });
 
 $("publish").addEventListener("click", async () => {
@@ -154,10 +168,17 @@ $("publish").addEventListener("click", async () => {
   publishing = true;
   $("publish").disabled = true;
   try {
-    const { error } = await supabaseClient.rpc("admin_publish_communication", data);
+    const { test_link, test_first_name, ...greeting } = data;
+    const { error } = test_link
+      ? await supabaseClient.rpc("admin_publish_communication_test", {
+        greeting_title: greeting.greeting_title, greeting_message: greeting.greeting_message,
+        greeting_banner_url: greeting.greeting_banner_url, greeting_signature: greeting.greeting_signature,
+        test_first_name: test_first_name || null,
+      })
+      : await supabaseClient.rpc("admin_publish_communication", greeting);
     if (error) throw new Error(error.message);
     invalidatePreview();
-    if (await loadData()) showStatus("Greeting published. Copy a text message for each customer below; nothing was sent automatically.");
+    if (await loadData()) showStatus(test_link ? "Test link created. Copy it from communication history below; nothing was sent automatically." : "Greeting published. Copy a text message for each customer below; nothing was sent automatically.");
   } catch (error) {
     showStatus(`Unable to publish greeting: ${error.message}`);
   } finally {

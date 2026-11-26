@@ -15,4 +15,10 @@ function validateGreeting(data, requireRecipients) {
     if (names.has(key)) throw new Error("Selected customer names must be distinct. Review and edit duplicate names before publishing.");
     names.add(key);
   }
+
+}
+
+function validateCommunicationPreview(data) {
+  validateGreeting(data, !data.test_link);
+  if (data.test_link && data.test_first_name.length > 100) throw new Error("Test first name must be at most 100 characters.");
 }
