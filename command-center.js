@@ -85,21 +85,21 @@ function render() {
   const model = ccModel(snapshot);
   document.getElementById("counters").innerHTML = model.counters.map(([label, count]) =>
     `<div class="counter"><strong>${count}</strong>${escapeText(label)}${label === "Overdue" ? `<span class="counter-detail">Services ${model.overdueCounts.services} · VP² ${model.overdueCounts.reviews} · Tasks ${model.overdueCounts.tasks}</span>` : ""}</div>`).join("");
+  document.getElementById("outlook").innerHTML = model.days.map((day) => {
+    const label = new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" }).format(new Date(`${day.date}T00:00:00Z`));
+    return `<div class="day ${day.date === model.today ? "current" : ""}"><strong>${escapeText(label)}</strong><span${day.services > 0 ? ' class="has-services"' : ""}>Services ${day.services}</span><span>Arrivals ${day.arrivals}</span><span>VP² ${day.reviews}</span></div>`;
+  }).join("");
   const service = (item) => {
     const status = ccCompleted(item) ? "completed" : ccOverdueService(item, model.today) ? "overdue" : "";
     const detail = [item.type || "Manual", item.guest_ready && item.type !== "Guest Ready" ? "Guest Ready" : "", item.off_cycle ? "Off-cycle" : "", item.technician, item.status || "Scheduled"].filter(Boolean).join(" · ");
     return `<div class="entry ${status}"><strong>${escapeText(item.property)}</strong><span class="detail">${escapeText(detail)}</span></div>`;
   };
-  displayList("today-services", model.todayServices, service);
-  displayList("tomorrow-services", model.tomorrowServices, service);
   const review = (item) => `<div class="entry ${item.date < model.today ? "overdue" : item.date > model.today ? "upcoming" : ""}"><strong>${escapeText(item.property)}</strong><span class="detail">${escapeText(item.date)} · ${escapeText(item.kind)} · ${escapeText(item.status)}</span></div>`;
   sizeReviewsPanel(model.reviews, review);
+  displayList("today-services", model.todayServices, service);
+  displayList("tomorrow-services", model.tomorrowServices, service);
   displayList("reviews", model.reviews, review);
   displayList("special-tasks", model.special, (item) => `<div class="entry ${item.date && item.date < model.today ? "overdue" : item.date && item.date > model.today ? "upcoming" : ""}"><strong>${escapeText(item.title)}</strong><span class="detail">${escapeText([item.priority, item.property, item.technician, item.date, item.status].filter(Boolean).join(" · "))}</span>${item.description ? `<div>${escapeText(item.description)}</div>` : ""}</div>`, model.hiddenSpecial);
-  document.getElementById("outlook").innerHTML = model.days.map((day) => {
-    const label = new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" }).format(new Date(`${day.date}T00:00:00Z`));
-    return `<div class="day ${day.date === model.today ? "current" : ""}"><strong>${escapeText(label)}</strong><span${day.services > 0 ? ' class="has-services"' : ""}>Services ${day.services}</span><span>Arrivals ${day.arrivals}</span><span>VP² ${day.reviews}</span></div>`;
-  }).join("");
 }
 
 function updateClock() {
