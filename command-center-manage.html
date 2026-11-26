@@ -3,12 +3,12 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Command Center Tasks &amp; Notes</title>
+  <title>Command Center Tasks</title>
   <link rel="stylesheet" href="command-center-manage.css">
 </head>
 <body>
   <main>
-    <h1>Command Center Tasks &amp; Notes</h1>
+    <h1>Command Center Tasks</h1>
     <p>Manage the read-only display. These items do not create services or charges.</p>
     <form id="login">
       <label>Email <input id="email" type="email" autocomplete="username" required></label>
@@ -17,7 +17,6 @@
     </form>
     <p id="message" role="status"></p>
     <div id="manager" hidden>
-      <div class="grid">
         <section>
           <h2>Special task</h2>
           <form id="task-form">
@@ -33,20 +32,6 @@
           </form>
           <h3>Tasks and history</h3><div id="tasks"></div>
         </section>
-        <section>
-          <h2>Pinned note</h2>
-          <form id="note-form">
-            <label>Title <input name="title" maxlength="100" required></label>
-            <label>Content <textarea name="content" required></textarea></label>
-            <label>Property <select name="property"></select></label>
-            <label>Expiration date <input name="date" type="date"></label>
-            <label class="check"><input name="pinned" type="checkbox"> Pin to Command Center</label>
-            <label class="check"><input name="archived" type="checkbox"> Archived</label>
-            <button type="submit">Save note</button><button type="button" id="new-note">New note</button>
-          </form>
-          <h3>Notes and history</h3><div id="notes"></div>
-        </section>
-      </div>
     </div>
   </main>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
