@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>A Greeting from Guest Ready</title>
+  <meta property="og:title" content="Holiday Wishes from Guest Ready">
+  <meta property="og:description" content="A holiday greeting and a note of appreciation from the Guest Ready team.">
+  <meta property="og:image" content="https://guest-ready-engine.netlify.app/assets/holiday-preview.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Warm holiday wishes from Guest Ready">
+  <meta property="og:url" content="https://guest-ready-engine.netlify.app/greeting.html">
+  <meta property="og:type" content="website">
+  <link rel="stylesheet" href="greeting.css">
+</head>
+<body>
+  <main>
+    <p id="status" role="status">Loading greeting…</p>
+    <article id="greeting" hidden>
+      <img id="banner" alt="" hidden referrerpolicy="no-referrer">
+      <div class="content">
+        <p class="brand">GUEST READY</p>
+        <h1 id="title"></h1><p id="salutation"></p>
+        <p id="message"></p><p id="signature"></p>
+      </div>
+    </article>
+    <div id="save-controls" hidden>
+      <button id="save-image" type="button">Save Greeting Image</button>
+      <p id="save-status" role="status" aria-live="polite"></p>
+      <a id="image-download" download="guest-ready-greeting.png" hidden>Open or save your greeting image</a>
+      <p id="save-help" hidden>If the image does not download, open the link above and save it from your browser.</p>
+    </div>
+  </main>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="greeting-image.js"></script>
+  <script src="greeting.js"></script>
+</body>
+</html>

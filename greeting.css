@@ -1,0 +1,15 @@
+:root { font-family: Georgia, serif; color: #183b43; background: #e8eff0; }
+* { box-sizing: border-box; }
+body { margin: 0; padding: 1rem; }
+main { max-width: 640px; margin: 4vh auto; }
+article { background: #fffdf8; border-radius: 16px; overflow: hidden; box-shadow: 0 8px 32px #1a384b22; }
+img { display: block; width: 100%; height: auto; }
+.content { padding: clamp(1.5rem, 5vw, 3rem); }
+.brand { font: bold .85rem Arial, sans-serif; letter-spacing: .16em; color: #46757d; }
+h1 { font-size: clamp(2rem, 7vw, 3rem); }
+#message, #signature { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.65; }
+#save-controls { margin: 1rem 0; font: 1rem Arial, sans-serif; }
+#save-image { padding: .75rem 1rem; border: 0; border-radius: 6px; background: #245c65; color: white; font: inherit; cursor: pointer; }
+#save-image:disabled { opacity: .6; cursor: wait; }
+#save-status { color: #85411e; }
+[hidden] { display: none !important; }

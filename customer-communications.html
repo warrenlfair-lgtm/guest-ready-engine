@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Customer Communications</title>
+  <link rel="stylesheet" href="customer-communications.css">
+</head>
+<body>
+<main>
+  <h1>Customer Communications</h1>
+  <p>Create a greeting, preview it, then copy links to send manually. No messages are sent automatically.</p>
+  <form id="login">
+    <label>Email <input id="email" type="email" autocomplete="username" required></label>
+    <label>Password <input id="password" type="password" autocomplete="current-password" required></label>
+    <button>Sign in</button>
+  </form>
+  <p id="status" role="status" aria-live="polite"></p>
+  <div id="workspace" hidden>
+    <section>
+      <h2>Greeting</h2>
+      <label>Load template <select id="template"><option value="">New greeting</option></select></label>
+      <label>Template name <input id="template-name" maxlength="120" placeholder="Name for reuse"></label>
+      <label>Greeting title <input id="title" maxlength="200" required></label>
+      <label>Message <textarea id="message" rows="6" maxlength="10000" required></textarea></label>
+      <label>Banner image URL (optional, HTTPS) <input id="banner" type="url" maxlength="2000" placeholder="https://..."></label>
+      <label>Closing signature <textarea id="signature" rows="3" maxlength="1000" required></textarea></label>
+      <button id="save-template" type="button">Save template</button>
+      <button id="save-new-template" type="button">Save as new template</button>
+    </section>
+    <section>
+      <h2>Recipients</h2>
+      <p>Customers are grouped by their client/owner name on active properties. Review and edit names before publishing; similar names may be different customers.</p>
+      <p id="customer-warning"></p>
+      <label class="inline"><input id="select-all" type="checkbox"> Select all active customers</label>
+      <label class="inline"><input id="personalize" type="checkbox"> Personalize with first name (one link per customer)</label>
+      <div id="recipients"></div>
+      <p>A personalized link displays the first name to anyone who receives it. Only use a name you are comfortable sharing.</p>
+      <button id="preview" type="button">Preview greeting</button>
+      <button id="publish" type="button" disabled>Publish greeting</button>
+    </section>
+    <section id="preview-section" hidden>
+      <h2>Preview</h2>
+      <div class="greeting-preview">
+        <img id="preview-banner" alt="" hidden referrerpolicy="no-referrer">
+        <h3 id="preview-title"></h3><p id="preview-name"></p><p id="preview-message" class="multiline"></p><p id="preview-signature" class="multiline"></p>
+      </div>
+    </section>
+    <section><h2>Communication history</h2><p>Recorded sends are manual entries, not confirmed deliveries.</p><div id="history"></div></section>
+  </div>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="js/supabase.js"></script>
+<script src="customer-communications-core.js"></script>
+<script src="customer-communications.js"></script>
+</body>
+</html>
