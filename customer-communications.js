@@ -27,6 +27,7 @@ function clearWorkspace() {
   $("preview-section").hidden = true;
   $("publish").disabled = true;
   $("publish").textContent = "Publish greeting";
+  window.dispatchEvent(new Event("communications-cleared"));
 }
 
 function validateData(data) {
@@ -70,6 +71,7 @@ async function loadData(includeCustomers = false) {
     return false;
   }
   communicationsData = data;
+  window.dispatchEvent(new CustomEvent("communications-loaded", { detail: data }));
   const previous = selectedTemplateId || "";
   $("template").innerHTML = '<option value="">New greeting</option>' + data.templates.map((t) => `<option value="${escapeText(t.id)}">${escapeText(t.name)}</option>`).join("");
   $("template").value = previous;

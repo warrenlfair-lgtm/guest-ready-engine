@@ -7,6 +7,8 @@ label { display: block; margin: .7rem 0; font-weight: 600; }
 input:not([type=checkbox]), textarea, select { display: block; width: 100%; padding: .6rem; font: inherit; margin-top: .3rem; }
 button { font: inherit; background: #2563eb; color: white; border: 0; border-radius: 6px; padding: .6rem .8rem; margin: .2rem; cursor: pointer; }
 button:disabled { opacity: .5; cursor: not-allowed; }
+.message-app-link { display: inline-block; font: inherit; background: #2563eb; color: white; border-radius: 6px; padding: .6rem .8rem; margin: .2rem; text-decoration: none; }
+#voice-status { color: #8a4300; }
 .inline { display: flex; align-items: center; gap: .5rem; }
 .recipient { display: grid; grid-template-columns: auto minmax(0, 1fr) minmax(0, 1fr); align-items: end; gap: .5rem; border-top: 1px solid #d5dfea; }
 .recipient label { min-width: 0; }

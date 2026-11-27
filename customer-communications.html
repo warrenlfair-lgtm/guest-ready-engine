@@ -50,6 +50,29 @@
         <h3 id="preview-title"></h3><p id="preview-name"></p><p id="preview-message" class="multiline"></p><p id="preview-signature" class="multiline"></p>
       </div>
     </section>
+    <section id="voice-helper">
+      <h2>Message snippets</h2>
+      <p>Write or insert a saved snippet, then copy your message into Google Voice or another messaging app. Messages are not sent automatically.</p>
+      <p>Save reusable text, then insert it into a message at the cursor. Selected text is replaced; the rest of the message is preserved.</p>
+      <label>Snippet name <input id="snippet-name" maxlength="120"></label>
+      <label>Snippet text <textarea id="snippet-body" rows="3" maxlength="10000"></textarea></label>
+      <button id="snippet-save" type="button">Save snippet</button>
+      <button id="snippet-new" type="button">New snippet</button>
+      <label>Saved snippets <select id="snippet-select"><option value="">Select a snippet</option></select></label>
+      <button id="snippet-edit" type="button">Edit selected snippet</button>
+      <button id="snippet-delete" type="button">Delete selected snippet</button>
+      <label>Message <textarea id="voice-message" rows="5" maxlength="10000" placeholder="Write the message to copy"></textarea></label>
+      <button id="snippet-insert" type="button">Insert selected snippet into message</button>
+      <label id="snippet-first-name-field" hidden>First name for {first_name} <input id="snippet-first-name" maxlength="100" autocomplete="off"></label>
+      <p>Use {first_name} in a snippet to personalize it; enter the first name before copying. Paste greeting or invoice links into the message yourself.</p>
+      <button id="voice-copy" type="button">Copy message</button>
+      <a href="https://voice.google.com/" target="_blank" rel="noopener noreferrer">Open Google Voice</a>
+      <a class="message-app-link" href="sms:">Open Messages app</a>
+      <p>Copy your message first, then open a messaging app, choose the recipient, and paste. The Messages link depends on your device and may not work on every browser; open your messaging app manually if needed. Copying does not record a send or confirm delivery. Google Voice may block repeated messages or links.</p>
+      <div id="voice-copy-fallback" hidden><p>Copy this message manually:</p><p id="voice-copy-text" class="multiline"></p></div>
+      <p id="voice-status" role="status" aria-live="polite"></p>
+      <details id="voice-history-section"><summary>Previous manual message history</summary><p>Earlier records are manual entries, not confirmed deliveries.</p><div id="voice-history"></div></details>
+    </section>
     <section><h2>Communication history</h2><p>Recorded sends are manual entries, not confirmed deliveries.</p><div id="history"></div></section>
   </div>
 </main>
@@ -58,5 +81,6 @@
 <script src="greeting-token.js"></script>
 <script src="customer-communications-core.js"></script>
 <script src="customer-communications.js"></script>
+<script src="customer-voice.js"></script>
 </body>
 </html>
